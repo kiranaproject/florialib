@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Lazarus Version="4.9"/>
+  <Compiler Value="/home/afumi/fpcup/files/fpc/bin/x86_64-linux/fpc.sh" Date="1782671745"/>
+  <Params Value="-MObjFPC -Scghi -Cg -O1 -g -gl -l -vewnhibq -Fu/home/afumi/Documents/projects/kirana/florialib/src/main/pascal/ -Fu/home/afumi/fpcup/files/lazarus/packager/units/x86_64-linux -FU/home/afumi/Documents/projects/kirana/florialib/src/main/pascal/lib/x86_64-linux/ florialib.pas"/>
+</CONFIG>

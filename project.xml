@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>florialib</name>
+  <version>0.0.1</version>
+  <author>Dio Affriza</author>
+  <license>MPL 2.0</license>
+
+  <build>
+    <projectType>library</projectType>
+    <outputDirectory>target</outputDirectory>
+  </build>
+
+  <test>
+    <testSource>TestRunner.pas</testSource>
+    <frameworkOptions>
+      <option>--all --format=plain</option>
+    </frameworkOptions>
+  </test>
+</project>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <Name Value="florialib"/>
+    <Type Value="RunAndDesignTime"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <SearchPaths>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Files>
+      <Item>
+        <Filename Value="Floria.CSS.AST.pas"/>
+        <UnitName Value="Floria.CSS.AST"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.CSS.Parser.pas"/>
+        <UnitName Value="Floria.CSS.Parser"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.CSS.Tokenizer.pas"/>
+        <UnitName Value="Floria.CSS.Tokenizer"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.CSS.Types.pas"/>
+        <UnitName Value="Floria.CSS.Types"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.X11.KeySym.pas"/>
+        <UnitName Value="Floria.X11.KeySym"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.Cursor.pas"/>
+        <UnitName Value="Floria.XCB.Cursor"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.EWMH.pas"/>
+        <UnitName Value="Floria.XCB.EWMH"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.ICCCM.pas"/>
+        <UnitName Value="Floria.XCB.ICCCM"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.Keysyms.pas"/>
+        <UnitName Value="Floria.XCB.Keysyms"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.pas"/>
+        <UnitName Value="Floria.XCB"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.RandR.pas"/>
+        <UnitName Value="Floria.XCB.RandR"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.Render.pas"/>
+        <UnitName Value="Floria.XCB.Render"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.Shape.pas"/>
+        <UnitName Value="Floria.XCB.Shape"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.SHM.pas"/>
+        <UnitName Value="Floria.XCB.SHM"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XCB.XFixes.pas"/>
+        <UnitName Value="Floria.XCB.XFixes"/>
+      </Item>
+    </Files>
+    <RequiredPkgs>
+      <Item>
+        <PackageName Value="FCL"/>
+      </Item>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>
