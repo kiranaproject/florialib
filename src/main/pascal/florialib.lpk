@@ -86,6 +86,22 @@
         <Filename Value="Floria.XCB.XFixes.pas"/>
         <UnitName Value="Floria.XCB.XFixes"/>
       </Item>
+      <Item>
+        <Filename Value="Floria.XML.Types.pas"/>
+        <UnitName Value="Floria.XML.Types"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XML.Tokenizer.pas"/>
+        <UnitName Value="Floria.XML.Tokenizer"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XML.DOM.pas"/>
+        <UnitName Value="Floria.XML.DOM"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.XML.Parser.pas"/>
+        <UnitName Value="Floria.XML.Parser"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

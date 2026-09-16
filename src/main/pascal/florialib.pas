@@ -12,7 +12,8 @@ uses
   Floria.CSS.Selectors, Floria.CSS.Tokenizer, Floria.CSS.Types, Floria.CSS.Values, 
   Floria.X11.KeySym, Floria.XCB.Cursor, Floria.XCB.EWMH, Floria.XCB.ICCCM, 
   Floria.XCB.Keysyms, Floria.XCB, Floria.XCB.RandR, Floria.XCB.Render, 
-  Floria.XCB.Shape, Floria.XCB.SHM, Floria.XCB.XFixes;
+  Floria.XCB.Shape, Floria.XCB.SHM, Floria.XCB.XFixes,
+  Floria.XML.Types, Floria.XML.Tokenizer, Floria.XML.DOM, Floria.XML.Parser;
 
 implementation
 
