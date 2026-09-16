@@ -792,6 +792,9 @@ begin
       case Tok.TokenType of
         cttWhitespace: Result := Result + ' ';
         cttComma:      Result := Result + ', ';
+        cttHash:       Result := Result + '#' + Tok.Value;
+        cttPercentage: Result := Result + Tok.Value + '%';
+        cttDimension:  Result := Result + Tok.Value + Tok.Unit_;
       else
         Result := Result + Tok.Value;
       end;

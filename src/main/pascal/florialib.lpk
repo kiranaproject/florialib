@@ -102,6 +102,22 @@
         <Filename Value="Floria.XML.Parser.pas"/>
         <UnitName Value="Floria.XML.Parser"/>
       </Item>
+      <Item>
+        <Filename Value="Floria.SVG.Types.pas"/>
+        <UnitName Value="Floria.SVG.Types"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.SVG.Path.pas"/>
+        <UnitName Value="Floria.SVG.Path"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.SVG.DOM.pas"/>
+        <UnitName Value="Floria.SVG.DOM"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.SVG.Parser.pas"/>
+        <UnitName Value="Floria.SVG.Parser"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

@@ -12,7 +12,8 @@ uses
   Floria.CSS.Selectors.Test,
   Floria.CSS.Cascade.Test,
   Floria.XCB.Test,
-  Floria.XML.Test;
+  Floria.XML.Test,
+  Floria.SVG.Test;
 
 var
   Application: TTestRunner;

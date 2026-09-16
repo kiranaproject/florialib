@@ -40,6 +40,8 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
 | Document | Description |
 |---|---|
 | [**CSS Subsystem Guide**](css.md) | Complete guide to the CSS pipeline: tokenizer, parser, AST, values, properties, selectors, and cascading engine. |
+| [**XML Subsystem Guide**](xml.md) | Complete guide to the XML 1.0 tokenizer, DOM tree, entity handling, and ICSSElement bridge. |
+| [**SVG Subsystem Guide**](svg.md) | High-performance SVG 1.1 scene graph, 2D transforms, path math, arc decomposition, and CSS styling. |
 | [**XCB & Window Manager Guide**](xcb.md) | Documentation and code examples for XCB, ICCCM, EWMH, RandR, XRender, SHM, Shape, and KeySyms. |
 | [**Coding Standards & Development**](coding-style.md) | Object Pascal conventions, mandatory `()` routine rules, memory ownership, and Pasbuild build workflow. |
 
