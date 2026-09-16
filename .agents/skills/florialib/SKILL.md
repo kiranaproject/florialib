@@ -105,7 +105,13 @@ Floria.CSS.AST             (Phase 2 — DONE)
       ↓
 Floria.CSS.Parser          (Phase 2 — DONE)
       ↓
-[Phase 3: typed property model — NOT STARTED]
+Floria.CSS.Values          (Phase 3 — DONE)
+      ↓
+Floria.CSS.Properties      (Phase 3 — DONE)
+      ↓
+Floria.CSS.Selectors       (Phase 4 — DONE)
+      ↓
+Floria.CSS.Cascade         (Phase 4 — DONE)
 ```
 
 ### Unit responsibilities
@@ -116,6 +122,10 @@ Floria.CSS.Parser          (Phase 2 — DONE)
 | `Floria.CSS.Tokenizer` | Streaming push tokenizer — W3C CSS Syntax §4. `Feed(chunk)` + `Finish()` |
 | `Floria.CSS.AST` | AST node classes: `TCSSStylesheet`, `TCSSQualifiedRule`, `TCSSAtRule`, `TCSSDeclaration`, `TCSSSimpleBlock`, `TCSSFunctionBlock`, `TCSSPreservedToken` |
 | `Floria.CSS.Parser` | W3C CSS Syntax §5 parser. Entry: `TCSSParser.FromCSS(css)` → `TCSSStylesheet`. Also exports `TokenizeCSS()` helper |
+| `Floria.CSS.Values` | Typed CSS values: `TCSSColor` (RGBA, hex, rgb(), named), `TCSSLength`, `TCSSBox`, `TCSSBorderSide`, layout/style enums |
+| `Floria.CSS.Properties` | Typed property model: `TCSSPropertyId`, metadata (inherited, shorthand), `TCSSStyleDeclaration`, `TCSSStyleBlock` with shorthand expander |
+| `Floria.CSS.Selectors` | W3C Selectors: compound, complex, specificity tuple (A,B,C), combinators (child, descendant, siblings), attribute ops |
+| `Floria.CSS.Cascade` | Style resolution engine: `ICSSElement` contract, `TCSSMockElement`, right-to-left matching, cascade sorting, inheritance |
 
 ### Key API
 
@@ -397,11 +407,12 @@ and continue).
 |---|---|---|
 | 1 — Tokenizer | `Floria.CSS.Types`, `Floria.CSS.Tokenizer` | ✅ Done — 80 tests |
 | 2 — Parser | `Floria.CSS.AST`, `Floria.CSS.Parser` | ✅ Done — 43 tests |
-| 3 — Typed property model | TBD | 🔲 Not started |
+| 3 — Typed property model | `Floria.CSS.Values`, `Floria.CSS.Properties` | ✅ Done — 60 tests |
+| 4 — Selectors & Cascade | `Floria.CSS.Selectors`, `Floria.CSS.Cascade` | ✅ Done — 31 tests |
 
-Phase 3 goal: a unit that knows what each CSS property name means — its
-allowed value syntax, initial value, inherited flag, etc. — so higher-level
-code can validate and resolve computed styles.
+The CSS engine in `florialib` is fully implemented across all 4 phases,
+providing a complete pipeline from raw CSS text down to computed style blocks
+for UI and window manager elements. Total CSS test suite: 214 tests.
 
 ---
 

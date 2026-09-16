@@ -7,6 +7,10 @@ uses
   { Register all test suites }
   Floria.CSS.Tokenizer.Test,
   Floria.CSS.Parser.Test,
+  Floria.CSS.Values.Test,
+  Floria.CSS.Properties.Test,
+  Floria.CSS.Selectors.Test,
+  Floria.CSS.Cascade.Test,
   Floria.XCB.Test;
 
 var

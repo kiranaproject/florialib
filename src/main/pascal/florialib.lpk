@@ -2,7 +2,7 @@
 <CONFIG>
   <Package Version="5">
     <Name Value="florialib"/>
-    <Type Value="RunAndDesignTime"/>
+    <Type Value="RunTime"/>
     <CompilerOptions>
       <Version Value="11"/>
       <SearchPaths>
@@ -15,8 +15,20 @@
         <UnitName Value="Floria.CSS.AST"/>
       </Item>
       <Item>
+        <Filename Value="Floria.CSS.Cascade.pas"/>
+        <UnitName Value="Floria.CSS.Cascade"/>
+      </Item>
+      <Item>
         <Filename Value="Floria.CSS.Parser.pas"/>
         <UnitName Value="Floria.CSS.Parser"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.CSS.Properties.pas"/>
+        <UnitName Value="Floria.CSS.Properties"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.CSS.Selectors.pas"/>
+        <UnitName Value="Floria.CSS.Selectors"/>
       </Item>
       <Item>
         <Filename Value="Floria.CSS.Tokenizer.pas"/>
@@ -25,6 +37,10 @@
       <Item>
         <Filename Value="Floria.CSS.Types.pas"/>
         <UnitName Value="Floria.CSS.Types"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.CSS.Values.pas"/>
+        <UnitName Value="Floria.CSS.Values"/>
       </Item>
       <Item>
         <Filename Value="Floria.X11.KeySym.pas"/>

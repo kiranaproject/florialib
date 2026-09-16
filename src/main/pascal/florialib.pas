@@ -8,17 +8,13 @@ unit florialib;
 interface
 
 uses
-  Floria.CSS.AST, Floria.CSS.Parser, Floria.CSS.Tokenizer, Floria.CSS.Types, 
+  Floria.CSS.AST, Floria.CSS.Cascade, Floria.CSS.Parser, Floria.CSS.Properties, 
+  Floria.CSS.Selectors, Floria.CSS.Tokenizer, Floria.CSS.Types, Floria.CSS.Values, 
   Floria.X11.KeySym, Floria.XCB.Cursor, Floria.XCB.EWMH, Floria.XCB.ICCCM, 
   Floria.XCB.Keysyms, Floria.XCB, Floria.XCB.RandR, Floria.XCB.Render, 
-  Floria.XCB.Shape, Floria.XCB.SHM, Floria.XCB.XFixes, LazarusPackageIntf;
+  Floria.XCB.Shape, Floria.XCB.SHM, Floria.XCB.XFixes;
 
 implementation
 
-procedure Register;
-begin
-end;
-
-initialization
-  RegisterPackage('florialib', @Register);
 end.
+
