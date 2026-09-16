@@ -741,7 +741,7 @@ begin
   for I := FDeclarations.Count - 1 downto 0 do
   begin
     D := TCSSStyleDeclaration(FDeclarations[I]);
-    if (D.PropertyId = cpiCustom) and (D.CustomName = AName) then
+    if (D.PropertyId = cpiCustom) and SameText(D.CustomName, AName) then
     begin
       Result := D;
       Exit;

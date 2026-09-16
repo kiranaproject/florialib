@@ -44,6 +44,7 @@ type
     function IsFocused(): Boolean;
     function IsActive(): Boolean;
     function IsDisabled(): Boolean;
+    function IsChecked(): Boolean;
   end;
 
   // ── Concrete Mock Element ─────────────────────────────────────────────────
@@ -61,6 +62,7 @@ type
     FFocused    : Boolean;
     FActive     : Boolean;
     FDisabled   : Boolean;
+    FChecked    : Boolean;
 
     // ICSSElement implementation
     function QueryInterface(constref IID: TGUID; out Obj): HResult; cdecl;
@@ -80,6 +82,7 @@ type
     function IsFocused(): Boolean;
     function IsActive(): Boolean;
     function IsDisabled(): Boolean;
+    function IsChecked(): Boolean;
   public
     constructor Create(const ATagName: AnsiString; const AId: AnsiString = '');
     destructor Destroy(); override;
@@ -92,6 +95,7 @@ type
     procedure SetFocused(const AVal: Boolean);
     procedure SetActive(const AVal: Boolean);
     procedure SetDisabled(const AVal: Boolean);
+    procedure SetChecked(const AVal: Boolean);
 
     property TagName : AnsiString read FTagName write FTagName;
     property Id      : AnsiString read FId      write FId;
@@ -136,6 +140,7 @@ begin
   FFocused    := False;
   FActive     := False;
   FDisabled   := False;
+  FChecked    := False;
 end;
 
 destructor TCSSMockElement.Destroy();
@@ -240,6 +245,11 @@ begin
   Result := FDisabled;
 end;
 
+function TCSSMockElement.IsChecked(): Boolean;
+begin
+  Result := FChecked;
+end;
+
 procedure TCSSMockElement.AddClass(const AClass: AnsiString);
 begin
   if FClasses.IndexOf(AClass) < 0 then
@@ -278,6 +288,11 @@ end;
 procedure TCSSMockElement.SetDisabled(const AVal: Boolean);
 begin
   FDisabled := AVal;
+end;
+
+procedure TCSSMockElement.SetChecked(const AVal: Boolean);
+begin
+  FChecked := AVal;
 end;
 
 // ── Matching Engine ─────────────────────────────────────────────────────────
@@ -361,6 +376,7 @@ begin
   else if Low = 'focus' then Result := AElement.IsFocused()
   else if Low = 'active' then Result := AElement.IsActive()
   else if Low = 'disabled' then Result := AElement.IsDisabled()
+  else if Low = 'checked' then Result := AElement.IsChecked()
   else if Low = 'first-child' then Result := AElement.GetChildIndex() = 1
   else if Low = 'last-child' then Result := AElement.GetChildIndex() = AElement.GetSiblingCount()
   else if Low = 'only-child' then Result := AElement.GetSiblingCount() = 1

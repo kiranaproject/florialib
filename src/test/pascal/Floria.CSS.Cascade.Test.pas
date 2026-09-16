@@ -220,6 +220,15 @@ begin
     finally
       Sel.Free();
     end;
+
+    C1.SetChecked(True);
+    Sel := ParseSelectorListFromCSS(':checked');
+    try
+      AssertTrue('C1 is checked', MatchesSelectorList(Sel, C1, Spec));
+      AssertFalse('C2 is not checked', MatchesSelectorList(Sel, C2, Spec));
+    finally
+      Sel.Free();
+    end;
   finally
     Parent.Free();
   end;
