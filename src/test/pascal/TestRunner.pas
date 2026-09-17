@@ -13,7 +13,8 @@ uses
   Floria.CSS.Cascade.Test,
   Floria.XCB.Test,
   Floria.XML.Test,
-  Floria.SVG.Test;
+  Floria.SVG.Test,
+  Floria.HTML.Test;
 
 var
   Application: TTestRunner;
