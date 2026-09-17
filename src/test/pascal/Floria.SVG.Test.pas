@@ -13,7 +13,7 @@ unit Floria.SVG.Test;
 interface
 
 uses
-  Classes, SysUtils, fpcunit, testregistry, Math,
+  Classes, SysUtils, Contnrs, fpcunit, testregistry, Math,
   Floria.CSS.Types, Floria.CSS.Values, Floria.CSS.Properties,
   Floria.SVG.Types, Floria.SVG.Path, Floria.SVG.DOM, Floria.SVG.Parser;
 
@@ -650,14 +650,16 @@ procedure TSVGParserTest.TestParseGradients();
 var
   SvgXml: string;
   Doc: TSVGDocument;
-  Grad: TSVGLinearGradientElement;
+  Grad, Grad2: TSVGLinearGradientElement;
+  EffStops: TObjectList;
 begin
   SvgXml := '<svg width="200" height="200">' +
             '  <defs>' +
-            '    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">' +
-            '      <stop offset="0%" stop-color="#ff0000" stop-opacity="1"/>' +
-            '      <stop offset="100%" stop-color="#0000ff" stop-opacity="0.5"/>' +
+            '    <linearGradient id="baseGrad" gradientUnits="userSpaceOnUse" spreadMethod="reflect">' +
+            '      <stop offset="0%" style="stop-color:rgb(255,0,0);stop-opacity:1"/>' +
+            '      <stop offset="100%" style="stop-color:#0000ff;stop-opacity:0.5"/>' +
             '    </linearGradient>' +
+            '    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%" xlink:href="#baseGrad"/>' +
             '  </defs>' +
             '  <rect x="0" y="0" width="200" height="200" fill="url(#g1)"/>' +
             '</svg>';
@@ -665,14 +667,25 @@ begin
   Doc := TSVGParser.ParseString(SvgXml);
   try
     AssertNotNull('Doc exists', Doc);
-    Grad := TSVGLinearGradientElement(Doc.FindElementById('g1'));
-    AssertNotNull('Gradient found', Grad);
+    Grad := TSVGLinearGradientElement(Doc.FindElementById('baseGrad'));
+    AssertNotNull('Base gradient found', Grad);
+    AssertEquals(Ord(sguUserSpaceOnUse), Ord(Grad.GradientUnits));
+    AssertEquals(Ord(sgsReflect), Ord(Grad.SpreadMethod));
     AssertEquals(2, Grad.StopCount());
     AssertEquals(0.0, Grad.GetStop(0).Offset, 1e-6);
     AssertEquals(255, Grad.GetStop(0).Color.R);
     AssertEquals(1.0, Grad.GetStop(1).Offset, 1e-6);
     AssertEquals(255, Grad.GetStop(1).Color.B);
     AssertEquals(128, Grad.GetStop(1).Color.A, 2); // 0.5 * 255 = 127.5
+
+    Grad2 := TSVGLinearGradientElement(Doc.FindElementById('g1'));
+    AssertNotNull('Referencing gradient found', Grad2);
+    AssertEquals(0, Grad2.StopCount());
+    EffStops := Grad2.GetEffectiveStops();
+    AssertNotNull('Effective stops found', EffStops);
+    AssertEquals(2, EffStops.Count);
+    AssertEquals(255, TSVGStopElement(EffStops[0]).Color.R);
+    AssertEquals(255, TSVGStopElement(EffStops[1]).Color.B);
   finally
     Doc.Free();
   end;

@@ -112,6 +112,10 @@ var
   OffVal, OpVal: Double;
   Code: Integer;
   Col: TCSSColor;
+  InlineBlock: TCSSStyleBlock;
+  Decl: TCSSStyleDeclaration;
+  I: Integer;
+  PropName: string;
 begin
   StopElem := TSVGStopElement.Create(FDoc);
   if AXMLElem.HasAttribute('id') then
@@ -139,7 +143,7 @@ begin
     end;
   end;
 
-  // Stop color and opacity
+  // Stop color and opacity from attributes
   ColStr := AXMLElem.GetAttribute('stop-color');
   if (ColStr <> '') and TCSSColor.TryParse(ColStr, Col) then
     StopElem.Color := Col;
@@ -154,6 +158,44 @@ begin
       Col := StopElem.Color;
       Col.A := Round(Max(0.0, Min(1.0, OpVal)) * 255);
       StopElem.Color := Col;
+    end;
+  end;
+
+  // Stop color and opacity from style attribute (overrides presentation attributes)
+  if AXMLElem.HasAttribute('style') then
+  begin
+    InlineBlock := TCSSStyleBlock.FromCSS(AXMLElem.GetAttribute('style'));
+    if Assigned(InlineBlock) then
+    begin
+      try
+        for I := 0 to InlineBlock.Count - 1 do
+        begin
+          Decl := InlineBlock.Items[I];
+          if Decl.CustomName <> '' then
+            PropName := LowerCase(Decl.CustomName)
+          else
+            PropName := CSSPropertyIdToName(Decl.PropertyId);
+
+          if (PropName = 'stop-color') and TCSSColor.TryParse(Decl.Value.ToString(), Col) then
+          begin
+            Col.A := StopElem.Color.A;
+            StopElem.Color := Col;
+          end
+          else if PropName = 'stop-opacity' then
+          begin
+            OpVal := 1.0;
+            System.Val(Decl.Value.ToString(), OpVal, Code);
+            if Code = 0 then
+            begin
+              Col := StopElem.Color;
+              Col.A := Round(Max(0.0, Min(1.0, OpVal)) * 255);
+              StopElem.Color := Col;
+            end;
+          end;
+        end;
+      finally
+        InlineBlock.Free();
+      end;
     end;
   end;
 
@@ -288,6 +330,21 @@ begin
     if AXMLElem.HasAttribute('y2') then LinGrad.Y2 := SVGParseLength(AXMLElem.GetAttribute('y2'), suPercent);
     if AXMLElem.HasAttribute('gradientTransform') then
       LinGrad.GradientTransform := SVGParseTransform(AXMLElem.GetAttribute('gradientTransform'));
+    if AXMLElem.HasAttribute('gradientUnits') then
+    begin
+      if LowerCase(Trim(AXMLElem.GetAttribute('gradientUnits'))) = 'userspaceonuse' then
+        LinGrad.GradientUnits := sguUserSpaceOnUse
+      else
+        LinGrad.GradientUnits := sguObjectBoundingBox;
+    end;
+    if AXMLElem.HasAttribute('spreadMethod') then
+    begin
+      case LowerCase(Trim(AXMLElem.GetAttribute('spreadMethod'))) of
+        'reflect': LinGrad.SpreadMethod := sgsReflect;
+        'repeat':  LinGrad.SpreadMethod := sgsRepeat;
+        else       LinGrad.SpreadMethod := sgsPad;
+      end;
+    end;
 
     HrefVal := AXMLElem.GetAttribute('href');
     if HrefVal = '' then HrefVal := AXMLElem.GetAttribute('xlink:href');
@@ -311,6 +368,21 @@ begin
     if AXMLElem.HasAttribute('fy') then RadGrad.Fy := SVGParseLength(AXMLElem.GetAttribute('fy'), suPercent);
     if AXMLElem.HasAttribute('gradientTransform') then
       RadGrad.GradientTransform := SVGParseTransform(AXMLElem.GetAttribute('gradientTransform'));
+    if AXMLElem.HasAttribute('gradientUnits') then
+    begin
+      if LowerCase(Trim(AXMLElem.GetAttribute('gradientUnits'))) = 'userspaceonuse' then
+        RadGrad.GradientUnits := sguUserSpaceOnUse
+      else
+        RadGrad.GradientUnits := sguObjectBoundingBox;
+    end;
+    if AXMLElem.HasAttribute('spreadMethod') then
+    begin
+      case LowerCase(Trim(AXMLElem.GetAttribute('spreadMethod'))) of
+        'reflect': RadGrad.SpreadMethod := sgsReflect;
+        'repeat':  RadGrad.SpreadMethod := sgsRepeat;
+        else       RadGrad.SpreadMethod := sgsPad;
+      end;
+    end;
 
     HrefVal := AXMLElem.GetAttribute('href');
     if HrefVal = '' then HrefVal := AXMLElem.GetAttribute('xlink:href');

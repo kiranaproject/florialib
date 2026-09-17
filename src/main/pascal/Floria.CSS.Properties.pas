@@ -776,9 +776,12 @@ end;
 
 function ParseNodesToString(const ANodes: TObjectList): AnsiString;
 var
-  I   : Integer;
-  Node: TCSSNode;
-  Tok : TCSSToken;
+  I      : Integer;
+  Node   : TCSSNode;
+  Tok    : TCSSToken;
+  Func   : TCSSFunctionBlock;
+  Blk    : TCSSSimpleBlock;
+  CloseCh: AnsiString;
 begin
   Result := '';
   if ANodes = nil then
@@ -798,6 +801,23 @@ begin
       else
         Result := Result + Tok.Value;
       end;
+    end
+    else if Node.NodeType = cntFunction then
+    begin
+      Func := TCSSFunctionBlock(Node);
+      Result := Result + Func.Name + '(' + ParseNodesToString(Func.Children) + ')';
+    end
+    else if Node.NodeType = cntSimpleBlock then
+    begin
+      Blk := TCSSSimpleBlock(Node);
+      case Blk.AssocToken.TokenType of
+        cttOpenParen:  CloseCh := ')';
+        cttOpenSquare: CloseCh := ']';
+        cttOpenCurly:  CloseCh := '}';
+      else
+        CloseCh := '';
+      end;
+      Result := Result + Blk.AssocToken.Value + ParseNodesToString(Blk.Children) + CloseCh;
     end;
   end;
   Result := Trim(Result);

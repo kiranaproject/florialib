@@ -326,6 +326,7 @@ type
     procedure AddStop(AStop: TSVGStopElement);
     function StopCount(): Integer;
     function GetStop(AIndex: Integer): TSVGStopElement;
+    function GetEffectiveStops(): TObjectList;
 
     property GradientUnits: TSVGGradientUnits read FGradientUnits write FGradientUnits;
     property SpreadMethod: TSVGGradientSpread read FSpreadMethod write FSpreadMethod;
@@ -1142,6 +1143,50 @@ end;
 function TSVGGradientElement.GetStop(AIndex: Integer): TSVGStopElement;
 begin
   Result := TSVGStopElement(FStops[AIndex]);
+end;
+
+function TSVGGradientElement.GetEffectiveStops(): TObjectList;
+var
+  RefElem: TSVGElement;
+  TargetId: string;
+  Visited: TStringList;
+begin
+  if FStops.Count > 0 then
+    Exit(FStops);
+
+  if (FHref = '') or not Assigned(FDocument) then
+    Exit(FStops);
+
+  Visited := TStringList.Create();
+  try
+    Visited.Add(FId);
+    TargetId := FHref;
+    if (Length(TargetId) > 0) and (TargetId[1] = '#') then
+      Delete(TargetId, 1, 1);
+
+    while TargetId <> '' do
+    begin
+      if Visited.IndexOf(TargetId) >= 0 then
+        Break;
+      Visited.Add(TargetId);
+
+      RefElem := FDocument.FindElementById(TargetId);
+      if Assigned(RefElem) and (RefElem is TSVGGradientElement) then
+      begin
+        if TSVGGradientElement(RefElem).FStops.Count > 0 then
+          Exit(TSVGGradientElement(RefElem).FStops);
+        TargetId := TSVGGradientElement(RefElem).FHref;
+        if (Length(TargetId) > 0) and (TargetId[1] = '#') then
+          Delete(TargetId, 1, 1);
+      end
+      else
+        Break;
+    end;
+  finally
+    Visited.Free();
+  end;
+
+  Result := FStops;
 end;
 
 constructor TSVGLinearGradientElement.Create(ADoc: TSVGDocument = nil);
