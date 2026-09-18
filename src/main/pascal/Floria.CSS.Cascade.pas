@@ -380,6 +380,7 @@ begin
   else if Low = 'first-child' then Result := AElement.GetChildIndex() = 1
   else if Low = 'last-child' then Result := AElement.GetChildIndex() = AElement.GetSiblingCount()
   else if Low = 'only-child' then Result := AElement.GetSiblingCount() = 1
+  else if Low = 'root' then Result := (AElement.GetParent() = nil) or SameText(AElement.GetTagName(), 'window') or SameText(AElement.GetTagName(), 'root') or SameText(AElement.GetTagName(), 'html')
   else Result := False;
 end;
 

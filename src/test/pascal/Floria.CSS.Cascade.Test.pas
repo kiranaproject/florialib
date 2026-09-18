@@ -229,6 +229,14 @@ begin
     finally
       Sel.Free();
     end;
+
+    Sel := ParseSelectorListFromCSS(':root');
+    try
+      AssertTrue('Parent is root', MatchesSelectorList(Sel, Parent, Spec));
+      AssertFalse('C1 is not root', MatchesSelectorList(Sel, C1, Spec));
+    finally
+      Sel.Free();
+    end;
   finally
     Parent.Free();
   end;

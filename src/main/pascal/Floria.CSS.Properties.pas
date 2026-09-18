@@ -1055,7 +1055,9 @@ begin
             SetProperty(cpiMarginRight, TCSSPropertyValue.FromLength(Val.Box.Right), ASTDecl.Important);
             SetProperty(cpiMarginBottom, TCSSPropertyValue.FromLength(Val.Box.Bottom), ASTDecl.Important);
             SetProperty(cpiMarginLeft, TCSSPropertyValue.FromLength(Val.Box.Left), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiMargin, Val, ASTDecl.Important);
         end;
         cpiPadding:
         begin
@@ -1065,7 +1067,9 @@ begin
             SetProperty(cpiPaddingRight, TCSSPropertyValue.FromLength(Val.Box.Right), ASTDecl.Important);
             SetProperty(cpiPaddingBottom, TCSSPropertyValue.FromLength(Val.Box.Bottom), ASTDecl.Important);
             SetProperty(cpiPaddingLeft, TCSSPropertyValue.FromLength(Val.Box.Left), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiPadding, Val, ASTDecl.Important);
         end;
         cpiBorderWidth:
         begin
@@ -1075,7 +1079,9 @@ begin
             SetProperty(cpiBorderRightWidth, TCSSPropertyValue.FromLength(Val.Box.Right), ASTDecl.Important);
             SetProperty(cpiBorderBottomWidth, TCSSPropertyValue.FromLength(Val.Box.Bottom), ASTDecl.Important);
             SetProperty(cpiBorderLeftWidth, TCSSPropertyValue.FromLength(Val.Box.Left), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiBorderWidth, Val, ASTDecl.Important);
         end;
         cpiBorderRadius:
         begin
@@ -1085,7 +1091,9 @@ begin
             SetProperty(cpiBorderTopRightRadius, TCSSPropertyValue.FromLength(Val.Box.Right), ASTDecl.Important);
             SetProperty(cpiBorderBottomRightRadius, TCSSPropertyValue.FromLength(Val.Box.Bottom), ASTDecl.Important);
             SetProperty(cpiBorderBottomLeftRadius, TCSSPropertyValue.FromLength(Val.Box.Left), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiBorderRadius, Val, ASTDecl.Important);
         end;
         cpiBorder:
         begin
@@ -1106,7 +1114,9 @@ begin
             SetProperty(cpiBorderRightColor, TCSSPropertyValue.FromColor(Side.Color), ASTDecl.Important);
             SetProperty(cpiBorderBottomColor, TCSSPropertyValue.FromColor(Side.Color), ASTDecl.Important);
             SetProperty(cpiBorderLeftColor, TCSSPropertyValue.FromColor(Side.Color), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiBorder, Val, ASTDecl.Important);
         end;
         cpiBorderTop:
         begin
@@ -1115,7 +1125,9 @@ begin
             SetProperty(cpiBorderTopWidth, TCSSPropertyValue.FromLength(Side.Width), ASTDecl.Important);
             SetProperty(cpiBorderTopStyle, TCSSPropertyValue.FromKeyword(BorderStyleToString(Side.Style)), ASTDecl.Important);
             SetProperty(cpiBorderTopColor, TCSSPropertyValue.FromColor(Side.Color), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiBorderTop, Val, ASTDecl.Important);
         end;
         cpiBorderRight:
         begin
@@ -1124,7 +1136,9 @@ begin
             SetProperty(cpiBorderRightWidth, TCSSPropertyValue.FromLength(Side.Width), ASTDecl.Important);
             SetProperty(cpiBorderRightStyle, TCSSPropertyValue.FromKeyword(BorderStyleToString(Side.Style)), ASTDecl.Important);
             SetProperty(cpiBorderRightColor, TCSSPropertyValue.FromColor(Side.Color), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiBorderRight, Val, ASTDecl.Important);
         end;
         cpiBorderBottom:
         begin
@@ -1133,7 +1147,9 @@ begin
             SetProperty(cpiBorderBottomWidth, TCSSPropertyValue.FromLength(Side.Width), ASTDecl.Important);
             SetProperty(cpiBorderBottomStyle, TCSSPropertyValue.FromKeyword(BorderStyleToString(Side.Style)), ASTDecl.Important);
             SetProperty(cpiBorderBottomColor, TCSSPropertyValue.FromColor(Side.Color), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiBorderBottom, Val, ASTDecl.Important);
         end;
         cpiBorderLeft:
         begin
@@ -1142,7 +1158,9 @@ begin
             SetProperty(cpiBorderLeftWidth, TCSSPropertyValue.FromLength(Side.Width), ASTDecl.Important);
             SetProperty(cpiBorderLeftStyle, TCSSPropertyValue.FromKeyword(BorderStyleToString(Side.Style)), ASTDecl.Important);
             SetProperty(cpiBorderLeftColor, TCSSPropertyValue.FromColor(Side.Color), ASTDecl.Important);
-          end;
+          end
+          else
+            SetProperty(cpiBorderLeft, Val, ASTDecl.Important);
         end;
       else
         SetProperty(PropId, Val, ASTDecl.Important);
