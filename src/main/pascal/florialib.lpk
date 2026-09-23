@@ -155,8 +155,8 @@
         <UnitName Value="Floria.Image.JPEG"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Blur.pas"/>
-        <UnitName Value="Floria.Blur"/>
+        <Filename Value="Floria.Image.Blur.pas"/>
+        <UnitName Value="Floria.Image.Blur"/>
       </Item>
       <Item>
         <Filename Value="Floria.Font.pas"/>

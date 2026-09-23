@@ -4,7 +4,7 @@
 
 `Floria.Canvas.Agg` is a high-performance, 2D vector and raster graphics canvas built on top of **AggPas** (Anti-Grain Geometry for Pascal) and integrated natively with `florialib`'s core units:
 - **`Floria.Canvas.Agg`**: 2D anti-aliased canvas rendering to 32-bit BGRA raster buffers (`TFloriaImage`).
-- **`Floria.Blur`**: Multi-pass downsampled box blur with bilinear reconstruction and rounded corner masking.
+- **`Floria.Image.Blur`**: Multi-pass downsampled box blur with bilinear reconstruction and rounded corner masking.
 - **`Floria.Font`**: FreeType font engine and cache manager with DPI scaling, stem darkening, and fallback chaining.
 - **`Floria.SVG.Rasterizer`**: Vector rasterizer that maps `TSVGDocument` and `TSVGElement` scenes directly onto `Floria.Canvas.Agg`.
 
@@ -20,14 +20,14 @@
                                 │                 │
             ┌───────────────────┴───┐         ┌───┴────────────────────┐
             ▼                       ▼         ▼                        ▼
-  ┌───────────────────┐   ┌─────────────────┐ ┌───────────────────┐  ┌───────────────────┐
-  │ Vector Primitives │   │   Floria.Blur   │ │    Floria.Font    │  │ Floria.SVG.Raster │
-  ├───────────────────┤   ├─────────────────┤ ├───────────────────┤  ├───────────────────┤
-  │ • Lines & Rects   │   │ • Fast box blur │ │ • FreeType Cache  │  │ • SVG DOM render  │
-  │ • Rounded corners │   │ • Rounded rect  │ │ • DPI scaling     │  │ • Linear / Radial │
-  │ • Outlines & Join │   │ • Zero artifacts│ │ • CJK Fallback    │  │   gradient LUTs   │
-  │ • Drop shadows    │   │ • SIMD-friendly │ │ • Gamma / dark    │  │ • Path curves     │
-  └───────────────────┘   └─────────────────┘ └───────────────────┘  └───────────────────┘
+  ┌───────────────────┐   ┌───────────────────┐ ┌───────────────────┐  ┌───────────────────┐
+  │ Vector Primitives │   │ Floria.Image.Blur │ │    Floria.Font    │  │ Floria.SVG.Raster │
+  ├───────────────────┤   ├───────────────────┤ ├───────────────────┤  ├───────────────────┤
+  │ • Lines & Rects   │   │ • Fast box blur   │ │ • FreeType Cache  │  │ • SVG DOM render  │
+  │ • Rounded corners │   │ • Rounded rect    │ │ • DPI scaling     │  │ • Linear / Radial │
+  │ • Outlines & Join │   │ • Zero artifacts  │ │ • CJK Fallback    │  │   gradient LUTs   │
+  │ • Drop shadows    │   │ • SIMD-friendly   │ │ • Gamma / dark    │  │ • Path curves     │
+  └───────────────────┘   └───────────────────┘ └───────────────────┘  └───────────────────┘
 ```
 
 ---

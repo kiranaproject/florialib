@@ -45,7 +45,7 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
 | [**XCB & Window Manager Guide**](xcb.md) | Documentation and code examples for XCB, ICCCM, EWMH, RandR, XRender, SHM, Shape, and KeySyms. |
 | [**WM Framework Specification**](wm.md) | Architecture and specifications for Floria.XCB.WM (reparenting, EWMH, virtual desktops, client management). |
 | [**Image Subsystem Guide**](image.md) | Pure Pascal image buffer, BMP/PNG/JPEG codecs, and AggPas-compatible 32-bit raster graphics. |
-| [**Canvas & 2D Graphics Guide**](canvas.md) | 2D vector & raster anti-aliased canvas (`Floria.Canvas.Agg`), fast blur (`Floria.Blur`), and FreeType fonts (`Floria.Font`). |
+| [**Canvas & 2D Graphics Guide**](canvas.md) | 2D vector & raster anti-aliased canvas (`Floria.Canvas.Agg`), fast blur (`Floria.Image.Blur`), and FreeType fonts (`Floria.Font`). |
 | [**Coding Standards & Development**](coding-style.md) | Object Pascal conventions, mandatory `()` routine rules, memory ownership, and Pasbuild build workflow. |
 
 ---

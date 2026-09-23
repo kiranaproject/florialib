@@ -424,7 +424,7 @@ and continue).
 | 6 — XML & SVG Subsystems | `Floria.XML.*`, `Floria.SVG.*` | ✅ Done — 49 tests |
 | 7 — HTML Subsystem | `Floria.HTML.*` | ✅ Done — 23 tests |
 | 8 — Image Codecs (Pure Pascal) | `Floria.Image.*` (Core, BMP, PNG, JPEG) | ✅ Done — 10 tests |
-| 9 — Canvas & Graphics | `Floria.Blur`, `Floria.Font`, `Floria.Canvas.Agg`, `Floria.SVG.Rasterizer` | ✅ Done — 13 tests |
+| 9 — Canvas & Graphics | `Floria.Image.Blur`, `Floria.Font`, `Floria.Canvas.Agg`, `Floria.SVG.Rasterizer` | ✅ Done — 13 tests |
 
 The CSS engine, XCB Window Manager, XML/SVG DOM, HTML parser, pure Pascal Image codecs,
 and AggPas 2D Canvas subsystems in `florialib` provide full foundations for GUI, window management, and vector/raster graphics.

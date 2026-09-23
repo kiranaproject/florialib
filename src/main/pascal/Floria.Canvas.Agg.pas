@@ -47,7 +47,7 @@ uses
   Floria.SVG.DOM,
   Floria.Font,
   Floria.Image.Core,
-  Floria.Blur;
+  Floria.Image.Blur;
 
 type
   TFtClipRect = record

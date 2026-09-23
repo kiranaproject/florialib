@@ -17,7 +17,7 @@ uses
   Floria.SVG.Test,
   Floria.HTML.Test,
   Floria.Image.Test,
-  Floria.Blur.Test,
+  Floria.Image.Blur.Test,
   Floria.Canvas.Agg.Test;
 
 var

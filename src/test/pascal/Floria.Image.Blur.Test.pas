@@ -1,4 +1,4 @@
-unit Floria.Blur.Test;
+unit Floria.Image.Blur.Test;
 
 {$mode objfpc}{$H+}
 
@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, fpcunit, testregistry,
-  Floria.Image.Core, Floria.Blur;
+  Floria.Image.Core, Floria.Image.Blur;
 
 type
   TFloriaBlurTest = class(TTestCase)

@@ -1,7 +1,7 @@
-unit Floria.Blur;
+unit Floria.Image.Blur;
 
-// Floria.Blur
-// ===========
+// Floria.Image.Blur
+// =================
 // High-performance multi-pass box blur with downsampling, bilinear reconstruction,
 // and anti-aliased rounded corner masking.
 // Operates natively on 32-bit BGRA pixel buffers (TBgraPixel / TFloriaImage).
