@@ -240,6 +240,19 @@ truncation of the rest of the file and a misleading
 These are compiler directives inside `{ }` — they work because they start
 with `$`. This is fine and must always be present.
 
+### Image Codec Auto-Registration & Initialization Order
+
+`Floria.Image.Core` maintains the global codec registry (`GReaders`, `GWriters`) and initializes them in its `initialization` block:
+- Codec units (`Floria.Image.PNG`, `Floria.Image.BMP`, `Floria.Image.JPEG`) call `RegisterImageReader()` / `RegisterImageWriter()` in their own `initialization` sections.
+- **Never** import codec units from the `implementation` section of `Floria.Image.Core`. Doing so causes FPC to execute the codec initializers *before* `Floria.Image.Core`'s initializer, which then executes and resets `GReaders` and `GWriters` with `SetLength(..., 0)`, erasing all registered codecs.
+- `Floria.Image.Core` must remain pure and free of codec imports. Downstream consumers (executables, shared libraries, tests) must explicitly add `Floria.Image.PNG`, `Floria.Image.BMP`, `Floria.Image.JPEG` to their `uses` clause.
+
+### Position-Independent Code (`-Cg` / `-fPIC`) for Shared Libraries
+
+When `florialib` compiled units (`.o`, `.ppu`) are consumed by shared libraries (such as `libft.so` in `floria-toolkit`), the compiler must emit Position-Independent Code (`-Cg` flag).
+- Without `-Cg`, the linker fails: `relocation R_X86_64_PC32 against symbol ... can not be used when making a shared object; recompile with -fPIC`.
+- Ensure `-Cg` is enabled in `~/.fpc.cfg` or compiler options so units in the local Pasbuild repository are compatible with both executables and shared libraries.
+
 ---
 
 ## 8. Object Pascal Coding Style
