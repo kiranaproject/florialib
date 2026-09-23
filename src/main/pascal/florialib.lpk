@@ -87,6 +87,10 @@
         <UnitName Value="Floria.XCB.XFixes"/>
       </Item>
       <Item>
+        <Filename Value="Floria.XCB.WM.pas"/>
+        <UnitName Value="Floria.XCB.WM"/>
+      </Item>
+      <Item>
         <Filename Value="Floria.XML.Types.pas"/>
         <UnitName Value="Floria.XML.Types"/>
       </Item>
@@ -117,6 +121,54 @@
       <Item>
         <Filename Value="Floria.SVG.Parser.pas"/>
         <UnitName Value="Floria.SVG.Parser"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.HTML.Types.pas"/>
+        <UnitName Value="Floria.HTML.Types"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.HTML.Tokenizer.pas"/>
+        <UnitName Value="Floria.HTML.Tokenizer"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.HTML.DOM.pas"/>
+        <UnitName Value="Floria.HTML.DOM"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.HTML.Parser.pas"/>
+        <UnitName Value="Floria.HTML.Parser"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.Image.Core.pas"/>
+        <UnitName Value="Floria.Image.Core"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.Image.BMP.pas"/>
+        <UnitName Value="Floria.Image.BMP"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.Image.PNG.pas"/>
+        <UnitName Value="Floria.Image.PNG"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.Image.JPEG.pas"/>
+        <UnitName Value="Floria.Image.JPEG"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.Blur.pas"/>
+        <UnitName Value="Floria.Blur"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.Font.pas"/>
+        <UnitName Value="Floria.Font"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.Canvas.Agg.pas"/>
+        <UnitName Value="Floria.Canvas.Agg"/>
+      </Item>
+      <Item>
+        <Filename Value="Floria.SVG.Rasterizer.pas"/>
+        <UnitName Value="Floria.SVG.Rasterizer"/>
       </Item>
     </Files>
     <RequiredPkgs>

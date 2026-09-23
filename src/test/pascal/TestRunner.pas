@@ -12,9 +12,13 @@ uses
   Floria.CSS.Selectors.Test,
   Floria.CSS.Cascade.Test,
   Floria.XCB.Test,
+  Floria.XCB.WM.Test,
   Floria.XML.Test,
   Floria.SVG.Test,
-  Floria.HTML.Test;
+  Floria.HTML.Test,
+  Floria.Image.Test,
+  Floria.Blur.Test,
+  Floria.Canvas.Agg.Test;
 
 var
   Application: TTestRunner;

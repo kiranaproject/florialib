@@ -148,6 +148,13 @@ Execute the entire test suite with plain text reporting:
 pasbuild test
 ```
 
+### Installing to Local Repository
+Publish compiled units so dependent projects (e.g. `floria-toolkit`) can link against `florialib`:
+
+```bash
+pasbuild install
+```
+
 ### Adding a New Unit
 1. Create `src/main/pascal/Floria.<Subsystem>.<Role>.pas`.
 2. Implement using `{$mode objfpc}{$H+}` and the conventions above.
@@ -161,3 +168,4 @@ pasbuild test
    ```
 6. Add the test unit to `src/test/pascal/TestRunner.pas` `uses` clause.
 7. Run `pasbuild test` and ensure `E:0 F:0`.
+8. Run `pasbuild install` to publish the updated units to `~/.pasbuild/repository/`.

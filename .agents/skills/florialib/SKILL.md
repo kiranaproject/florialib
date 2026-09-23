@@ -40,11 +40,12 @@ florialib/
 │   ├── main/pascal/     ← library units (auto-discovered by Pasbuild)
 │   └── test/pascal/     ← test units + TestRunner.pas
 ├── target/              ← build output (generated, do not edit)
-└── project.xml          ← Pasbuild project descriptor
+└── project.xml          ← Pasbuild project descriptor (XML format; pasbuild.json does not exist)
 ```
 
-`project.xml` keys: library type, output `target/`, test entry-point
-`TestRunner.pas`, FPCUnit runner flags `--all --format=plain`.
+`project.xml` is the sole project descriptor used by Pasbuild (there is no
+`pasbuild.json`). Key configurations: library type, output `target/`, test
+entry-point `TestRunner.pas`, FPCUnit runner flags `--all --format=plain`.
 
 ---
 
@@ -78,6 +79,16 @@ Use this when stale `.ppu` / `.o` files cause spurious compile errors.
    `src/test/pascal/TestRunner.pas`.
 2. Each test unit must call `RegisterTest(TMyTestClass)` in its own
    `initialization` section — Pasbuild picks them up automatically.
+
+### Installing to local repository
+
+```bash
+pasbuild install
+```
+
+Installs compiled units to `~/.pasbuild/repository/florialib/...` so dependent
+projects (e.g. `floria-toolkit`) can link against the updated library. Always run
+this command whenever units in `florialib` are added, modified, or refactored.
 
 ---
 
@@ -409,10 +420,15 @@ and continue).
 | 2 — Parser | `Floria.CSS.AST`, `Floria.CSS.Parser` | ✅ Done — 43 tests |
 | 3 — Typed property model | `Floria.CSS.Values`, `Floria.CSS.Properties` | ✅ Done — 60 tests |
 | 4 — Selectors & Cascade | `Floria.CSS.Selectors`, `Floria.CSS.Cascade` | ✅ Done — 31 tests |
+| 5 — Window Manager Framework | `Floria.XCB.WM` | ✅ Done — 12 tests |
+| 6 — XML & SVG Subsystems | `Floria.XML.*`, `Floria.SVG.*` | ✅ Done — 49 tests |
+| 7 — HTML Subsystem | `Floria.HTML.*` | ✅ Done — 23 tests |
+| 8 — Image Codecs (Pure Pascal) | `Floria.Image.*` (Core, BMP, PNG, JPEG) | ✅ Done — 10 tests |
+| 9 — Canvas & Graphics | `Floria.Blur`, `Floria.Font`, `Floria.Canvas.Agg`, `Floria.SVG.Rasterizer` | ✅ Done — 13 tests |
 
-The CSS engine in `florialib` is fully implemented across all 4 phases,
-providing a complete pipeline from raw CSS text down to computed style blocks
-for UI and window manager elements. Total CSS test suite: 214 tests.
+The CSS engine, XCB Window Manager, XML/SVG DOM, HTML parser, pure Pascal Image codecs,
+and AggPas 2D Canvas subsystems in `florialib` provide full foundations for GUI, window management, and vector/raster graphics.
+Total test suite: 330 tests (all passing).
 
 ---
 
@@ -427,3 +443,5 @@ for UI and window manager elements. Total CSS test suite: 214 tests.
 5. Create a matching test unit `src/test/pascal/Floria.<Subsystem>.<Role>.Test.pas`.
 6. Add the test unit to `src/test/pascal/TestRunner.pas` `uses` clause.
 7. Run `pasbuild test` and confirm `E:0 F:0`.
+8. Run `pasbuild install` to publish the updated units to the local repository
+   for dependent projects.
