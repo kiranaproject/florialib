@@ -438,10 +438,11 @@ and continue).
 | 7 — HTML Subsystem | `Floria.HTML.*` | ✅ Done — 23 tests |
 | 8 — Image Codecs (Pure Pascal) | `Floria.Image.*` (Core, BMP, PNG, JPEG) | ✅ Done — 10 tests |
 | 9 — Canvas & Graphics | `Floria.Image.Blur`, `Floria.Font`, `Floria.Canvas.Agg`, `Floria.SVG.Rasterizer` | ✅ Done — 13 tests |
+| 10 — Text Layout & Shaping | `Floria.Unicode.BiDi`, `Floria.Text.HarfBuzz` | ✅ Done — 14 tests |
 
 The CSS engine, XCB Window Manager, XML/SVG DOM, HTML parser, pure Pascal Image codecs,
-and AggPas 2D Canvas subsystems in `florialib` provide full foundations for GUI, window management, and vector/raster graphics.
-Total test suite: 330 tests (all passing).
+AggPas 2D Canvas, and BiDi + HarfBuzz text shaping subsystems in `florialib` provide full foundations for GUI, window management, internationalized text layout, and vector/raster graphics.
+Total test suite: 344 tests (all passing).
 
 ---
 
