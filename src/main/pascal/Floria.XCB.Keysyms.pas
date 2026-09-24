@@ -24,8 +24,9 @@ function xcb_key_symbols_alloc(c: Pxcb_connection_t): Pxcb_key_symbols_t; cdecl;
 procedure xcb_key_symbols_free(syms: Pxcb_key_symbols_t); cdecl; external 'xcb-keysyms' name 'xcb_key_symbols_free';
 { xcb_key_symbols_get_keysym: skipped — return type 'xcb_keysym_t' comes from a filtered-out header }
 { xcb_key_symbols_get_keycode: skipped — parameter type 'xcb_keysym_t' comes from a filtered-out header }
-{ xcb_key_press_lookup_keysym: skipped — return type 'xcb_keysym_t' comes from a filtered-out header }
-{ xcb_key_release_lookup_keysym: skipped — return type 'xcb_keysym_t' comes from a filtered-out header }
+
+function xcb_key_press_lookup_keysym(syms: Pxcb_key_symbols_t; event: Pxcb_key_press_event_t; col: Integer): xcb_keysym_t; cdecl; external 'xcb-keysyms' name 'xcb_key_press_lookup_keysym';
+function xcb_key_release_lookup_keysym(syms: Pxcb_key_symbols_t; event: Pxcb_key_release_event_t; col: Integer): xcb_keysym_t; cdecl; external 'xcb-keysyms' name 'xcb_key_release_lookup_keysym';
 function xcb_refresh_keyboard_mapping(syms: Pxcb_key_symbols_t; event: Pxcb_mapping_notify_event_t): Integer; cdecl; external 'xcb-keysyms' name 'xcb_refresh_keyboard_mapping';
 { xcb_is_keypad_key: skipped — parameter type 'xcb_keysym_t' comes from a filtered-out header }
 { xcb_is_private_keypad_key: skipped — parameter type 'xcb_keysym_t' comes from a filtered-out header }

@@ -2,11 +2,10 @@
 <CONFIG>
   <Package Version="5">
     <Name Value="florialib"/>
-    <Type Value="RunTime"/>
     <CompilerOptions>
       <Version Value="11"/>
       <SearchPaths>
-        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)/"/>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
       </SearchPaths>
     </CompilerOptions>
     <Files>
@@ -172,6 +171,9 @@
       </Item>
     </Files>
     <RequiredPkgs>
+      <Item>
+        <PackageName Value="fpgui_toolkit"/>
+      </Item>
       <Item>
         <PackageName Value="FCL"/>
       </Item>

@@ -47,7 +47,8 @@ uses
   Floria.SVG.DOM,
   Floria.Font,
   Floria.Image.Core,
-  Floria.Image.Blur;
+  Floria.Image.Blur,
+  Floria.Unicode.BiDi;
 
 type
   TFtClipRect = record
@@ -839,13 +840,19 @@ var
   first: Boolean;
   cm, curCM: font_cache_manager_ptr;
   fb: TFloriaFont;
+  renderText: string;
 begin
   if (AText = '') or (FCurrentAlpha <= 0.0) then Exit;
   if not Assigned(AFont) then AFont := FloriaGetSystemFont();
 
+  if TFloriaBiDi.HasRTL(AText) then
+    renderText := TFloriaBiDi.ProcessBidiAndShape(AText)
+  else
+    renderText := AText;
+
   if not AFont.Loaded then
   begin
-    DrawTextHershey(X, Y, AText, AFont.Size, R, G, B);
+    DrawTextHershey(X, Y, renderText, AFont.Size, R, G, B);
     Exit;
   end;
 
@@ -856,7 +863,7 @@ begin
 
   curX := X;
   curY := Y;
-  str_ := PChar(AText);
+  str_ := PChar(renderText);
   first := True;
 
   while str_^ <> #0 do

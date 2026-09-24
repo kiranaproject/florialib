@@ -19,6 +19,8 @@ type
     procedure TestMixedBiDiRuns();
     procedure TestNumbersInRTL();
     procedure TestReorderToVisualString();
+    procedure TestShapeArabic();
+    procedure TestProcessBidiAndShape();
   end;
 
 implementation
@@ -120,6 +122,45 @@ begin
   // Mirrored characters in RTL context
   res := TFloriaBiDi.ReorderToVisualString('(مرحبا)', fbbRTL);
   AssertTrue('Has output', Length(res) > 0);
+end;
+
+procedure TFloriaBiDiTest.TestShapeArabic();
+var
+  shaped: string;
+begin
+  shaped := TFloriaBiDi.ShapeArabic('مرحبا');
+  AssertTrue('Has shaped output', Length(shaped) > 0);
+  // 'م' should be shaped to initial Meem ($FEE3 = UTF-8 #$EF#$BB#$A3)
+  AssertTrue('Initial Meem shaped', Pos(#$EF#$BB#$A3, shaped) > 0);
+
+  // Lam-Alef ligature in 'أهلا' (connected to 'ه', so final Lam-Alef $FEFC)
+  shaped := TFloriaBiDi.ShapeArabic('أهلا');
+  AssertTrue('Has Lam-Alef output', Length(shaped) > 0);
+  AssertTrue('Lam-Alef ligature present', 
+    (Pos(#$EF#$BB#$B5, shaped) > 0) or (Pos(#$EF#$BB#$B6, shaped) > 0) or
+    (Pos(#$EF#$BB#$B7, shaped) > 0) or (Pos(#$EF#$BB#$B8, shaped) > 0) or
+    (Pos(#$EF#$BB#$B9, shaped) > 0) or (Pos(#$EF#$BB#$BA, shaped) > 0) or
+    (Pos(#$EF#$BB#$BB, shaped) > 0) or (Pos(#$EF#$BB#$BC, shaped) > 0));
+end;
+
+procedure TFloriaBiDiTest.TestProcessBidiAndShape();
+var
+  res: string;
+begin
+  // Pure LTR stays identical
+  res := TFloriaBiDi.ProcessBidiAndShape('Hello World');
+  AssertEquals('LTR unchanged', 'Hello World', res);
+
+  // Arabic mixed with English
+  res := TFloriaBiDi.ProcessBidiAndShape('مرحباً بالعالم! أهلاً بكم في Floria');
+  AssertTrue('Shaped Arabic result not empty', Length(res) > 0);
+  // 'Floria' should still appear in output
+  AssertTrue('Contains English word', Pos('Floria', res) > 0);
+
+  // Hebrew mixed with English
+  res := TFloriaBiDi.ProcessBidiAndShape('שלום עולם! ברוכים הבאים ל-Floria');
+  AssertTrue('Hebrew result not empty', Length(res) > 0);
+  AssertTrue('Contains English word', Pos('Floria', res) > 0);
 end;
 
 initialization

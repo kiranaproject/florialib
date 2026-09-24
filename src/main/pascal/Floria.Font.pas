@@ -124,6 +124,9 @@ procedure FtSetFontGamma(AGamma: Double);
 
 implementation
 
+uses
+  Floria.Unicode.BiDi;
+
 var
   uFontManager: TFloriaFontManager = nil;
 
@@ -294,14 +297,20 @@ var
   x, y: Double;
   fb: TFloriaFont;
   curCM: font_cache_manager_ptr;
+  measText: string;
 begin
   if not FLoaded or (AText = '') then
     Exit(Length(AText) * (FSize * (FDPI / 72.0)) * 0.55);
 
+  if TFloriaBiDi.HasRTL(AText) then
+    measText := TFloriaBiDi.ProcessBidiAndShape(AText)
+  else
+    measText := AText;
+
   x := 0.0;
   y := 0.0;
   first := True;
-  str_ := PChar(AText);
+  str_ := PChar(measText);
 
   while str_^ <> #0 do
   begin

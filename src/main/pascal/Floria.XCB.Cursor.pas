@@ -18,7 +18,7 @@ type
   xcb_cursor_context_t = record end; { opaque }
 
 function xcb_cursor_context_new(conn: Pxcb_connection_t; screen: Pxcb_screen_t; ctx: PPxcb_cursor_context_t): Integer; cdecl; external 'xcb-cursor' name 'xcb_cursor_context_new';
-{ xcb_cursor_load_cursor: skipped — return type 'xcb_cursor_t' comes from a filtered-out header }
+function xcb_cursor_load_cursor(ctx: Pxcb_cursor_context_t; const name: PChar): xcb_cursor_t; cdecl; external 'xcb-cursor' name 'xcb_cursor_load_cursor';
 procedure xcb_cursor_context_free(ctx: Pxcb_cursor_context_t); cdecl; external 'xcb-cursor' name 'xcb_cursor_context_free';
 
 implementation

@@ -95,6 +95,15 @@ type
 
     // Detects whether AText contains any Right-to-Left characters (Arabic or Hebrew)
     class function HasRTL(const AText: string): Boolean;
+
+    // Contextually shapes Arabic characters into Unicode Presentation Forms-B (U+FE70..U+FEFF),
+    // joining cursive letters (initial, medial, final, isolated) and Lam-Alef ligatures.
+    class function ShapeArabic(const AText: string): string;
+
+    // Full end-to-end BiDi pipeline: shapes Arabic characters, then performs
+    // UAX #9 bidirectional reordering and bracket mirroring for visual display.
+    class function ProcessBidiAndShape(const AText: string;
+                                       ABaseDir: TFloriaBiDiBaseDir = fbbAuto): string;
   end;
 
 // Unicode helper functions
@@ -672,4 +681,183 @@ begin
   end;
 end;
 
+const
+  AJ_NONE  = 0;
+  AJ_RIGHT = 1;
+  AJ_DUAL  = 2;
+
+type
+  TArabicFormRecord = record
+    JoinType : Byte;
+    Isolated : Word;
+    Final_   : Word;
+    Initial  : Word;
+    Medial   : Word;
+  end;
+
+function GetArabicFormData(ACodePoint: Cardinal; out AData: TArabicFormRecord): Boolean;
+begin
+  Result := True;
+  case ACodePoint of
+    $0621: begin AData.JoinType := AJ_NONE;  AData.Isolated := $FE80; AData.Final_ := $FE80; AData.Initial := $FE80; AData.Medial := $FE80; end; // Hamza
+    $0622: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FE81; AData.Final_ := $FE82; AData.Initial := $FE81; AData.Medial := $FE82; end; // Alef Madda
+    $0623: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FE83; AData.Final_ := $FE84; AData.Initial := $FE83; AData.Medial := $FE84; end; // Alef Hamza Above
+    $0624: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FE85; AData.Final_ := $FE86; AData.Initial := $FE85; AData.Medial := $FE86; end; // Waw Hamza
+    $0625: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FE87; AData.Final_ := $FE88; AData.Initial := $FE87; AData.Medial := $FE88; end; // Alef Hamza Below
+    $0626: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FE89; AData.Final_ := $FE8A; AData.Initial := $FE8B; AData.Medial := $FE8C; end; // Yeh Hamza
+    $0627: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FE8D; AData.Final_ := $FE8E; AData.Initial := $FE8D; AData.Medial := $FE8E; end; // Alef
+    $0628: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FE8F; AData.Final_ := $FE90; AData.Initial := $FE91; AData.Medial := $FE92; end; // Beh
+    $0629: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FE93; AData.Final_ := $FE94; AData.Initial := $FE93; AData.Medial := $FE94; end; // Teh Marbuta
+    $062A: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FE95; AData.Final_ := $FE96; AData.Initial := $FE97; AData.Medial := $FE98; end; // Teh
+    $062B: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FE99; AData.Final_ := $FE9A; AData.Initial := $FE9B; AData.Medial := $FE9C; end; // Theh
+    $062C: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FE9D; AData.Final_ := $FE9E; AData.Initial := $FE9F; AData.Medial := $FEA0; end; // Jeem
+    $062D: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEA1; AData.Final_ := $FEA2; AData.Initial := $FEA3; AData.Medial := $FEA4; end; // Hah
+    $062E: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEA5; AData.Final_ := $FEA6; AData.Initial := $FEA7; AData.Medial := $FEA8; end; // Khah
+    $062F: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FEA9; AData.Final_ := $FEAA; AData.Initial := $FEA9; AData.Medial := $FEAA; end; // Dal
+    $0630: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FEAB; AData.Final_ := $FEAC; AData.Initial := $FEAB; AData.Medial := $FEAC; end; // Thal
+    $0631: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FEAD; AData.Final_ := $FEAE; AData.Initial := $FEAD; AData.Medial := $FEAE; end; // Reh
+    $0632: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FEAF; AData.Final_ := $FEB0; AData.Initial := $FEAF; AData.Medial := $FEB0; end; // Zain
+    $0633: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEB1; AData.Final_ := $FEB2; AData.Initial := $FEB3; AData.Medial := $FEB4; end; // Seen
+    $0634: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEB5; AData.Final_ := $FEB6; AData.Initial := $FEB7; AData.Medial := $FEB8; end; // Sheen
+    $0635: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEB9; AData.Final_ := $FEBA; AData.Initial := $FEBB; AData.Medial := $FEBC; end; // Sad
+    $0636: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEBD; AData.Final_ := $FEBE; AData.Initial := $FEBF; AData.Medial := $FEC0; end; // Dad
+    $0637: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEC1; AData.Final_ := $FEC2; AData.Initial := $FEC3; AData.Medial := $FEC4; end; // Tah
+    $0638: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEC5; AData.Final_ := $FEC6; AData.Initial := $FEC7; AData.Medial := $FEC8; end; // Zah
+    $0639: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEC9; AData.Final_ := $FECA; AData.Initial := $FECB; AData.Medial := $FECC; end; // Ain
+    $063A: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FECD; AData.Final_ := $FECE; AData.Initial := $FECF; AData.Medial := $FED0; end; // Ghain
+    $0640: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $0640; AData.Final_ := $0640; AData.Initial := $0640; AData.Medial := $0640; end; // Tatweel
+    $0641: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FED1; AData.Final_ := $FED2; AData.Initial := $FED3; AData.Medial := $FED4; end; // Feh
+    $0642: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FED5; AData.Final_ := $FED6; AData.Initial := $FED7; AData.Medial := $FED8; end; // Qaf
+    $0643: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FED9; AData.Final_ := $FEDA; AData.Initial := $FEDB; AData.Medial := $FEDC; end; // Kaf
+    $0644: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEDD; AData.Final_ := $FEDE; AData.Initial := $FEDF; AData.Medial := $FEE0; end; // Lam
+    $0645: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEE1; AData.Final_ := $FEE2; AData.Initial := $FEE3; AData.Medial := $FEE4; end; // Meem
+    $0646: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEE5; AData.Final_ := $FEE6; AData.Initial := $FEE7; AData.Medial := $FEE8; end; // Noon
+    $0647: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEE9; AData.Final_ := $FEEA; AData.Initial := $FEEB; AData.Medial := $FEEC; end; // Heh
+    $0648: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FEED; AData.Final_ := $FEEE; AData.Initial := $FEED; AData.Medial := $FEEE; end; // Waw
+    $0649: begin AData.JoinType := AJ_RIGHT; AData.Isolated := $FEEF; AData.Final_ := $FEF0; AData.Initial := $FEEF; AData.Medial := $FEF0; end; // Alef Maksura
+    $064A: begin AData.JoinType := AJ_DUAL;  AData.Isolated := $FEF1; AData.Final_ := $FEF2; AData.Initial := $FEF3; AData.Medial := $FEF4; end; // Yeh
+  else
+    Result := False;
+  end;
+end;
+
+function IsArabicTransparent(ACodePoint: Cardinal): Boolean; inline;
+begin
+  Result := ((ACodePoint >= $064B) and (ACodePoint <= $065F)) or (ACodePoint = $0670);
+end;
+
+function GetLamAlefLigature(AlefCP: Cardinal; FinalForm: Boolean): Cardinal;
+begin
+  case AlefCP of
+    $0622: if FinalForm then Result := $FEF6 else Result := $FEF5;
+    $0623: if FinalForm then Result := $FEF8 else Result := $FEF7;
+    $0625: if FinalForm then Result := $FEFA else Result := $FEF9;
+    $0627: if FinalForm then Result := $FEFC else Result := $FEFB;
+  else
+    Result := 0;
+  end;
+end;
+
+class function TFloriaBiDi.ShapeArabic(const AText: string): string;
+var
+  Chars: array of Cardinal;
+  Count, I, PrevIdx, NextIdx: Integer;
+  P: PChar;
+  CP, Lig: Cardinal;
+  PrevJoins, NextJoins: Boolean;
+  CurData, PrevData, NextData: TArabicFormRecord;
+begin
+  Result := '';
+  if AText = '' then Exit;
+
+  P := PChar(AText);
+  Count := 0;
+  while FloriaUTF8NextChar(P, CP) do
+  begin
+    SetLength(Chars, Count + 1);
+    Chars[Count] := CP;
+    Inc(Count);
+  end;
+  if Count = 0 then Exit;
+
+  I := 0;
+  while I < Count do
+  begin
+    CP := Chars[I];
+
+    if IsArabicTransparent(CP) then
+    begin
+      Result := Result + FloriaUnicodeToUTF8(CP);
+      Inc(I);
+      Continue;
+    end;
+
+    // Check Lam-Alef ligature ($0644 followed by Alef variant)
+    if CP = $0644 then
+    begin
+      NextIdx := I + 1;
+      while (NextIdx < Count) and IsArabicTransparent(Chars[NextIdx]) do
+        Inc(NextIdx);
+
+      if NextIdx < Count then
+      begin
+        Lig := GetLamAlefLigature(Chars[NextIdx], False);
+        if Lig <> 0 then
+        begin
+          PrevIdx := I - 1;
+          while (PrevIdx >= 0) and IsArabicTransparent(Chars[PrevIdx]) do
+            Dec(PrevIdx);
+
+          PrevJoins := (PrevIdx >= 0) and GetArabicFormData(Chars[PrevIdx], PrevData) and (PrevData.JoinType = AJ_DUAL);
+          if PrevJoins then
+            Lig := GetLamAlefLigature(Chars[NextIdx], True);
+
+          Result := Result + FloriaUnicodeToUTF8(Lig);
+          I := NextIdx + 1;
+          Continue;
+        end;
+      end;
+    end;
+
+    if GetArabicFormData(CP, CurData) then
+    begin
+      PrevIdx := I - 1;
+      while (PrevIdx >= 0) and IsArabicTransparent(Chars[PrevIdx]) do
+        Dec(PrevIdx);
+      PrevJoins := (PrevIdx >= 0) and GetArabicFormData(Chars[PrevIdx], PrevData) and (PrevData.JoinType = AJ_DUAL);
+
+      NextIdx := I + 1;
+      while (NextIdx < Count) and IsArabicTransparent(Chars[NextIdx]) do
+        Inc(NextIdx);
+      NextJoins := (NextIdx < Count) and GetArabicFormData(Chars[NextIdx], NextData) and (NextData.JoinType in [AJ_RIGHT, AJ_DUAL]);
+
+      if PrevJoins and NextJoins and (CurData.JoinType = AJ_DUAL) then
+        Result := Result + FloriaUnicodeToUTF8(CurData.Medial)
+      else if PrevJoins then
+        Result := Result + FloriaUnicodeToUTF8(CurData.Final_)
+      else if NextJoins and (CurData.JoinType = AJ_DUAL) then
+        Result := Result + FloriaUnicodeToUTF8(CurData.Initial)
+      else
+        Result := Result + FloriaUnicodeToUTF8(CurData.Isolated);
+    end
+    else
+      Result := Result + FloriaUnicodeToUTF8(CP);
+
+    Inc(I);
+  end;
+end;
+
+class function TFloriaBiDi.ProcessBidiAndShape(const AText: string;
+                                               ABaseDir: TFloriaBiDiBaseDir = fbbAuto): string;
+var
+  shaped: string;
+begin
+  if (AText = '') or (not HasRTL(AText)) then
+    Exit(AText);
+
+  shaped := ShapeArabic(AText);
+  Result := ReorderToVisualString(shaped, ABaseDir);
+end;
+
 end.
+
