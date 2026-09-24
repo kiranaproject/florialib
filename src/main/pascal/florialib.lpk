@@ -10,164 +10,172 @@
     </CompilerOptions>
     <Files>
       <Item>
-        <Filename Value="Floria.CSS.AST.pas"/>
+        <Filename Value="floria.css.ast.pas"/>
         <UnitName Value="Floria.CSS.AST"/>
       </Item>
       <Item>
-        <Filename Value="Floria.CSS.Cascade.pas"/>
+        <Filename Value="floria.css.cascade.pas"/>
         <UnitName Value="Floria.CSS.Cascade"/>
       </Item>
       <Item>
-        <Filename Value="Floria.CSS.Parser.pas"/>
+        <Filename Value="floria.css.parser.pas"/>
         <UnitName Value="Floria.CSS.Parser"/>
       </Item>
       <Item>
-        <Filename Value="Floria.CSS.Properties.pas"/>
+        <Filename Value="floria.css.properties.pas"/>
         <UnitName Value="Floria.CSS.Properties"/>
       </Item>
       <Item>
-        <Filename Value="Floria.CSS.Selectors.pas"/>
+        <Filename Value="floria.css.selectors.pas"/>
         <UnitName Value="Floria.CSS.Selectors"/>
       </Item>
       <Item>
-        <Filename Value="Floria.CSS.Tokenizer.pas"/>
+        <Filename Value="floria.css.tokenizer.pas"/>
         <UnitName Value="Floria.CSS.Tokenizer"/>
       </Item>
       <Item>
-        <Filename Value="Floria.CSS.Types.pas"/>
+        <Filename Value="floria.css.types.pas"/>
         <UnitName Value="Floria.CSS.Types"/>
       </Item>
       <Item>
-        <Filename Value="Floria.CSS.Values.pas"/>
+        <Filename Value="floria.css.values.pas"/>
         <UnitName Value="Floria.CSS.Values"/>
       </Item>
       <Item>
-        <Filename Value="Floria.X11.KeySym.pas"/>
+        <Filename Value="floria.x11.keysym.pas"/>
         <UnitName Value="Floria.X11.KeySym"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.Cursor.pas"/>
+        <Filename Value="floria.xcb.cursor.pas"/>
         <UnitName Value="Floria.XCB.Cursor"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.EWMH.pas"/>
+        <Filename Value="floria.xcb.ewmh.pas"/>
         <UnitName Value="Floria.XCB.EWMH"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.ICCCM.pas"/>
+        <Filename Value="floria.xcb.icccm.pas"/>
         <UnitName Value="Floria.XCB.ICCCM"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.Keysyms.pas"/>
+        <Filename Value="floria.xcb.keysyms.pas"/>
         <UnitName Value="Floria.XCB.Keysyms"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.pas"/>
+        <Filename Value="floria.xcb.pas"/>
         <UnitName Value="Floria.XCB"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.RandR.pas"/>
+        <Filename Value="floria.xcb.randr.pas"/>
         <UnitName Value="Floria.XCB.RandR"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.Render.pas"/>
+        <Filename Value="floria.xcb.render.pas"/>
         <UnitName Value="Floria.XCB.Render"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.Shape.pas"/>
+        <Filename Value="floria.xcb.shape.pas"/>
         <UnitName Value="Floria.XCB.Shape"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.SHM.pas"/>
+        <Filename Value="floria.xcb.shm.pas"/>
         <UnitName Value="Floria.XCB.SHM"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.XFixes.pas"/>
+        <Filename Value="floria.xcb.xfixes.pas"/>
         <UnitName Value="Floria.XCB.XFixes"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XCB.WM.pas"/>
+        <Filename Value="floria.xcb.wm.pas"/>
         <UnitName Value="Floria.XCB.WM"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XML.Types.pas"/>
+        <Filename Value="floria.xml.types.pas"/>
         <UnitName Value="Floria.XML.Types"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XML.Tokenizer.pas"/>
+        <Filename Value="floria.xml.tokenizer.pas"/>
         <UnitName Value="Floria.XML.Tokenizer"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XML.DOM.pas"/>
+        <Filename Value="floria.xml.dom.pas"/>
         <UnitName Value="Floria.XML.DOM"/>
       </Item>
       <Item>
-        <Filename Value="Floria.XML.Parser.pas"/>
+        <Filename Value="floria.xml.parser.pas"/>
         <UnitName Value="Floria.XML.Parser"/>
       </Item>
       <Item>
-        <Filename Value="Floria.SVG.Types.pas"/>
+        <Filename Value="floria.svg.types.pas"/>
         <UnitName Value="Floria.SVG.Types"/>
       </Item>
       <Item>
-        <Filename Value="Floria.SVG.Path.pas"/>
+        <Filename Value="floria.svg.path.pas"/>
         <UnitName Value="Floria.SVG.Path"/>
       </Item>
       <Item>
-        <Filename Value="Floria.SVG.DOM.pas"/>
+        <Filename Value="floria.svg.dom.pas"/>
         <UnitName Value="Floria.SVG.DOM"/>
       </Item>
       <Item>
-        <Filename Value="Floria.SVG.Parser.pas"/>
+        <Filename Value="floria.svg.parser.pas"/>
         <UnitName Value="Floria.SVG.Parser"/>
       </Item>
       <Item>
-        <Filename Value="Floria.HTML.Types.pas"/>
+        <Filename Value="floria.html.types.pas"/>
         <UnitName Value="Floria.HTML.Types"/>
       </Item>
       <Item>
-        <Filename Value="Floria.HTML.Tokenizer.pas"/>
+        <Filename Value="floria.html.tokenizer.pas"/>
         <UnitName Value="Floria.HTML.Tokenizer"/>
       </Item>
       <Item>
-        <Filename Value="Floria.HTML.DOM.pas"/>
+        <Filename Value="floria.html.dom.pas"/>
         <UnitName Value="Floria.HTML.DOM"/>
       </Item>
       <Item>
-        <Filename Value="Floria.HTML.Parser.pas"/>
+        <Filename Value="floria.html.parser.pas"/>
         <UnitName Value="Floria.HTML.Parser"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Image.Core.pas"/>
+        <Filename Value="floria.image.core.pas"/>
         <UnitName Value="Floria.Image.Core"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Image.BMP.pas"/>
+        <Filename Value="floria.image.bmp.pas"/>
         <UnitName Value="Floria.Image.BMP"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Image.PNG.pas"/>
+        <Filename Value="floria.image.png.pas"/>
         <UnitName Value="Floria.Image.PNG"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Image.JPEG.pas"/>
+        <Filename Value="floria.image.jpeg.pas"/>
         <UnitName Value="Floria.Image.JPEG"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Image.Blur.pas"/>
+        <Filename Value="floria.image.blur.pas"/>
         <UnitName Value="Floria.Image.Blur"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Font.pas"/>
+        <Filename Value="floria.font.pas"/>
         <UnitName Value="Floria.Font"/>
       </Item>
       <Item>
-        <Filename Value="Floria.Canvas.Agg.pas"/>
+        <Filename Value="floria.canvas.agg.pas"/>
         <UnitName Value="Floria.Canvas.Agg"/>
       </Item>
       <Item>
-        <Filename Value="Floria.SVG.Rasterizer.pas"/>
+        <Filename Value="floria.svg.rasterizer.pas"/>
         <UnitName Value="Floria.SVG.Rasterizer"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.unicode.bidi.pas"/>
+        <UnitName Value="Floria.Unicode.BiDi"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.text.harfbuzz.pas"/>
+        <UnitName Value="Floria.Text.HarfBuzz"/>
       </Item>
     </Files>
     <RequiredPkgs>
