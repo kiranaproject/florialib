@@ -46,6 +46,7 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
 | [**WM Framework Specification**](wm.md) | Architecture and specifications for Floria.XCB.WM (reparenting, EWMH, virtual desktops, client management). |
 | [**Image Subsystem Guide**](image.md) | Pure Pascal image buffer, BMP/PNG/JPEG codecs, and AggPas-compatible 32-bit raster graphics. |
 | [**Canvas & 2D Graphics Guide**](canvas.md) | 2D vector & raster anti-aliased canvas (`Floria.Canvas.Agg`), fast blur (`Floria.Image.Blur`), and FreeType fonts (`Floria.Font`). |
+| [**Text Layout & Shaping Guide**](text.md) | Pure Pascal Unicode BiDi (UAX #9) and dynamic HarfBuzz OpenType text shaping (`Floria.Unicode.BiDi`, `Floria.Text.HarfBuzz`). |
 | [**Coding Standards & Development**](coding-style.md) | Object Pascal conventions, mandatory `()` routine rules, memory ownership, and Pasbuild build workflow. |
 
 ---
@@ -66,7 +67,7 @@ pasbuild compile
 
 ### Running the Test Suite
 
-`florialib` features an extensive test suite (220+ unit tests) powered by FPCUnit:
+`florialib` features an extensive test suite (346 unit tests) powered by FPCUnit:
 
 ```bash
 pasbuild test

@@ -92,7 +92,8 @@ Free Pascal does **not** support nested `{}` block comments. Any `{` or `}` insi
 
 | Element | Format | Prefix / Rule | Example |
 |---|---|---|---|
-| **Unit Names** | PascalCase | Dotted namespaces | `Floria.CSS.Values` |
+| **Unit Filenames** | Lowercase | Dot-separated lowercase `.pas` | `floria.css.values.pas`, `floria.font.pas` |
+| **Unit Declarations** | PascalCase | Declared inside file header | `unit Floria.CSS.Values;` |
 | **Classes / Records** | PascalCase | `T` prefix | `TCSSColor`, `TCSSStyleBlock` |
 | **Interfaces** | PascalCase | `I` prefix | `ICSSElement`, `ICSSTokenListener` |
 | **Private Fields** | PascalCase | `F` prefix | `FTagName`, `FParent` |

@@ -1,12 +1,12 @@
 # florialib
 
-A modern, high-performance Free Pascal library providing foundational subsystems for building GUI toolkits, desktop applications, and X11 window managers.
+A modern, high-performance Free Pascal library providing foundational subsystems for building GUI toolkits, desktop applications, 2D vector graphics, and X11 window managers.
 
 Developed by **Dio Affriza** &bull; Licensed under the **Mozilla Public License 2.0 (MPL 2.0)** &bull; Built with **Pasbuild**.
 
 [![FPC](https://img.shields.io/badge/Language-Free%20Pascal%203.2%2B-blue.svg)](https://www.freepascal.org/)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Tests](https://img.shields.io/badge/Tests-223%20passed%20%7C%200%20errors-success.svg)](src/test/pascal/)
+[![Tests](https://img.shields.io/badge/Tests-346%20passed%20%7C%200%20errors-success.svg)](src/test/pascal/)
 
 ---
 
@@ -17,21 +17,21 @@ Developed by **Dio Affriza** &bull; Licensed under the **Mozilla Public License 
 A complete, end-to-end CSS implementation written in Object Pascal following W3C specifications:
 
 ```
-Floria.CSS.Types       (Tokens, token types, position tracking, listener interface)
+floria.css.types       (Tokens, token types, position tracking, listener interface)
       ↓
-Floria.CSS.Tokenizer   (Streaming push tokenizer conforming to W3C CSS Syntax Level 3 §4)
+floria.css.tokenizer   (Streaming push tokenizer conforming to W3C CSS Syntax Level 3 §4)
       ↓
-Floria.CSS.AST         (AST nodes with automatic cascaded memory ownership)
+floria.css.ast         (AST nodes with automatic cascaded memory ownership)
       ↓
-Floria.CSS.Parser      (W3C CSS Syntax Level 3 §5 parser)
+floria.css.parser      (W3C CSS Syntax Level 3 §5 parser)
       ↓
-Floria.CSS.Values      (Typed values: TCSSColor, TCSSLength, TCSSBox, TCSSBorderSide, layout enums)
+floria.css.values      (Typed values: TCSSColor, TCSSLength, TCSSBox, TCSSBorderSide, layout enums)
       ↓
-Floria.CSS.Properties  (70+ canonical property IDs, metadata, style declarations, style blocks)
+floria.css.properties  (70+ canonical property IDs, metadata, style declarations, style blocks)
       ↓
-Floria.CSS.Selectors   (Compound/complex selectors, specificity (A,B,C), combinators)
+floria.css.selectors   (Compound/complex selectors, specificity (A,B,C), combinators)
       ↓
-Floria.CSS.Cascade     (ICSSElement abstraction, right-to-left matching, cascade resolver)
+floria.css.cascade     (ICSSElement abstraction, right-to-left matching, cascade resolver)
 ```
 
 - **Push Tokenizer**: Full W3C CSS Syntax Level 3 §4 compliance, supporting 25 token types, streaming chunks, unicode escape sequence decoding, and resilient error recovery.
@@ -62,86 +62,51 @@ Floria.CSS.Cascade     (ICSSElement abstraction, right-to-left matching, cascade
 
 A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib**:
 
-- **Core XCB (`Floria.XCB`)**: Asynchronous, thread-safe connections, window creation, graphics contexts, events, atoms, and errors.
-- **ICCCM 2.0 Protocol (`Floria.XCB.ICCCM`)**: Window manager protocols (`WM_PROTOCOLS`, `WM_DELETE_WINDOW`), window hints, and normal size hints.
-- **EWMH / NetWM (`Floria.XCB.EWMH`)**: Modern desktop integration (`_NET_SUPPORTED`, `_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW`, window types, window states, and struts).
-- **RandR Multi-Monitor (`Floria.XCB.RandR`)**: Dynamic screen resources, CRTCs, outputs, resolutions, and multi-display management.
-- **XRender 2D Compositing (`Floria.XCB.Render`)**: Hardware-accelerated alpha blending, picture formats, geometric primitives, and glyph sets.
-- **Shared Memory (`Floria.XCB.SHM`)**: Zero-copy XSHM framebuffers for blitting software-rendered pixel buffers directly to the X server.
-- **Non-Rectangular Windows (`Floria.XCB.Shape`)**: Window shaping masks for rounded corners, shaped titlebars, and custom window borders.
-- **XFixes (`Floria.XCB.XFixes`)**: Modern cursor visibility, pointer tracking, and server-side damage/region handling.
-- **Cursor & Keysyms (`Floria.XCB.Cursor`, `Floria.XCB.Keysyms`, `Floria.X11.KeySym`)**: Themed cursor loading and comprehensive hardware keycode-to-keysym translation.
+- **Core XCB (`floria.xcb.pas`)**: Asynchronous, thread-safe connections, window creation, graphics contexts, events, atoms, and errors.
+- **ICCCM 2.0 Protocol (`floria.xcb.icccm.pas`)**: Window manager protocols (`WM_PROTOCOLS`, `WM_DELETE_WINDOW`), window hints, and normal size hints.
+- **EWMH / NetWM (`floria.xcb.ewmh.pas`)**: Modern desktop integration (`_NET_SUPPORTED`, `_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW`, window types, window states, and struts).
+- **RandR Multi-Monitor (`floria.xcb.randr.pas`)**: Dynamic screen resources, CRTCs, outputs, resolutions, and multi-display management.
+- **XRender 2D Compositing (`floria.xcb.render.pas`)**: Hardware-accelerated alpha blending, picture formats, geometric primitives, and glyph sets.
+- **Shared Memory (`floria.xcb.shm.pas`)**: Zero-copy XSHM framebuffers for blitting software-rendered pixel buffers directly to the X server.
+- **Non-Rectangular Windows (`floria.xcb.shape.pas`)**: Window shaping masks for rounded corners, shaped titlebars, and custom window borders.
+- **XFixes (`floria.xcb.xfixes.pas`)**: Modern cursor visibility, pointer tracking, and server-side damage/region handling.
+- **Cursor & Keysyms (`floria.xcb.cursor.pas`, `floria.xcb.keysyms.pas`, `floria.x11.keysym.pas`)**: Themed cursor loading and comprehensive hardware keycode-to-keysym translation.
+- **WM Framework (`floria.xcb.wm.pas`)**: Reparenting frame geometry, virtual workspaces, titlebar drag interaction, and client window lifecycle.
 
 ---
 
-## Quick Example: CSS Styling & Resolution
+### 3. XML & SVG 1.1 Vector Graphics Subsystem (`Floria.XML.*`, `Floria.SVG.*`)
 
-```pascal
-uses
-  Floria.CSS.Values, Floria.CSS.Properties, Floria.CSS.Cascade;
-
-var
-  Resolver   : TCSSStyleResolver;
-  WindowElem : TCSSMockElement;
-  ButtonElem : TCSSMockElement;
-  ParentStyle: TCSSStyleBlock;
-  Style      : TCSSStyleBlock;
-begin
-  Resolver := TCSSStyleResolver.Create();
-  WindowElem := TCSSMockElement.Create('window', 'main-window');
-  ButtonElem := TCSSMockElement.Create('button', 'submit-btn');
-  try
-    ButtonElem.AddClass('btn');
-    ButtonElem.AddClass('btn-primary');
-    WindowElem.AppendChild(ButtonElem);
-
-    // Add stylesheets
-    Resolver.AddCSS('window { color: #333333; font-family: "Ubuntu", sans-serif; }');
-    Resolver.AddCSS('button { width: 120px; height: 36px; padding: 6px 12px; }');
-    Resolver.AddCSS('.btn-primary { background-color: #007acc; color: #ffffff !important; }');
-    Resolver.AddCSS('#submit-btn:hover { background-color: #005999; }');
-
-    // 1. Resolve parent window style
-    ParentStyle := Resolver.ResolveStyle(WindowElem);
-    try
-      // 2. Resolve button style (cascading inherited properties from parent)
-      Style := Resolver.ResolveStyle(ButtonElem, ParentStyle);
-      try
-        WriteLn('Button width: ', Style.GetDeclaration(cpiWidth).Value.Length.ToString());
-        WriteLn('Button color: ', Style.GetDeclaration(cpiColor).Value.Color.ToHex());
-        WriteLn('Button bg:    ', Style.GetDeclaration(cpiBackgroundColor).Value.Color.ToHex());
-        // Shorthand padding is automatically expanded to 4 sides
-        WriteLn('Padding-left: ', Style.GetDeclaration(cpiPaddingLeft).Value.Length.ToString());
-      finally
-        Style.Free();
-      end;
-    finally
-      ParentStyle.Free();
-    end;
-  finally
-    WindowElem.Free();
-    Resolver.Free();
-  end;
-end;
-```
+- **Pure Pascal XML 1.0 Parser**: Streaming tokenizer, DOM tree, entity encoding/decoding, and `ICSSElement` bridge for CSS styling.
+- **SVG Scene Graph**: Full SVG DOM with `<path>`, `<rect>`, `<circle>`, `<ellipse>`, `<line>`, `<polygon>`, `<g>`, `<defs>`, and `<use>`.
+- **Affine Transforms & Path Math**: 2D transform matrices, SVG compact path tokenizer, Bézier curves, arc decomposition, and linear/radial gradients.
+- **Vector Rasterizer (`floria.svg.rasterizer.pas`)**: Converts SVG DOM trees directly onto anti-aliased 32-bit pixel surfaces using AggPas.
 
 ---
 
-## Directory Structure
+### 4. Pure Pascal Image Codecs (`Floria.Image.*`)
 
-```
-florialib/
-├── docs/                    # Detailed documentation and architecture guides
-│   ├── index.md             # Documentation overview
-│   ├── css.md               # CSS Subsystem Guide (Tokenizer, AST, Values, Cascade)
-│   ├── xcb.md               # XCB & Window Manager Subsystem Guide
-│   └── coding-style.md      # Object Pascal coding standards & conventions
-├── src/
-│   ├── main/pascal/         # Library units (Floria.CSS.*, Floria.XCB.*, Floria.X11.*)
-│   └── test/pascal/         # FPCUnit test suites and TestRunner.pas
-├── project.xml              # Pasbuild build descriptor
-└── README.md                # This file
-```
+- **Zero External C Image Libraries**: Built-in, high-speed pure Pascal readers and writers.
+- **Supported Formats**:
+  - **PNG** (`floria.image.png.pas`): Full 8-bit truecolor RGBA with deflate/zlib decompression and filter un-filtering.
+  - **BMP** (`floria.image.bmp.pas`): 24-bit and 32-bit BMP round-trip decoding and encoding.
+  - **JPEG** (`floria.image.jpeg.pas`): Baseline JPEG parsing and marker extraction.
+- **Core Image Surface (`floria.image.core.pas`)**: 32-bit BGRA pixel buffers (`TFloriaImage`), bilinear scaling, and format auto-detection.
+
+---
+
+### 5. 2D Vector Canvas & Graphics Engine (`Floria.Canvas.Agg`, `Floria.Image.Blur`, `Floria.Font`)
+
+- **Anti-Grain Geometry (AggPas) Canvas**: High-fidelity sub-pixel anti-aliased lines, circles, rounded rectangles, polygons, outlines, and clipping rectangles.
+- **High-Performance Blur (`floria.image.blur.pas`)**: Multi-pass box blur with downsampling, bilinear upsampling, and rounded-corner boundary clipping.
+- **FreeType Font Engine (`floria.font.pas`)**: High-quality font loading, persistent glyph caching, stem darkening / gamma correction, and fontconfig fallback chaining.
+
+---
+
+### 6. Internationalized Text Layout & Shaping (`Floria.Unicode.BiDi`, `Floria.Text.HarfBuzz`)
+
+- **Unicode Bidirectional Algorithm (UAX #9)**: Complete pure Pascal implementation handling mixed LTR and RTL scripts (Arabic, Hebrew, Persian, Latin), weak/neutral character resolution, bracket pairing, and glyph mirroring.
+- **Dynamic HarfBuzz OpenType Shaper**: Dynamically loads `libharfbuzz.so.0` via `dynlibs` (zero hard binary dependency; automatic fallback if unavailable). Accurately shapes ligatures (`liga`, `calt`), cursive Arabic connections, and complex mark placement.
 
 ---
 
@@ -151,7 +116,7 @@ florialib/
 
 - **Free Pascal**: FPC 3.2.0+ (recommended: FPC 3.2.3+).
 - **Pasbuild**: Free Pascal build tool.
-- **System Libraries**: `libxcb`, `libxcb-render`, `libxcb-randr`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`.
+- **System Libraries**: `libxcb`, `libxcb-render`, `libxcb-randr`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`, `libfreetype`, `libharfbuzz` (optional at runtime).
 
 ### Build Commands
 
@@ -159,11 +124,14 @@ florialib/
 # Compile library
 pasbuild compile
 
-# Run complete test suite (223 tests)
+# Run complete test suite (346 tests)
 pasbuild test
 
 # Force clean build and run tests
 rm -rf target && pasbuild test
+
+# Install to local package repository (~/.pasbuild/repository/)
+pasbuild install
 ```
 
 ### Lazarus Package
@@ -176,8 +144,15 @@ Open [`src/main/pascal/florialib.lpk`](src/main/pascal/florialib.lpk) in Lazarus
 
 Comprehensive guides and API references are available in the [`docs/`](docs/) directory:
 
+- [**Documentation Overview**](docs/index.md)
 - [**CSS Subsystem Documentation**](docs/css.md)
+- [**XML Subsystem Guide**](docs/xml.md)
+- [**SVG Subsystem Guide**](docs/svg.md)
+- [**Image Subsystem Guide**](docs/image.md)
+- [**Canvas & 2D Graphics Guide**](docs/canvas.md)
+- [**Text Layout & Shaping Guide**](docs/text.md)
 - [**XCB & Window Manager Guide**](docs/xcb.md)
+- [**WM Framework Specification**](docs/wm.md)
 - [**Coding Standards & Development Guide**](docs/coding-style.md)
 
 ---
