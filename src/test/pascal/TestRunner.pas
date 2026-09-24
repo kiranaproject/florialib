@@ -18,7 +18,9 @@ uses
   Floria.HTML.Test,
   Floria.Image.Test,
   Floria.Image.Blur.Test,
-  Floria.Canvas.Agg.Test;
+  Floria.Canvas.Agg.Test,
+  Floria.Unicode.BiDi.Test,
+  Floria.Text.HarfBuzz.Test;
 
 var
   Application: TTestRunner;

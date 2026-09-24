@@ -14,11 +14,11 @@ uses
   Floria.XCB.EWMH, Floria.XCB.ICCCM, Floria.XCB.Keysyms, Floria.XCB, 
   Floria.XCB.RandR, Floria.XCB.Render, Floria.XCB.Shape, Floria.XCB.SHM, 
   Floria.XCB.XFixes, Floria.XCB.WM, Floria.XML.Types, Floria.XML.Tokenizer, 
-  Floria.XML.DOM, Floria.XML.Parser, Floria.SVG.Types, Floria.SVG.Path,
-  Floria.SVG.DOM, Floria.SVG.Parser,
-  Floria.HTML.Types, Floria.HTML.DOM, Floria.HTML.Tokenizer, Floria.HTML.Parser,
-  Floria.Image.Core, Floria.Image.BMP, Floria.Image.PNG, Floria.Image.JPEG,
-  Floria.Image.Blur, Floria.Font, Floria.Canvas.Agg, Floria.SVG.Rasterizer;
+  Floria.XML.DOM, Floria.XML.Parser, Floria.SVG.Types, Floria.SVG.Path, 
+  Floria.SVG.DOM, Floria.SVG.Parser, Floria.HTML.Types, Floria.HTML.Tokenizer, 
+  Floria.HTML.DOM, Floria.HTML.Parser, Floria.Image.Core, Floria.Image.BMP, 
+  Floria.Image.PNG, Floria.Image.JPEG, Floria.Image.Blur, Floria.Font, 
+  Floria.Canvas.Agg, Floria.SVG.Rasterizer, Floria.Unicode.BiDi, Floria.Text.HarfBuzz;
 
 implementation
 
