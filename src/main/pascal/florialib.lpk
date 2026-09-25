@@ -180,7 +180,7 @@
     </Files>
     <RequiredPkgs>
       <Item>
-        <PackageName Value="fpgui_toolkit"/>
+        <PackageName Value="aggpas"/>
       </Item>
       <Item>
         <PackageName Value="FCL"/>

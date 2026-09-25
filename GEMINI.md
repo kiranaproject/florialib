@@ -5,7 +5,12 @@
 Whenever any source file in `src/main/pascal/` is added, modified, or refactored:
 
 1. **Run tests**: `pasbuild test` (all tests must pass with `E:0 F:0`).
-2. **Install to local repository**: **Always** run `pasbuild install` immediately after successful testing. This step publishes the compiled units (`.ppu`, `.o`) to the local package repository (`~/.pasbuild/repository/florialib/`), enabling downstream consumer projects (such as `floria-toolkit`) to resolve and link against the updated `florialib`.
+2. **Install to local repository**: **Always** run `pasbuild install` immediately after successful testing. This step publishes the compiled units (`.ppu`, `.o`) to the local package repository (`~/.pasbuild/repository/florialib/`), enabling downstream consumer projects (such as `floria-toolkit` and `wmsama`) to resolve and link against the updated `florialib`.
+
+## Dependencies
+
+- **`aggpas:2.4.0-SNAPSHOT`**: Independent 2D vector graphics rendering engine (decoupled from fpGUI).
+- **`fpgui-framework` is not used**. Do not add `fpgui-framework` as a dependency.
 
 ## Pasbuild Configuration File
 
