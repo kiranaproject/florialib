@@ -159,7 +159,6 @@ const
   EGL_PLATFORM_X11_KHR        = $31D5;
   EGL_PLATFORM_X11_SCREEN_KHR = $31D6;
   EGL_PLATFORM_GBM_KHR        = $31D7;
-  EGL_PLATFORM_WAYLAND_KHR    = $31D8;
 
   // Sync objects
   EGL_SYNC_FENCE              = $30F9;

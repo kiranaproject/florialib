@@ -221,7 +221,7 @@ gantt
 
 #### 3.3 Multi-Platform Backend Abstraction
 - Abstract GPU presentation across platforms:
-  - Linux: Wayland/X11 via EGL + OpenGL ES 3.0 / Vulkan.
+  - Linux: X11/XCB via EGL + OpenGL ES 3.0 / Vulkan.
   - Windows: Direct3D 11/12 via ANGLE or native DXGI.
   - macOS: Metal / MoltenVK.
 
