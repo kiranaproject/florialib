@@ -52,43 +52,66 @@ flowchart TD
 | **Scene Graph & Caching** | Immediate mode rasterization into window buffer with dirty rectangles. | Retained command recording (`SkPicture`), spatial R-Tree indexing, thread-safe replay, layer tile caching. | **High** | Phase 2 |
 | **Hardware Backends** | X11/XCB with EGL/OpenGL ES 2.0 texture streaming. | Vulkan, Metal, Direct3D 12, OpenGL ES, WebGPU. | **Medium** | Phase 3 |
 
-### 2.2 Modern Paradigm Shift: Google Skia vs. Flutter Impeller
+### 2.2 The Modern Rendering Landscape: Google Skia vs. Flutter Impeller vs. Mozilla WebRender
 
-While **Skia** serves as our functional benchmark for mathematical completeness (W3C blend modes, color spaces, path ops, typography), **Impeller** serves as our modern architectural blueprint for GPU vector execution without frame drops.
+To build a world-class 2D graphics and desktop UI stack in pure Object Pascal and GLSL/Vulkan, we synthesize the key architectural breakthroughs of three major modern graphics engines:
 
-#### Why Flutter Replaced Skia with Impeller
+1. **Google Skia**: Our functional benchmark for **mathematical and colorimetric completeness** (29 blend modes, arbitrary color spaces, Clipper2 path ops, HarfBuzz typography, and high-precision software scanline ground truth).
+2. **Flutter Impeller**: Our modern blueprint for **zero-jank GPU vector execution** (100% AOT precompiled shaders with static PSOs, eliminating runtime shader compilation pauses, and direct single-pass triangle strip tessellation).
+3. **Mozilla WebRender**: Our blueprint for **high-throughput retained desktop UI compositing** (treating UI like 3D game geometry, instanced mega-batching, analytical clip chains in fragment shaders, picture tile caching, and delegating complex arbitrary vector paths to a fallback blob rasterizer).
+
+#### The Triangle of Modern 2D Graphics Engines
 
 ```mermaid
 flowchart TD
-    subgraph SkiaGanesh ["Google Skia (Ganesh)"]
-        S1["Draw Calls (Immediate Stream)"] --> S2["Dynamic SkSL Generation"]
-        S2 --> S3["Driver JIT Shader Compilation\n(Causes 50–200ms Frame Drops)"]
-        S3 --> S4["Multi-Pass Stencil-and-Cover\n& CPU Raster Fallbacks"]
-        S4 --> S5["Legacy OpenGL State Machine Heritage"]
+    subgraph SkiaEngine ["Google Skia (Ground Truth)"]
+        SK1["Low-Level 2D Vector Primitives"]
+        SK2["Arbitrary Bezier Curves & PathOps"]
+        SK3["Full-Spectrum Color & Typography"]
     end
 
-    subgraph ImpellerArch ["Flutter Impeller (Floria Target)"]
-        I1["Draw Calls (Retained EntityPass Tree)"] --> I2["AOT Precompiled Shaders\n(Offline SPIR-V / MSL / GLSL)"]
-        I2 --> I3["Static Pipeline State Objects (PSO)\n(Zero Runtime JIT Compilation)"]
-        I3 --> I4["Direct CPU/Compute Tessellation\n(Single-Pass Triangle Meshes + Analytic AA)"]
-        I4 --> I5["Explicit Modern APIs (Vulkan / Metal / EGL)"]
+    subgraph ImpellerEngine ["Flutter Impeller (Zero-Jank Vector Pipeline)"]
+        IM1["AOT Precompiled Shaders (No Runtime JIT)"]
+        IM2["Single-Pass Direct Triangle Tessellation"]
+        IM3["Modern Explicit APIs (Vulkan / Metal)"]
     end
+
+    subgraph WebRenderEngine ["Mozilla WebRender (Game-Engine UI Compositor)"]
+        WR1["Retained Display List (Semantic UI Items)"]
+        WR2["Instanced Quad Mega-Batching"]
+        WR3["Analytical Clip Chains in Shaders"]
+        WR4["Retained Picture Tile Caching"]
+    end
+
+    WebRenderEngine -.->|"Delegates complex SVG paths to"| SkiaEngine
+    ImpellerEngine -.->|"Modernizes GPU vector backend of"| SkiaEngine
 ```
 
-#### Detailed Architecture Comparison
+#### Multi-Engine Architectural Matrix
 
-| Architectural Dimension | Google Skia (Ganesh) | Flutter Impeller | Florialib Strategy (Phases 2 & 3) |
-| :--- | :--- | :--- | :--- |
-| **Origin & Purpose** | 20+ year general-purpose engine (browsers, OS compositors, PDF, print). | Modern UI engine written from scratch specifically to guarantee smooth 60/120 FPS. | UI & desktop compositing engine tailored for `shellsama` and `ft`. |
-| **Shader Compilation** | **Runtime JIT via SkSL**: Dynamically compiles shaders on main thread on first encounter, causing 50–200ms frame drops ("shader jank"). | **Ahead-Of-Time (AOT)**: All shaders precompiled offline to SPIR-V / MSL; static Pipeline State Objects (PSOs). Zero runtime shader compilation. | **AOT Precompiled Shaders**: Fixed GLSL / SPIR-V shaders compiled ahead-of-time; zero runtime compilation jank. |
-| **Path Rendering** | **Stencil-and-Cover & CPU Masks**: Multi-pass stencil winding or CPU mask rasterization fallback with texture atlas blitting. | **Direct Tessellation & Analytic AA**: Fast CPU/compute tessellation into triangle strips; single-pass draw directly into color target. | **Direct Tessellation**: Decompose paths into triangle strips with analytic coverage in fragment shaders. |
-| **GPU API Heritage** | OpenGL 2/3 state machine heritage; Vulkan/Metal retrofitted as wrappers over legacy context model. | First-class **Metal & Vulkan** with explicit Command Buffers and Render Passes; optimized for TBDR GPUs. | Modern explicit pipeline built over EGL / Vulkan with minimal state switches. |
-| **Pass Compositing** | Immediate mode stream; `saveLayer()` dynamically allocates offscreen FBOs on the fly. | **Retained `EntityPass` Tree**: Batches, coalesces, and reorders draws; minimizes expensive framebuffer swaps. | **Retained `TFloriaRenderPass` Tree** (Phase 2): Records entire frame before flushing to GPU. |
+| Architectural Dimension | Google Skia (Ganesh) | Flutter Impeller | Mozilla WebRender | Florialib Target Architecture |
+| :--- | :--- | :--- | :--- | :--- |
+| **Primary Domain** | Universal 2D (Browsers, OS compositors, PDF, print). | Reactive mobile/desktop UI (Flutter). | Web browser viewport rendering (Firefox Quantum/Servo). | Desktop desktop environment (`shellsama`) & widget toolkit (`ft`). |
+| **Shader Lifecycle** | **Runtime JIT via SkSL**: Generates shaders on demand; causes 50–200ms frame drops on first draw. | **100% Ahead-Of-Time (AOT)**: All shaders compiled offline; static PSOs. Zero runtime shader compilation. | **AOT Mega-Shaders**: Fixed, bounded set of uber-shaders with uniform buffer parameters. | **100% AOT Precompiled Shaders**: Zero runtime JIT compilation jank on desktop GPUs. |
+| **Path Rendering** | **Stencil-and-Cover**: Multi-pass stencil buffer or CPU mask atlas blits. | **Direct Tessellation**: Decomposes paths to triangle strips with analytic AA. | **Fallback Blob Rasterizer**: Skia rasterizes complex SVG paths to texture cache; WebRender composites. | **Impeller + WebRender Hybrid**: Direct tessellation for common paths; AggPas CPU blob cache for arbitrary complex SVGs. |
+| **UI Primitive Handling** | Treats all drawing as low-level procedural canvas strokes/fills. | Retained `EntityPass` tree with vertex generation. | **The 95/5 Rule**: 95% of UI (rects, rounded corners, borders, shadows, text) are instanced GPU quads. | **95/5 Rule**: Instanced quads + SDF shaders for UI primitives; AggPas for 5% complex vector art. |
+| **Clipping Strategy** | Allocates offscreen FBOs or GPU stencil masks. | Stencil or clip geometry bounding hulls. | **Analytical Clip Chains**: Passes stack of rounded clip boxes to shader; shader discards or computes AA coverage. | **Analytical Clip Chains**: Zero offscreen FBO allocation for nested rounded rect clipping. |
+| **Pass Compositing** | Immediate mode stream; dynamic `saveLayer()` FBO switches. | Retained pass tree with pass reordering. | **Retained Picture Caching**: Breaks viewport into cached GPU tiles; scrolling only updates transform matrix. | **Retained `TFloriaTileCache`**: Zero-CPU-rasterization scrolling and window dragging in `shellsama`. |
 
-#### Architectural Tenets Borrowed from Impeller for Florialib:
-1. **Never Compile Shaders at Runtime**: All vector strokes, rounded corners, gradient ramps, and blur passes must utilize a bounded set of precompiled fragment shaders with uniform buffers.
-2. **Prefer Direct Tessellation over Multi-Pass Stencil**: Stencil buffers require multiple render passes and memory barriers. Direct triangulation allows drawing filled/stroked paths directly into the color buffer in a single pass.
-3. **Coalesce Offscreen Layers into Unified Render Passes**: Minimize framebuffer swaps to keep GPU pipelines filled and ensure rock-solid 60/120 FPS desktop rendering.
+#### 5 Architectural Tenets Adopted for Florialib:
+
+1. **The "95 / 5 Rule" of Desktop UI (from WebRender)**:
+   - 95% of desktop UI elements (window frames, buttons, taskbar panels, borders, text labels, drop shadows) are **regular analytical geometric shapes**, not arbitrary beziers.
+   - We do not run CPU scanlines for simple rounded boxes or shadows: an instanced quad evaluated in a fragment shader with a Signed Distance Field (SDF) renders anti-aliased rounded boxes and blurs at 1,000+ FPS with zero CPU overhead.
+2. **Analytical Clip Chains in Shaders (from WebRender)**:
+   - Nested rounded clipping no longer requires allocating temporary offscreen textures or stencil buffers. Clip rectangles and radiuses are packed into uniform buffers, and the fragment shader analytically evaluates boundary distance (`distance_to_clip < 0.0 -> discard`).
+3. **Zero-Jank AOT Shaders (from Impeller)**:
+   - All shaders for color blending, gradient ramps, SDF rounded corners, box shadows, and frosted-glass blurs are precompiled ahead-of-time (offline GLSL/SPIR-V) with static Pipeline State Objects (PSOs).
+4. **Direct Single-Pass Tessellation (from Impeller)**:
+   - Vector paths and stroked outlines are triangulated into vertex strips and drawn directly into the color target in a single pass with analytic coverage, avoiding multi-pass stencil barriers.
+5. **Retained Picture Tile Caching & Blob Rasterizer (from WebRender + AggPas)**:
+   - Scrollable containers and desktop panels are cached as GPU texture tiles. Scrolling in `shellsama` simply updates quad transform coordinates with zero redraw overhead.
+   - Pure Object Pascal AggPas acts as our reliable background "blob rasterizer" for high-precision SVG assets.
 
 ---
 
@@ -162,38 +185,38 @@ gantt
 ---
 
 ### Phase 2: Retained Display Lists & Scene Graph Caching (Months 7–9)
-*Goal: Prevent redundant CPU vector re-rasterization by introducing recording, culling, and layer caching.*
+*Goal: Prevent redundant CPU vector re-rasterization by introducing WebRender-inspired semantic display lists, analytical clip chains, and picture tile caching.*
 
-#### 2.1 Recorded Command Stream (`TFloriaPicture` / `TFloriaDisplayList`)
-- Implement a serialization model for canvas calls:
-  - `TFloriaPictureRecorder` records draw commands (`DrawRect`, `DrawPath`, `DrawText`, `PushClip`, `DrawImage`) into a compact byte stream.
-  - `TFloriaPicture` encapsulates the recorded commands with an exact conservative bounding box.
-  - Can be replayed onto any canvas (`TFloriaCanvasAgg` or a GPU canvas) without re-evaluating widget layout.
+#### 2.1 Semantic Retained Display List (`TFloriaDisplayList` / `TFloriaPicture`)
+- Implement a semantic recording model for UI canvas calls:
+  - `TFloriaPictureRecorder` records structured UI primitives (`DrawRoundedBox`, `DrawBorder`, `DrawBoxShadow`, `DrawTextRun`, `DrawImageBlob`, `PushClipRect`, `PushClipRoundedRect`) rather than flat pixel-blitting commands.
+  - `TFloriaDisplayList` encapsulates the recorded commands with an exact conservative bounding box.
+  - Can be replayed onto software canvas (`TFloriaCanvasAgg`) or GPU instanced renderers without re-evaluating widget layout.
 
-#### 2.2 Spatial Indexing & Viewport Culling
-- Implement an **R-Tree** spatial acceleration structure for display lists.
-- During paint traversal, query the dirty damage region against the R-Tree to instantly skip drawing off-screen or undamaged visual elements.
+#### 2.2 Analytical Clip Chains & Spatial Viewport Culling
+- **Analytical Clip Chains**: Pack nested clipping regions (rectangles, rounded boxes) into a uniform buffer and pass them as a clip chain to fragment shaders, eliminating offscreen FBO allocation or stencil buffer roundtrips during clipping.
+- **Spatial R-Tree Indexing**: Index display list items in an **R-Tree** spatial acceleration structure. During paint traversal, query the dirty damage region against the R-Tree to instantly skip drawing off-screen or undamaged visual elements.
 
-#### 2.3 Retained Layer Compositing & Frosted Glass Caching
-- Introduce `TFloriaLayer`:
-  - Cache rendered subtrees (e.g. complex blurred panels, static background decor) in dedicated backing stores.
-  - Re-render the layer only when its underlying visual state is marked dirty, reducing frame paint overhead from milliseconds to a simple memory blit or texture quad.
+#### 2.3 Retained Picture Tile Caching (`TFloriaTileCache`)
+- Implement WebRender-style picture caching:
+  - Break scrollable containers, desktop panels, and static background decor into retained GPU tiles.
+  - When scrolling or dragging windows in `shellsama`, update only the quad transform matrix without re-rasterizing any contents, achieving zero-CPU-overhead 120 FPS scrolling.
 
 ---
 
 ### Phase 3: Hardware-Accelerated GPU Vector Core (Months 10–18)
-*Goal: True hardware GPU vector acceleration for 60/120 FPS high-refresh-rate desktop applications.*
+*Goal: True hardware GPU vector acceleration for 60/120 FPS high-refresh-rate desktop applications using an Impeller + WebRender hybrid design.*
 
-#### 3.1 The Hybrid GPU Approach (Immediate High-Value Step)
-- Maintain AggPas for vector path and glyph generation on the CPU.
-- Upload glyphs and static vector masks to a shared GPU texture atlas (`TFloriaGPUAtlas`).
-- Move all presentation, layout positioning, tinting, gradients, drop shadows, and backdrop frosted-glass blurs 100% into **OpenGL ES / EGL fragment shaders**, removing CPU memory blitting bottlenecks entirely.
+#### 3.1 The Hybrid Fast-Path & Blob Rasterizer Approach (Immediate High-Value Step)
+- **Fast Path (95% of UI)**: Evaluate rounded boxes, borders, gradients, drop shadows, and backdrop frosted-glass blurs 100% in **AOT fragment shaders** on instanced quads.
+- **Fallback Blob Rasterizer (5% of UI)**: Maintain pure Pascal `Floria.Canvas.Agg` on background threads for arbitrary complex SVG paths and vector artwork, uploading rasterized masks to a shared GPU texture atlas (`TFloriaGPUAtlas`).
+- Zero memory blitting bottlenecks on the main presentation thread.
 
 #### 3.2 Native GPU Vector Rasterizer (`Floria.Canvas.GPU`) — Impeller-Style Architecture
 - Implement direct GPU path evaluation with guaranteed 60/120 FPS frame pacing:
   - **AOT Precompiled Shaders**: Precompile all fragment/vertex shaders ahead of time (offline SPIR-V/GLSL) into static Pipeline State Objects (PSOs), completely eliminating runtime shader compilation jank.
   - **Single-Pass Direct Tessellation**: Decompose curved paths into triangle strips with analytic coverage anti-aliasing directly in fragment shaders, avoiding multi-pass stencil buffers and CPU mask rasterization bottlenecks.
-  - **Instanced Primitive Batching**: Batch rounded rectangles, outlines, gradients, and glyph quads into instanced vertex buffers.
+  - **Instanced Primitive Mega-Batching**: WebRender-style batching of rounded rectangles, outlines, gradients, and glyph quads into instanced vertex buffers (thousands of elements rendered in 2–5 draw calls).
   - **Compute Shader Tile Rasterizer**: Modern compute tile binning for arbitrary complex filled paths (inspired by Impeller & Vello).
 
 #### 3.3 Multi-Platform Backend Abstraction
