@@ -31,4 +31,11 @@ Whenever any source file in `src/main/pascal/` is added, modified, or refactored
 - **X11 Input-Only Window Stacking**:
   - In `floria.xcb.wm.pas`, outer resize margins over background windows are managed via an `InputOnly` window (`ResizeWindow`) parented to root and stacked immediately below `FrameWindow` (`XCB_STACK_MODE_BELOW`).
 
+## Linux Windowing & Display Server Policy
+
+- **Strictly X11/XCB Only (No Wayland)**:
+  - All Linux windowing, window management protocols (`floria.xcb.wm`), compositor integration (`floria.xcb.wm.compositor`), and EGL presentation target native **X11/XCB** (`libxcb`).
+  - **Never reference, propose, design for, or insert Wayland** into code, configuration, architectural documentation, roadmaps, or README files.
+  - All display and imaging engineering effort is dedicated to vector graphics fidelity (`AggPas`, `Floria.Canvas.*`), color pipelines, typography, and EGL/GL presentation on X11.
+
 
