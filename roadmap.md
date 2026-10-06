@@ -52,6 +52,44 @@ flowchart TD
 | **Scene Graph & Caching** | Immediate mode rasterization into window buffer with dirty rectangles. | Retained command recording (`SkPicture`), spatial R-Tree indexing, thread-safe replay, layer tile caching. | **High** | Phase 2 |
 | **Hardware Backends** | X11/XCB with EGL/OpenGL ES 2.0 texture streaming. | Vulkan, Metal, Direct3D 12, OpenGL ES, WebGPU. | **Medium** | Phase 3 |
 
+### 2.2 Modern Paradigm Shift: Google Skia vs. Flutter Impeller
+
+While **Skia** serves as our functional benchmark for mathematical completeness (W3C blend modes, color spaces, path ops, typography), **Impeller** serves as our modern architectural blueprint for GPU vector execution without frame drops.
+
+#### Why Flutter Replaced Skia with Impeller
+
+```mermaid
+flowchart TD
+    subgraph SkiaGanesh ["Google Skia (Ganesh)"]
+        S1["Draw Calls (Immediate Stream)"] --> S2["Dynamic SkSL Generation"]
+        S2 --> S3["Driver JIT Shader Compilation\n(Causes 50–200ms Frame Drops)"]
+        S3 --> S4["Multi-Pass Stencil-and-Cover\n& CPU Raster Fallbacks"]
+        S4 --> S5["Legacy OpenGL State Machine Heritage"]
+    end
+
+    subgraph ImpellerArch ["Flutter Impeller (Floria Target)"]
+        I1["Draw Calls (Retained EntityPass Tree)"] --> I2["AOT Precompiled Shaders\n(Offline SPIR-V / MSL / GLSL)"]
+        I2 --> I3["Static Pipeline State Objects (PSO)\n(Zero Runtime JIT Compilation)"]
+        I3 --> I4["Direct CPU/Compute Tessellation\n(Single-Pass Triangle Meshes + Analytic AA)"]
+        I4 --> I5["Explicit Modern APIs (Vulkan / Metal / EGL)"]
+    end
+```
+
+#### Detailed Architecture Comparison
+
+| Architectural Dimension | Google Skia (Ganesh) | Flutter Impeller | Florialib Strategy (Phases 2 & 3) |
+| :--- | :--- | :--- | :--- |
+| **Origin & Purpose** | 20+ year general-purpose engine (browsers, OS compositors, PDF, print). | Modern UI engine written from scratch specifically to guarantee smooth 60/120 FPS. | UI & desktop compositing engine tailored for `shellsama` and `ft`. |
+| **Shader Compilation** | **Runtime JIT via SkSL**: Dynamically compiles shaders on main thread on first encounter, causing 50–200ms frame drops ("shader jank"). | **Ahead-Of-Time (AOT)**: All shaders precompiled offline to SPIR-V / MSL; static Pipeline State Objects (PSOs). Zero runtime shader compilation. | **AOT Precompiled Shaders**: Fixed GLSL / SPIR-V shaders compiled ahead-of-time; zero runtime compilation jank. |
+| **Path Rendering** | **Stencil-and-Cover & CPU Masks**: Multi-pass stencil winding or CPU mask rasterization fallback with texture atlas blitting. | **Direct Tessellation & Analytic AA**: Fast CPU/compute tessellation into triangle strips; single-pass draw directly into color target. | **Direct Tessellation**: Decompose paths into triangle strips with analytic coverage in fragment shaders. |
+| **GPU API Heritage** | OpenGL 2/3 state machine heritage; Vulkan/Metal retrofitted as wrappers over legacy context model. | First-class **Metal & Vulkan** with explicit Command Buffers and Render Passes; optimized for TBDR GPUs. | Modern explicit pipeline built over EGL / Vulkan with minimal state switches. |
+| **Pass Compositing** | Immediate mode stream; `saveLayer()` dynamically allocates offscreen FBOs on the fly. | **Retained `EntityPass` Tree**: Batches, coalesces, and reorders draws; minimizes expensive framebuffer swaps. | **Retained `TFloriaRenderPass` Tree** (Phase 2): Records entire frame before flushing to GPU. |
+
+#### Architectural Tenets Borrowed from Impeller for Florialib:
+1. **Never Compile Shaders at Runtime**: All vector strokes, rounded corners, gradient ramps, and blur passes must utilize a bounded set of precompiled fragment shaders with uniform buffers.
+2. **Prefer Direct Tessellation over Multi-Pass Stencil**: Stencil buffers require multiple render passes and memory barriers. Direct triangulation allows drawing filled/stroked paths directly into the color buffer in a single pass.
+3. **Coalesce Offscreen Layers into Unified Render Passes**: Minimize framebuffer swaps to keep GPU pipelines filled and ensure rock-solid 60/120 FPS desktop rendering.
+
 ---
 
 ## 3. Phased Implementation Roadmap
@@ -82,11 +120,13 @@ gantt
 ### Phase 1: High-End 2D CPU Parity (Months 1–6)
 *Goal: Elevate the mathematical, colorimetric, and layout capabilities of `florialib` so that its CPU rasterizer matches Skia's feature set.*
 
-#### 1.1 Extended Blend Modes (`Floria.Canvas.Blend`)
-- Implement the full set of 29 standard blend modes:
-  - **Porter-Duff**: `Clear`, `Src`, `Dst`, `SrcOver`, `DstOver`, `SrcIn`, `DstIn`, `SrcOut`, `DstOut`, `SrcATop`, `DstATop`, `Xor`.
-  - **Color / Photoshop**: `Multiply`, `Screen`, `Overlay`, `Darken`, `Lighten`, `ColorDodge`, `ColorBurn`, `HardLight`, `SoftLight`, `Difference`, `Exclusion`, `Hue`, `Saturation`, `Color`, `Luminosity`.
-- Vectorize pixel blending loops with SIMD / SSE2 / AVX2 intrinsics.
+#### 1.1 Extended Blend Modes (`Floria.Canvas.Blend`) — [COMPLETED]
+- Implemented the full set of 29 standard blend modes:
+  - **Porter-Duff & Arithmetic (14)**: `Clear`, `Src`, `Dst`, `SrcOver`, `DstOver`, `SrcIn`, `DstIn`, `SrcOut`, `DstOut`, `SrcATop`, `DstATop`, `Xor`, `Plus`, `Modulate`.
+  - **Separable Color (11)**: `Multiply`, `Screen`, `Overlay`, `Darken`, `Lighten`, `ColorDodge`, `ColorBurn`, `HardLight`, `SoftLight`, `Difference`, `Exclusion`.
+  - **Non-Separable HSL (4)**: `Hue`, `Saturation`, `Color`, `Luminosity` (W3C standard color transforms).
+- Integrated directly with `Floria.Canvas.Agg` via `FloriaAggBlendAdaptor` (`pixfmt_custom_blend_rgba`) and updated `DrawImage` / `DrawImagePart`.
+- Verified with 39 dedicated unit tests and full canvas integration tests (404/404 passing in `florialib`, 48/48 in `ft`).
 
 #### 1.2 Color Management & Linear Float Pipeline (`Floria.ColorSpace`)
 - Introduce `TFloriaColorSpace` with support for:
@@ -149,11 +189,12 @@ gantt
 - Upload glyphs and static vector masks to a shared GPU texture atlas (`TFloriaGPUAtlas`).
 - Move all presentation, layout positioning, tinting, gradients, drop shadows, and backdrop frosted-glass blurs 100% into **OpenGL ES / EGL fragment shaders**, removing CPU memory blitting bottlenecks entirely.
 
-#### 3.2 Native GPU Vector Rasterizer (`Floria.Canvas.GPU`)
-- Implement direct GPU path evaluation:
-  - **Tessellation Pipeline**: Decompose curved paths on the CPU/compute shader into triangle strips and fans with analytic coverage anti-aliasing.
-  - **Stencil-and-Cover**: Standard hardware path rendering using the GPU stencil buffer (draw path into stencil, then cover bounding box with fragment color/gradient shader).
-  - **Compute Shader Tile Rasterizer**: Modern tile-based vector binning inspired by modern engines (e.g. Vello, Skia Graphite).
+#### 3.2 Native GPU Vector Rasterizer (`Floria.Canvas.GPU`) — Impeller-Style Architecture
+- Implement direct GPU path evaluation with guaranteed 60/120 FPS frame pacing:
+  - **AOT Precompiled Shaders**: Precompile all fragment/vertex shaders ahead of time (offline SPIR-V/GLSL) into static Pipeline State Objects (PSOs), completely eliminating runtime shader compilation jank.
+  - **Single-Pass Direct Tessellation**: Decompose curved paths into triangle strips with analytic coverage anti-aliasing directly in fragment shaders, avoiding multi-pass stencil buffers and CPU mask rasterization bottlenecks.
+  - **Instanced Primitive Batching**: Batch rounded rectangles, outlines, gradients, and glyph quads into instanced vertex buffers.
+  - **Compute Shader Tile Rasterizer**: Modern compute tile binning for arbitrary complex filled paths (inspired by Impeller & Vello).
 
 #### 3.3 Multi-Platform Backend Abstraction
 - Abstract GPU presentation across platforms:
