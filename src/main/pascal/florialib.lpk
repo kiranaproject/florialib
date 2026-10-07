@@ -193,6 +193,30 @@
         <Filename Value="floria.colorspace.pas"/>
         <UnitName Value="Floria.ColorSpace"/>
       </Item>
+      <Item>
+        <Filename Value="floria.compression.crc.pas"/>
+        <UnitName Value="Floria.Compression.CRC"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.compression.bitstream.pas"/>
+        <UnitName Value="Floria.Compression.BitStream"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.compression.huffman.pas"/>
+        <UnitName Value="Floria.Compression.Huffman"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.compression.deflate.pas"/>
+        <UnitName Value="Floria.Compression.Deflate"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.compression.zlib.pas"/>
+        <UnitName Value="Floria.Compression.Zlib"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.compression.gzip.pas"/>
+        <UnitName Value="Floria.Compression.Gzip"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

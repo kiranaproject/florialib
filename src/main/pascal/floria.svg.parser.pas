@@ -22,7 +22,8 @@ uses
   SysUtils, Classes, Contnrs, Math,
   Floria.CSS.Types, Floria.CSS.Values, Floria.CSS.Properties, Floria.CSS.Cascade, Floria.CSS.Parser,
   Floria.XML.DOM, Floria.XML.Parser,
-  Floria.SVG.Types, Floria.SVG.Path, Floria.SVG.DOM;
+  Floria.SVG.Types, Floria.SVG.Path, Floria.SVG.DOM,
+  Floria.Compression.Gzip;
 
 type
   { TSVGParser }
@@ -544,8 +545,24 @@ class function TSVGParser.ParseStream(AStream: TStream): TSVGDocument;
 var
   XMLDoc: TXMLDocument;
   Parser: TSVGParser;
+  DecompStream: TMemoryStream;
 begin
-  XMLDoc := TXMLParser.ParseStream(AStream);
+  if not Assigned(AStream) then Exit(nil);
+
+  if IsGzipStream(AStream) then
+  begin
+    DecompStream := TMemoryStream.Create();
+    try
+      GzipDecompressStream(AStream, DecompStream);
+      DecompStream.Position := 0;
+      XMLDoc := TXMLParser.ParseStream(DecompStream);
+    finally
+      DecompStream.Free();
+    end;
+  end
+  else
+    XMLDoc := TXMLParser.ParseStream(AStream);
+
   if not Assigned(XMLDoc) then Exit(nil);
 
   try
