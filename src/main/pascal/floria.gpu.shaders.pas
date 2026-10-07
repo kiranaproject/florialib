@@ -278,6 +278,20 @@ const
     '  gl_FragColor = mix(cStart, cEnd, t);'#10 +
     '}'#10;
 
+  // ---------------------------------------------------------------------------
+  // Path Mesh Fragment Shader (Triangles & AA Fringe strips with analytical clip)
+  // ---------------------------------------------------------------------------
+  PATH_MESH_FRAG =
+    CLIP_HEADER +
+    'varying vec2 v_Position;'#10 +
+    'varying vec4 v_Color;'#10 +
+    'varying vec4 v_Extra;'#10 +
+    'void main() {'#10 +
+    '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
+    '  if (v_Color.a <= 0.0) discard;'#10 +
+    '  gl_FragColor = v_Color;'#10 +
+    '}'#10;
+
 // -----------------------------------------------------------------------------
 // TFloriaGPUShaderProgram Implementation
 // -----------------------------------------------------------------------------
@@ -527,6 +541,7 @@ begin
   FPrograms[gbtRoundedRect]    := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, ROUNDED_RECT_FRAG);
   FPrograms[gbtBoxShadow]      := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, BOX_SHADOW_FRAG);
   FPrograms[gbtLinearGradient] := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, LINEAR_GRADIENT_FRAG);
+  FPrograms[gbtPathMesh]       := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, PATH_MESH_FRAG);
 
   FInitialized := True;
 end;

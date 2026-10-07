@@ -30,7 +30,8 @@ uses
   Floria.GL,
   Floria.GPU.Atlas,
   Floria.GPU.Batch,
-  Floria.GPU.Shaders;
+  Floria.GPU.Shaders,
+  Floria.GPU.Tessellator;
 
 type
   // ---------------------------------------------------------------------------
@@ -38,16 +39,18 @@ type
   // ---------------------------------------------------------------------------
   TFloriaGPURenderer = class(TFloriaDisplayListReceiver)
   private
-    FGL          : TGLEngine;
-    FAtlas       : TFloriaGPUAtlas;
-    FBatch       : TFloriaRenderBatch;
-    FPipelines   : TFloriaGPUPipelineManager;
-    FClipChain   : TFloriaClipChain;
-    FCurrentAlpha: Double;
-    FBlendMode   : TFloriaBlendMode;
-    FViewportW   : Integer;
-    FViewportH   : Integer;
-    FInFrame     : Boolean;
+    FGL                       : TGLEngine;
+    FAtlas                    : TFloriaGPUAtlas;
+    FBatch                    : TFloriaRenderBatch;
+    FPipelines                : TFloriaGPUPipelineManager;
+    FClipChain                : TFloriaClipChain;
+    FTessellator              : TFloriaGPUTessellator;
+    FDirectTessellationEnabled: Boolean;
+    FCurrentAlpha             : Double;
+    FBlendMode                : TFloriaBlendMode;
+    FViewportW                : Integer;
+    FViewportH                : Integer;
+    FInFrame                  : Boolean;
 
     procedure ApplyBlendMode(AMode: TFloriaBlendMode);
   public
@@ -84,11 +87,13 @@ type
     procedure OnSaveLayer(const ABounds: TRectD; AOpacity: Double; AFilter: TFloriaImageFilter; ABlendMode: TFloriaBlendMode); override;
     procedure OnRestoreLayer(); override;
 
-    property Atlas    : TFloriaGPUAtlas read FAtlas;
-    property Batch    : TFloriaRenderBatch read FBatch;
-    property Pipelines: TFloriaGPUPipelineManager read FPipelines;
-    property ClipChain: TFloriaClipChain read FClipChain;
-    property InFrame  : Boolean read FInFrame;
+    property Atlas                    : TFloriaGPUAtlas read FAtlas;
+    property Batch                    : TFloriaRenderBatch read FBatch;
+    property Pipelines                : TFloriaGPUPipelineManager read FPipelines;
+    property ClipChain                : TFloriaClipChain read FClipChain;
+    property Tessellator              : TFloriaGPUTessellator read FTessellator;
+    property DirectTessellationEnabled: Boolean read FDirectTessellationEnabled write FDirectTessellationEnabled;
+    property InFrame                  : Boolean read FInFrame;
   end;
 
 implementation
@@ -104,19 +109,22 @@ begin
   else
     FGL := FloriaGL();
 
-  FAtlas        := TFloriaGPUAtlas.Create();
-  FBatch        := TFloriaRenderBatch.Create();
-  FPipelines    := TFloriaGPUPipelineManager.Create();
-  FClipChain    := TFloriaClipChain.Create();
-  FCurrentAlpha := 1.0;
-  FBlendMode    := fbmSrcOver;
-  FViewportW    := 0;
-  FViewportH    := 0;
-  FInFrame      := False;
+  FAtlas                     := TFloriaGPUAtlas.Create();
+  FBatch                     := TFloriaRenderBatch.Create();
+  FPipelines                 := TFloriaGPUPipelineManager.Create();
+  FClipChain                 := TFloriaClipChain.Create();
+  FTessellator               := TFloriaGPUTessellator.Create();
+  FDirectTessellationEnabled := True;
+  FCurrentAlpha              := 1.0;
+  FBlendMode                 := fbmSrcOver;
+  FViewportW                 := 0;
+  FViewportH                 := 0;
+  FInFrame                   := False;
 end;
 
 destructor TFloriaGPURenderer.Destroy();
 begin
+  if Assigned(FTessellator) then FreeAndNil(FTessellator);
   if Assigned(FClipChain) then FreeAndNil(FClipChain);
   if Assigned(FPipelines) then FreeAndNil(FPipelines);
   if Assigned(FBatch) then FreeAndNil(FBatch);
@@ -299,7 +307,10 @@ end;
 procedure TFloriaGPURenderer.OnDrawLine(AX1, AY1, AX2, AY2: Double; const AColor: TBgraPixel; AStrokeWidth: Double);
 var
   R: TRectD;
+  LineMesh: TFloriaTessMesh;
 begin
+  if AColor.A = 0 then Exit;
+
   // Axis-aligned lines as thin rects
   if Abs(AY1 - AY2) < 1e-4 then
   begin
@@ -310,6 +321,13 @@ begin
   begin
     R := RectD(AX1 - AStrokeWidth * 0.5, Min(AY1, AY2), AX1 + AStrokeWidth * 0.5, Max(AY1, AY2));
     FBatch.EmitSolidRect(R, AColor, FBlendMode, FClipChain.CurrentNode);
+  end
+  else if FDirectTessellationEnabled then
+  begin
+    LineMesh.Clear();
+    FTessellator.TessellateLine(PointD(AX1, AY1), PointD(AX2, AY2), AStrokeWidth, True, LineMesh);
+    if LineMesh.IndexCount > 0 then
+      FBatch.EmitPathMesh(LineMesh, AColor, FBlendMode, FClipChain.CurrentNode);
   end;
 end;
 
@@ -317,17 +335,51 @@ procedure TFloriaGPURenderer.OnDrawPath(APath: TFloriaPath; const AFillColor, AS
 var
   Alloc: TFloriaAtlasAlloc;
   TexRect: TRectD;
+  FillMesh, StrokeMesh: TFloriaTessMesh;
+  Handled: Boolean;
 begin
   if not Assigned(APath) or APath.IsEmpty then Exit;
 
-  // Fallback Blob Rasterizer: renders path into GPU texture atlas via AggPas
-  if FAtlas.RasterizePath(APath, AFillColor, AStrokeColor, AStrokeWidth, AFillRule, Alloc) then
+  Handled := False;
+
+  if FDirectTessellationEnabled then
   begin
-    TexRect.Left   := Alloc.U1;
-    TexRect.Top    := Alloc.V1;
-    TexRect.Right  := Alloc.U2;
-    TexRect.Bottom := Alloc.V2;
-    FBatch.EmitTexturedRect(APath.Bounds, TexRect, FAtlas.Pages[Alloc.PageIndex].TextureID, FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
+    // 1. Direct GPU Fill Tessellation
+    if AFillColor.A > 0 then
+    begin
+      FillMesh.Clear();
+      FTessellator.TessellateFill(APath, FillMesh, fpfrNonZero, True);
+      if FillMesh.IndexCount > 0 then
+      begin
+        FBatch.EmitPathMesh(FillMesh, AFillColor, FBlendMode, FClipChain.CurrentNode);
+        Handled := True;
+      end;
+    end;
+
+    // 2. Direct GPU Stroke Tessellation
+    if (AStrokeColor.A > 0) and (AStrokeWidth > 0.0) then
+    begin
+      StrokeMesh.Clear();
+      FTessellator.TessellateStroke(APath, AStrokeWidth, StrokeMesh, fpjtRound, fpetRound, 4.0, True);
+      if StrokeMesh.IndexCount > 0 then
+      begin
+        FBatch.EmitPathMesh(StrokeMesh, AStrokeColor, FBlendMode, FClipChain.CurrentNode);
+        Handled := True;
+      end;
+    end;
+  end;
+
+  if not Handled then
+  begin
+    // Fallback Blob Rasterizer: renders path into GPU texture atlas via AggPas
+    if FAtlas.RasterizePath(APath, AFillColor, AStrokeColor, AStrokeWidth, AFillRule, Alloc) then
+    begin
+      TexRect.Left   := Alloc.U1;
+      TexRect.Top    := Alloc.V1;
+      TexRect.Right  := Alloc.U2;
+      TexRect.Bottom := Alloc.V2;
+      FBatch.EmitTexturedRect(APath.Bounds, TexRect, FAtlas.Pages[Alloc.PageIndex].TextureID, FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
+    end;
   end;
 end;
 

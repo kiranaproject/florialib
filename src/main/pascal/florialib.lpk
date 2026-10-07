@@ -305,6 +305,10 @@
         <Filename Value="floria.gpu.renderer.pas"/>
         <UnitName Value="Floria.GPU.Renderer"/>
       </Item>
+      <Item>
+        <Filename Value="floria.gpu.tessellator.pas"/>
+        <UnitName Value="Floria.GPU.Tessellator"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

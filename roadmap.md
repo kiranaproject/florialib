@@ -288,12 +288,25 @@ gantt
     - `TFloriaGPURenderer` implementing `IFloriaDisplayListReceiver` to directly consume and render retained `TFloriaPicture` streams to GPU hardware.
 - Verified with 9 dedicated unit tests (565/565 passing in `florialib`, 48/48 in `ft`).
 
-#### 3.2 Native GPU Vector Rasterizer (`Floria.Canvas.GPU`) — Impeller-Style Architecture
-- Implement direct GPU path evaluation with guaranteed 60/120 FPS frame pacing:
-  - **AOT Precompiled Shaders**: Precompile all fragment/vertex shaders ahead of time (offline SPIR-V/GLSL) into static Pipeline State Objects (PSOs), completely eliminating runtime shader compilation jank.
-  - **Single-Pass Direct Tessellation**: Decompose curved paths into triangle strips with analytic coverage anti-aliasing directly in fragment shaders, avoiding multi-pass stencil buffers and CPU mask rasterization bottlenecks.
-  - **Instanced Primitive Mega-Batching**: WebRender-style batching of rounded rectangles, outlines, gradients, and glyph quads into instanced vertex buffers (thousands of elements rendered in 2–5 draw calls).
-  - **Compute Shader Tile Rasterizer**: Modern compute tile binning for arbitrary complex filled paths (inspired by Impeller & Vello).
+#### 3.2 Native GPU Path Tessellation & Analytic AA Strips (`Floria.GPU.Tessellator`) — [COMPLETED]
+- Implemented Impeller-inspired native GPU path tessellation engine:
+  - **Single-Pass Direct Stroke Tessellation**:
+    - Polyline stroke extrusion into triangle strip meshes with configurable line width.
+    - Join handling: sharp Miter joins (with configurable miter limit), flat Bevel joins, and smooth radial Round joins.
+    - Cap handling: flat Butt caps, extended Square caps, and semi-circle radial Round caps.
+  - **Analytic Anti-Aliasing (AA) Fringe Skirts**:
+    - Impeller-style 1-pixel outer coverage skirt (linear opacity transition from 1.0 to 0.0) generated directly along all stroke and polygon boundaries.
+    - Eliminates multi-sample anti-aliasing (MSAA) performance overhead and multi-pass stencil buffer barriers.
+  - **Ear-Clipping Polygon Fill Triangulation**:
+    - Robust ear-clipping decomposition of simple and non-convex polygons into clean triangle meshes.
+    - Automatic winding / orientation normalization (CCW) and degenerate vertex culling.
+    - Outer 1px perimeter AA fringe generation for smooth anti-aliased fills.
+  - **Adaptive Bezier Curve Subdivision**:
+    - Recursive de Casteljau quadratic and cubic Bezier curve flattening within chord error tolerance ($\epsilon = 0.25$ px).
+  - **GPU Batching & Mega-Shader Integration**:
+    - Dedicated `gbtPathMesh` batch type in `TFloriaRenderBatch` with AOT precompiled `PATH_MESH_FRAG` shader.
+    - Direct integration with `TFloriaGPURenderer`: intercepts `OnDrawLine` and `OnDrawPath` for hardware-accelerated direct vector tessellation with automatic fallback to texture atlas for complex SVG blobs.
+- Verified with 8 dedicated unit tests (573/573 passing in `florialib`, 48/48 in `ft`).
 
 #### 3.3 Multi-Platform Backend Abstraction
 - Abstract GPU presentation across platforms:

@@ -17,7 +17,8 @@ uses
   Floria.GPU.Atlas,
   Floria.GPU.Batch,
   Floria.GPU.Shaders,
-  Floria.GPU.Renderer;
+  Floria.GPU.Renderer,
+  Floria.GPU.Tessellator;
 
 type
   { TFloriaGPUTest }
@@ -32,6 +33,14 @@ type
     procedure TestRenderBatchBoxShadowAndGradients;
     procedure TestGPUPipelineManagerLifecycle;
     procedure TestGPURendererDisplayListPlayback;
+    procedure TestTessellateStrokeLine;
+    procedure TestTessellateStrokeJoins;
+    procedure TestTessellateStrokeCaps;
+    procedure TestTessellatePolygonFillConvex;
+    procedure TestTessellatePolygonFillConcave;
+    procedure TestTessellateCurvedPathSubdivision;
+    procedure TestRenderBatchEmitPathMesh;
+    procedure TestGPURendererDirectTessellationPlayback;
   end;
 
 implementation
@@ -371,6 +380,272 @@ begin
     // End frame flushes to GPU
     Renderer.EndFrame();
     AssertFalse('Frame ended', Renderer.InFrame);
+  finally
+    Renderer.Free();
+    Pic.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestTessellateStrokeLine;
+var
+  Tess: TFloriaGPUTessellator;
+  Mesh: TFloriaTessMesh;
+begin
+  Tess := TFloriaGPUTessellator.Create();
+  try
+    Mesh.Clear();
+    // Non-AA horizontal line (10, 20) -> (100, 20) with width 4.0
+    Tess.TessellateLine(PointD(10.0, 20.0), PointD(100.0, 20.0), 4.0, False, Mesh);
+    AssertEquals('Non-AA line has 4 vertices', 4, Mesh.VertexCount);
+    AssertEquals('Non-AA line has 6 indices (2 triangles)', 6, Mesh.IndexCount);
+    AssertEquals('Left normal offset Y=22', 22.0, Mesh.Vertices[0].Y);
+    AssertEquals('Right normal offset Y=18', 18.0, Mesh.Vertices[1].Y);
+    AssertEquals('Vertex coverage is 1.0', 1.0, Mesh.Vertices[0].Coverage);
+
+    // AA line horizontal (10, 20) -> (100, 20) with width 4.0
+    Mesh.Clear();
+    Tess.TessellateLine(PointD(10.0, 20.0), PointD(100.0, 20.0), 4.0, True, Mesh);
+    AssertTrue('AA line has at least 8 vertices', Mesh.VertexCount >= 8);
+    AssertTrue('AA line has at least 18 indices (6 triangles)', Mesh.IndexCount >= 18);
+    AssertEquals('Core coverage 1.0', 1.0, Mesh.Vertices[0].Coverage);
+    AssertEquals('Fringe coverage 0.0', 0.0, Mesh.Vertices[4].Coverage);
+  finally
+    Tess.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestTessellateStrokeJoins;
+var
+  Tess: TFloriaGPUTessellator;
+  Mesh: TFloriaTessMesh;
+  Pts: TPathD;
+begin
+  Tess := TFloriaGPUTessellator.Create();
+  try
+    SetLength(Pts, 3);
+    Pts[0] := PointD(0.0, 0.0);
+    Pts[1] := PointD(50.0, 0.0);
+    Pts[2] := PointD(50.0, 50.0);
+
+    // Bevel join
+    Mesh.Clear();
+    Tess.TessellatePolyline(Pts, False, 10.0, fpjtBevel, fpetButt, 4.0, False, Mesh);
+    AssertTrue('Bevel join generates triangles', Mesh.TriangleCount() >= 5);
+
+    // Miter join
+    Mesh.Clear();
+    Tess.TessellatePolyline(Pts, False, 10.0, fpjtMiter, fpetButt, 4.0, False, Mesh);
+    AssertTrue('Miter join generates triangles', Mesh.TriangleCount() >= 6);
+
+    // Round join
+    Mesh.Clear();
+    Tess.TessellatePolyline(Pts, False, 10.0, fpjtRound, fpetButt, 4.0, False, Mesh);
+    AssertTrue('Round join generates smooth fan', Mesh.TriangleCount() >= 7);
+  finally
+    Tess.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestTessellateStrokeCaps;
+var
+  Tess: TFloriaGPUTessellator;
+  MeshButt, MeshRound, MeshSquare: TFloriaTessMesh;
+  Pts: TPathD;
+begin
+  Tess := TFloriaGPUTessellator.Create();
+  try
+    SetLength(Pts, 2);
+    Pts[0] := PointD(10.0, 10.0);
+    Pts[1] := PointD(90.0, 10.0);
+
+    MeshButt.Clear();
+    Tess.TessellatePolyline(Pts, False, 10.0, fpjtMiter, fpetButt, 4.0, False, MeshButt);
+    AssertEquals('Butt cap has 2 triangles', 2, MeshButt.TriangleCount());
+
+    MeshSquare.Clear();
+    Tess.TessellatePolyline(Pts, False, 10.0, fpjtMiter, fpetSquare, 4.0, False, MeshSquare);
+    AssertTrue('Square cap extends ends', MeshSquare.TriangleCount() > MeshButt.TriangleCount());
+
+    MeshRound.Clear();
+    Tess.TessellatePolyline(Pts, False, 10.0, fpjtMiter, fpetRound, 4.0, False, MeshRound);
+    AssertTrue('Round cap adds semi-circle fans', MeshRound.TriangleCount() > MeshSquare.TriangleCount());
+  finally
+    Tess.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestTessellatePolygonFillConvex;
+var
+  Tess: TFloriaGPUTessellator;
+  Mesh: TFloriaTessMesh;
+  Pts: TPathD;
+begin
+  Tess := TFloriaGPUTessellator.Create();
+  try
+    // CCW Rectangle (10, 10) to (50, 50)
+    SetLength(Pts, 4);
+    Pts[0] := PointD(10.0, 10.0);
+    Pts[1] := PointD(50.0, 10.0);
+    Pts[2] := PointD(50.0, 50.0);
+    Pts[3] := PointD(10.0, 50.0);
+
+    // Non-AA
+    Mesh.Clear();
+    Tess.TessellatePolygonFill(Pts, False, Mesh);
+    AssertEquals('Quad decomposes into 2 triangles', 2, Mesh.TriangleCount());
+    AssertEquals('Interior vertices have coverage 1.0', 1.0, Mesh.Vertices[0].Coverage);
+
+    // AA
+    Mesh.Clear();
+    Tess.TessellatePolygonFill(Pts, True, Mesh);
+    AssertEquals('AA quad has 10 triangles', 10, Mesh.TriangleCount());
+    AssertTrue('Vertex count contains fringe', Mesh.VertexCount >= 10);
+  finally
+    Tess.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestTessellatePolygonFillConcave;
+var
+  Tess: TFloriaGPUTessellator;
+  Mesh: TFloriaTessMesh;
+  Pts: TPathD;
+begin
+  Tess := TFloriaGPUTessellator.Create();
+  try
+    // L-shaped concave polygon with 6 vertices:
+    // (0,0) -> (40,0) -> (40,20) -> (20,20) -> (20,40) -> (0,40)
+    SetLength(Pts, 6);
+    Pts[0] := PointD(0.0, 0.0);
+    Pts[1] := PointD(40.0, 0.0);
+    Pts[2] := PointD(40.0, 20.0);
+    Pts[3] := PointD(20.0, 20.0);
+    Pts[4] := PointD(20.0, 40.0);
+    Pts[5] := PointD(0.0, 40.0);
+
+    Mesh.Clear();
+    Tess.TessellatePolygonFill(Pts, False, Mesh);
+    AssertEquals('6-vertex L-shape decomposes into 4 triangles', 4, Mesh.TriangleCount());
+  finally
+    Tess.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestTessellateCurvedPathSubdivision;
+var
+  Tess: TFloriaGPUTessellator;
+  OutPts: TPathD;
+  Mesh: TFloriaTessMesh;
+  Path: TFloriaPath;
+begin
+  Tess := TFloriaGPUTessellator.Create(0.25);
+  Path := TFloriaPath.Create();
+  try
+    // Quadratic subdivision
+    SetLength(OutPts, 1);
+    OutPts[0] := PointD(0.0, 0.0);
+    Tess.SubdivideQuad(PointD(0.0, 0.0), PointD(50.0, 100.0), PointD(100.0, 0.0), OutPts);
+    AssertTrue('Quad subdivided into multiple chord points', Length(OutPts) >= 8);
+
+    // Cubic subdivision
+    SetLength(OutPts, 1);
+    OutPts[0] := PointD(0.0, 0.0);
+    Tess.SubdivideCubic(PointD(0.0, 0.0), PointD(25.0, 100.0), PointD(75.0, -100.0), PointD(100.0, 0.0), OutPts);
+    AssertTrue('Cubic subdivided into multiple chord points', Length(OutPts) >= 12);
+
+    // Full path with curves
+    Path.MoveTo(10.0, 10.0);
+    Path.QuadTo(50.0, 80.0, 100.0, 10.0);
+    Path.Close();
+
+    Mesh.Clear();
+    Tess.TessellateFill(Path, Mesh, fpfrNonZero, True);
+    AssertTrue('Curved path fill generates triangles', Mesh.TriangleCount() >= 10);
+  finally
+    Path.Free();
+    Tess.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestRenderBatchEmitPathMesh;
+var
+  Batch: TFloriaRenderBatch;
+  Tess: TFloriaGPUTessellator;
+  Mesh: TFloriaTessMesh;
+  Pts: TPathD;
+begin
+  Batch := TFloriaRenderBatch.Create();
+  Tess := TFloriaGPUTessellator.Create();
+  try
+    SetLength(Pts, 3);
+    Pts[0] := PointD(0.0, 0.0);
+    Pts[1] := PointD(50.0, 0.0);
+    Pts[2] := PointD(25.0, 40.0);
+
+    Mesh.Clear();
+    Tess.TessellatePolygonFill(Pts, False, Mesh);
+
+    Batch.EmitPathMesh(Mesh, BgraPixel(255, 0, 0, 255));
+    AssertEquals('1 draw call generated', 1, Batch.DrawCallCount);
+    AssertEquals('Draw call batch type is gbtPathMesh', Integer(gbtPathMesh), Integer(Batch.DrawCalls[0].BatchType));
+    AssertEquals('Vertices match mesh index count', 3, Batch.VertexCount);
+
+    // Emitting another path mesh merges into the same draw call!
+    Batch.EmitPathMesh(Mesh, BgraPixel(0, 255, 0, 255));
+    AssertEquals('Draw calls coalesced into 1', 1, Batch.DrawCallCount);
+    AssertEquals('Vertex count is 6', 6, Batch.VertexCount);
+  finally
+    Tess.Free();
+    Batch.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestGPURendererDirectTessellationPlayback;
+var
+  Recorder: TFloriaPictureRecorder;
+  Pic: TFloriaPicture;
+  Renderer: TFloriaGPURenderer;
+  Path: TFloriaPath;
+begin
+  Recorder := TFloriaPictureRecorder.Create();
+  try
+    Recorder.BeginRecording(RectD(0.0, 0.0, 800.0, 600.0));
+    // Solid rect (generates gbtSolidQuad draw call)
+    Recorder.DrawRect(RectD(0.0, 0.0, 50.0, 50.0), BgraPixel(0, 0, 255, 255));
+
+    // Angled line (generates gbtPathMesh draw call)
+    Recorder.DrawLine(10.0, 10.0, 100.0, 80.0, BgraPixel(255, 0, 0, 255), 4.0);
+
+    // Filled vector triangle
+    Path := TFloriaPath.Create();
+    try
+      Path.MoveTo(200.0, 50.0);
+      Path.LineTo(300.0, 50.0);
+      Path.LineTo(250.0, 150.0);
+      Path.Close();
+      Recorder.DrawPath(Path, BgraPixel(0, 255, 0, 255));
+    finally
+      Path.Free();
+    end;
+
+    Pic := Recorder.EndRecording();
+  finally
+    Recorder.Free();
+  end;
+
+  Renderer := TFloriaGPURenderer.Create();
+  try
+    Renderer.BeginFrame(800, 600);
+    AssertTrue('Direct tessellation enabled by default', Renderer.DirectTessellationEnabled);
+
+    // Playback picture to GPU receiver!
+    Pic.Playback(Renderer);
+
+    // Verify GPU batcher captured geometry via direct tessellation
+    AssertTrue('Batch accumulated path vertices', Renderer.Batch.VertexCount > 10);
+    AssertTrue('Batch generated draw calls', Renderer.Batch.DrawCallCount >= 2);
+
+    Renderer.EndFrame();
   finally
     Renderer.Free();
     Pic.Free();

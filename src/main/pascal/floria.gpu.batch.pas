@@ -24,7 +24,8 @@ uses
   Floria.Path.Clipper.Core,
   Floria.DisplayList,
   Floria.DisplayList.Clip,
-  Floria.GL;
+  Floria.GL,
+  Floria.GPU.Tessellator;
 
 type
   // Batch Shader / Primitive Type
@@ -33,7 +34,8 @@ type
     gbtTexturedQuad,
     gbtRoundedRect,
     gbtBoxShadow,
-    gbtLinearGradient
+    gbtLinearGradient,
+    gbtPathMesh
   );
 
   // ---------------------------------------------------------------------------
@@ -116,6 +118,9 @@ type
     procedure EmitLinearGradient(const ARect: TRectD; const AColorStart, AColorEnd: TBgraPixel;
                                  AAngleDeg: Double; ABlendMode: TFloriaBlendMode = fbmSrcOver;
                                  AClipIndex: Integer = -1);
+
+    procedure EmitPathMesh(const AMesh: TFloriaTessMesh; const AColor: TBgraPixel;
+                           ABlendMode: TFloriaBlendMode = fbmSrcOver; AClipIndex: Integer = -1);
 
     // Buffer Synchronization
     procedure UploadToVBO(gl: TGLEngine);
@@ -504,6 +509,63 @@ begin
   end;
 
   AppendQuadVertices(V[0], V[1], V[2], V[3]);
+end;
+
+procedure TFloriaRenderBatch.EmitPathMesh(const AMesh: TFloriaTessMesh; const AColor: TBgraPixel;
+                                         ABlendMode: TFloriaBlendMode = fbmSrcOver; AClipIndex: Integer = -1);
+var
+  I, AddedCount: Integer;
+  V: TFloriaGPUVertex;
+  SrcV: TFloriaTessVertex;
+  Inv255, ColR, ColG, ColB, BaseA: Single;
+begin
+  if AMesh.IndexCount = 0 then Exit;
+  AddedCount := AMesh.IndexCount;
+
+  if CanMergeWithCurrent(gbtPathMesh, 0, ABlendMode, AClipIndex) then
+    Inc(FDrawCalls[FDrawCallCount - 1].VertexCount, AddedCount)
+  else
+  begin
+    EnsureDrawCallCapacity();
+    with FDrawCalls[FDrawCallCount] do
+    begin
+      BatchType   := gbtPathMesh;
+      TextureID   := 0;
+      BlendMode   := ABlendMode;
+      ClipIndex   := AClipIndex;
+      StartIndex  := FVertexCount;
+      VertexCount := AddedCount;
+    end;
+    Inc(FDrawCallCount);
+  end;
+
+  EnsureVertexCapacity(FVertexCount + AddedCount);
+
+  Inv255 := 1.0 / 255.0;
+  ColR  := AColor.R * Inv255;
+  ColG  := AColor.G * Inv255;
+  ColB  := AColor.B * Inv255;
+  BaseA := AColor.A * Inv255;
+
+  FillChar(V, SizeOf(V), 0);
+  V.ColorR    := ColR;
+  V.ColorG    := ColG;
+  V.ColorB    := ColB;
+  V.ClipIndex := AClipIndex;
+
+  for I := 0 to AddedCount - 1 do
+  begin
+    SrcV := AMesh.Vertices[AMesh.Indices[I]];
+    V.PosX        := SrcV.X;
+    V.PosY        := SrcV.Y;
+    V.TexU        := SrcV.TexU;
+    V.TexV        := SrcV.TexV;
+    V.ColorA      := BaseA * SrcV.Coverage;
+    V.ExtraParam1 := SrcV.Dist;
+
+    FVertices[FVertexCount] := V;
+    Inc(FVertexCount);
+  end;
 end;
 
 procedure TFloriaRenderBatch.UploadToVBO(gl: TGLEngine);
