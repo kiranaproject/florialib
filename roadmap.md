@@ -164,10 +164,16 @@ gantt
   - Mathematically eliminates dark fringing (muddy brown/olive halo) on semi-transparent and anti-aliased boundaries.
 - Verified with 25 dedicated unit tests (429/429 passing in `florialib`, 48/48 in `ft`).
 
-#### 1.3 Composable Filter Graph (`Floria.Canvas.Filter`)
-- Architect a clean, non-destructive filter tree:
-  - `TFloriaImageFilter` base class with `Apply(Src: TFloriaImage; Bounds: TRect): TFloriaImage`.
-  - Concrete implementations: `TBlurFilter` (Gaussian, Box, Dual-Kawase), `TColorMatrixFilter` (4x5 color transform matrix for saturation, contrast, tinting), `TDropShadowFilter`, `TDisplacementMapFilter`, `TMorphologyFilter` (Dilate, Erode).
+#### 1.3 Composable Filter Graph (`Floria.Canvas.Filter`) — [COMPLETED]
+- Architected a clean, non-destructive composable filter tree:
+  - `TFloriaImageFilter` base class with `Apply(Src, Bounds): TFloriaImage`, `ApplyInPlace`, fluent `Compose` (pipelining) and `Composite` (dual-tree blend).
+  - `TColorMatrixFilter`: $4 \times 5$ color transformation matrix with presets for `Grayscale`, `Invert`, `Sepia`, `Saturation`, `Brightness`, `Contrast`, and `Tint`.
+  - `TBlurFilter`: Multi-algorithm blur supporting `fbtGaussian` (3-pass separable $O(1)$ box Central Limit Theorem approximation), fast `fbtBox`, and `fbtDualKawase`.
+  - `TDropShadowFilter`: Configurable offset $(DX, DY)$, blur sigma, shadow tint color, and shadow-only or composite mode.
+  - `TMorphologyFilter`: Separable 2D mathematical morphology operators (`fmoDilate` / `fmoErode`) with configurable rectangular radii.
+  - `TDisplacementMapFilter`: SVG `<feDisplacementMap>` pixel displacement with sub-pixel bilinear sampling across arbitrary RGBA channels.
+  - `TComposeFilter` & `TCompositeFilter`: Fluent graph chaining and blend mode composition.
+- Verified with 20 dedicated unit tests (483/483 passing in `florialib`, 48/48 in `ft`).
 
 #### 1.4 Boolean Path Operations (`Floria.Path.Ops`)
 - Integrate or port an industrial-grade polygon and path clipping engine (such as Angus Johnson’s **Clipper2**) into `florialib`.

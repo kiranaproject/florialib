@@ -21,7 +21,7 @@ uses
   Floria.Hash.CRC, Floria.Hash.Adler, Floria.Hash.FNV, Floria.Hash.Murmur, 
   Floria.Compression.CRC, Floria.Compression.BitStream, Floria.Compression.Huffman, 
   Floria.Compression.Deflate, Floria.Compression.Zlib, Floria.Compression.Gzip, 
-  Floria.Canvas.Agg, Floria.Canvas.Blend, Floria.ColorSpace, Floria.SVG.Rasterizer, Floria.Unicode.BiDi, 
+  Floria.Canvas.Agg, Floria.Canvas.Blend, Floria.Canvas.Filter, Floria.ColorSpace, Floria.SVG.Rasterizer, Floria.Unicode.BiDi, 
   Floria.Text.HarfBuzz, Floria.EGL, Floria.XCB.WM.Compositor;
 
 implementation

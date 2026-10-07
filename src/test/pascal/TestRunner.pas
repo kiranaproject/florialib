@@ -20,6 +20,7 @@ uses
   Floria.Image.Blur.Test,
   Floria.Canvas.Agg.Test,
   Floria.Canvas.Blend.Test,
+  Floria.Canvas.Filter.Test,
   Floria.ColorSpace.Test,
   Floria.Hash.Test,
   Floria.Compression.Test,
