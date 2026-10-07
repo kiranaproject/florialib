@@ -26,7 +26,8 @@ uses
   Floria.Path.Clipper.RectClip, Floria.Path.Clipper.Minkowski, Floria.Path.Clipper, Floria.Path.Ops, 
   Floria.Text.HarfBuzz, Floria.Text.Paragraph, Floria.DisplayList, 
   Floria.DisplayList.Clip, Floria.DisplayList.Spatial, Floria.DisplayList.Cache, 
-  Floria.EGL, Floria.XCB.WM.Compositor;
+  Floria.EGL, Floria.GL, Floria.GPU.Atlas, Floria.GPU.Batch, Floria.GPU.Shaders, Floria.GPU.Renderer, 
+  Floria.XCB.WM.Compositor;
 
 implementation
 

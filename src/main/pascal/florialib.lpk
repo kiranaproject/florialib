@@ -285,6 +285,26 @@
         <Filename Value="floria.displaylist.cache.pas"/>
         <UnitName Value="Floria.DisplayList.Cache"/>
       </Item>
+      <Item>
+        <Filename Value="floria.gl.pas"/>
+        <UnitName Value="Floria.GL"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.gpu.atlas.pas"/>
+        <UnitName Value="Floria.GPU.Atlas"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.gpu.batch.pas"/>
+        <UnitName Value="Floria.GPU.Batch"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.gpu.shaders.pas"/>
+        <UnitName Value="Floria.GPU.Shaders"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.gpu.renderer.pas"/>
+        <UnitName Value="Floria.GPU.Renderer"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

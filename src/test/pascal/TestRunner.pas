@@ -32,6 +32,7 @@ uses
   Floria.Unicode.BiDi.Test,
   Floria.Text.HarfBuzz.Test,
   Floria.EGL.Test,
+  Floria.GPU.Test,
   Floria.XCB.WM.Compositor.Test;
 
 var

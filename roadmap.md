@@ -266,10 +266,27 @@ gantt
 ### Phase 3: Hardware-Accelerated GPU Vector Core (Months 10–18)
 *Goal: True hardware GPU vector acceleration for 60/120 FPS high-refresh-rate desktop applications using an Impeller + WebRender hybrid design.*
 
-#### 3.1 The Hybrid Fast-Path & Blob Rasterizer Approach (Immediate High-Value Step)
-- **Fast Path (95% of UI)**: Evaluate rounded boxes, borders, gradients, drop shadows, and backdrop frosted-glass blurs 100% in **AOT fragment shaders** on instanced quads.
-- **Fallback Blob Rasterizer (5% of UI)**: Maintain pure Pascal `Floria.Canvas.Agg` on background threads for arbitrary complex SVG paths and vector artwork, uploading rasterized masks to a shared GPU texture atlas (`TFloriaGPUAtlas`).
-- Zero memory blitting bottlenecks on the main presentation thread.
+#### 3.1 Hybrid Fast-Path & Dynamic Texture Atlas (`Floria.GL`, `Floria.GPU.*`) — [COMPLETED]
+- Implemented Impeller/WebRender-style hybrid GPU vector pipeline:
+  - **Dynamic OpenGL / GLES Loader (`Floria.GL`)**:
+    - Pure Object Pascal dynamic OpenGL/GLES 2.0 loader via `dynlibs` (`libGLESv2.so.2` / `libGL.so.1`) and `eglGetProcAddress`.
+    - Cross-context dynamic binding with zero C header dependency.
+  - **Dynamic Texture Atlas & Fallback Blob Rasterizer (`Floria.GPU.Atlas`)**:
+    - 2D Skyline bin-packing texture atlas (`TFloriaGPUAtlas`, `TFloriaAtlasPage`).
+    - Pure Pascal AggPas fallback rasterizer (`RasterizePath`) for arbitrary complex SVGs/paths, auto-blitting into dynamic GPU texture atlas pages with sub-pixel padding.
+  - **Instanced Quad & Vertex Batching (`Floria.GPU.Batch`)**:
+    - High-throughput draw-call batching (`TFloriaRenderBatch`) coalescing consecutive quads sharing identical pipeline state.
+    - 64-byte std140-aligned GPU vertex structure (`TFloriaGPUVertex`) streaming directly to OpenGL VBOs.
+    - Emitters for solid rects, textured quads, rounded rects with per-corner radii, box shadows, and linear gradients.
+  - **Ahead-Of-Time (AOT) Mega-Shaders (`Floria.GPU.Shaders`)**:
+    - 100% precompiled AOT GLSL shaders (`TFloriaGPUPipelineManager`): zero runtime JIT compilation jank.
+    - Analytical SDF rounded rects and borders with sub-pixel AA.
+    - Single-pass analytical box shadows via Erf Gaussian approximation.
+    - Linear gradients with arbitrary angle rotation.
+    - In-shader analytical clip chain evaluation (`evaluateClip`), bypassing offscreen FBO allocation.
+  - **GPU Display List Receiver & Renderer (`Floria.GPU.Renderer`)**:
+    - `TFloriaGPURenderer` implementing `IFloriaDisplayListReceiver` to directly consume and render retained `TFloriaPicture` streams to GPU hardware.
+- Verified with 9 dedicated unit tests (565/565 passing in `florialib`, 48/48 in `ft`).
 
 #### 3.2 Native GPU Vector Rasterizer (`Floria.Canvas.GPU`) — Impeller-Style Architecture
 - Implement direct GPU path evaluation with guaranteed 60/120 FPS frame pacing:

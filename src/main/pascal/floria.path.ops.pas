@@ -105,7 +105,9 @@ type
     property TotalPointCount: Integer read GetTotalPointCount;
     property IsEmpty: Boolean read GetIsEmpty;
     function GetBounds(): TRectD;
+    procedure Translate(const DX, DY: Double);
     function GetArea(): Double;
+    property Bounds: TRectD read GetBounds;
 
     // --- Boolean Operations (Returns new TFloriaPath) ---
     function Union(AOther: TFloriaPath; AFillRule: TFloriaPathFillRule = fpfrNonZero): TFloriaPath;
@@ -587,6 +589,19 @@ function TFloriaPath.GetBounds(): TRectD;
 begin
   FlushCurrentSubpath();
   Result := Floria.Path.Clipper.Core.GetBounds(FPaths);
+end;
+
+procedure TFloriaPath.Translate(const DX, DY: Double);
+var
+  I, J: Integer;
+begin
+  FlushCurrentSubpath();
+  for I := 0 to High(FPaths) do
+    for J := 0 to High(FPaths[I]) do
+    begin
+      FPaths[I][J].X := FPaths[I][J].X + DX;
+      FPaths[I][J].Y := FPaths[I][J].Y + DY;
+    end;
 end;
 
 function TFloriaPath.GetArea(): Double;
