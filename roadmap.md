@@ -175,14 +175,24 @@ gantt
   - `TComposeFilter` & `TCompositeFilter`: Fluent graph chaining and blend mode composition.
 - Verified with 20 dedicated unit tests (483/483 passing in `florialib`, 48/48 in `ft`).
 
-#### 1.4 Boolean Path Operations (`Floria.Path.Ops`)
-- Integrate or port an industrial-grade polygon and path clipping engine (such as Angus Johnson’s **Clipper2**) into `florialib`.
-- Expose first-class boolean operations on `agg_path_storage` / `TFloriaPath`:
-  - `PathUnion(PathA, PathB): TFloriaPath`
-  - `PathDifference(PathA, PathB): TFloriaPath`
-  - `PathIntersect(PathA, PathB): TFloriaPath`
-  - `PathXor(PathA, PathB): TFloriaPath`
-- Support path simplification, contour winding rule resolution (NonZero, EvenOdd), and offset polygon expansion.
+#### 1.4 Boolean Path Operations (`Floria.Path.Ops`) — [COMPLETED]
+- Integrated Angus Johnson's Clipper2 polygon clipping engine as pure Object Pascal units under dotted namespaces:
+  - `Floria.Path.Clipper.Core`: Coordinate types (`TPoint64`, `TPointD`, `TRect64`, `TRectD`), winding rules (`TFillRule`), and vector math.
+  - `Floria.Path.Clipper.Engine`: Core sweep-line clipping engine, active edge table, intersection list, and PolyTree hierarchy.
+  - `Floria.Path.Clipper.Offset`: High-performance polygon expansion, deflating, and stroke offset generation (`TClipperOffset`).
+  - `Floria.Path.Clipper.RectClip`: Fast analytical rectangular window clipping (`TRectClip64`, `TRectClipLines64`).
+  - `Floria.Path.Clipper.Minkowski`: 2D Minkowski sum algorithms.
+  - `Floria.Path.Clipper`: High-level procedural API (`Union`, `Difference`, `Intersect`, `XOR_`, `InflatePaths`, `RectClip`).
+- Implemented high-level `TFloriaPath` class:
+  - Procedural construction: `MoveTo`, `LineTo`, `QuadTo`, `CubicTo` (adaptive de Casteljau recursive subdivision), `ArcTo`, and `Close`.
+  - Shape generators: `AddRect`, `AddRoundedRect`, `AddCircle`, `AddEllipse`, and `AddPolygon`.
+  - First-class boolean operations: `Union`, `Difference`, `Intersect`, and `XorOp`.
+  - Contour offsetting / inflation: `Inflate` supporting join styles (`Round`, `Miter`, `Square`, `Bevel`) and end caps (`Polygon`, `Joined`, `Butt`, `Square`, `Round`).
+  - Simplification: `Simplify` using Douglas-Peucker reduction.
+  - Contour winding rule resolution: NonZero, EvenOdd, Positive, and Negative.
+  - Seamless interop: Two-way conversion between `TFloriaPath`, AggPas `path_storage`, SVG `<path>` data strings (`d="..."`), and Clipper native `TPathsD`.
+  - Direct AggPas `path_storage` boolean functions: `PathUnion`, `PathDifference`, `PathIntersect`, `PathXor`.
+- Verified with 16 dedicated unit tests (499/499 passing in `florialib`, 48/48 in `ft`).
 
 #### 1.5 Rich Paragraph Layout Engine (`Floria.Text.Paragraph`)
 - Decouple text wrapping and layout from GUI widgets into a standalone typography engine:
