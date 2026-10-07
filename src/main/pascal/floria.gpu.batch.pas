@@ -107,6 +107,10 @@ type
                               AOpacity: Double = 1.0; ABlendMode: TFloriaBlendMode = fbmSrcOver;
                               AClipIndex: Integer = -1);
 
+    procedure EmitGlyphRect(const ARect, ATexRect: TRectD; ATextureID: Cardinal;
+                            const AColor: TBgraPixel; AOpacity: Double = 1.0;
+                            ABlendMode: TFloriaBlendMode = fbmSrcOver; AClipIndex: Integer = -1);
+
     procedure EmitRoundedRect(const ARect: TRectD; const ARadii: TFloriaClipCornerRadii;
                              const AFillColor: TBgraPixel; const ABorderColor: TBgraPixel;
                              ABorderWidth: Double = 0.0; ABlendMode: TFloriaBlendMode = fbmSrcOver;
@@ -330,6 +334,63 @@ begin
   AppendQuadVertices(V[0], V[1], V[2], V[3]);
 end;
 
+procedure TFloriaRenderBatch.EmitGlyphRect(const ARect, ATexRect: TRectD; ATextureID: Cardinal;
+                                          const AColor: TBgraPixel; AOpacity: Double = 1.0;
+                                          ABlendMode: TFloriaBlendMode = fbmSrcOver; AClipIndex: Integer = -1);
+var
+  V: array[0..3] of TFloriaGPUVertex;
+  I: Integer;
+begin
+  if ARect.IsEmpty then Exit;
+
+  FillChar(V, SizeOf(V), 0);
+  for I := 0 to 3 do
+  begin
+    V[I].ColorR      := AColor.R / 255.0;
+    V[I].ColorG      := AColor.G / 255.0;
+    V[I].ColorB      := AColor.B / 255.0;
+    V[I].ColorA      := (AColor.A / 255.0) * AOpacity;
+    V[I].LocalX      := ARect.Left;
+    V[I].LocalY      := ARect.Top;
+    V[I].LocalW      := ARect.Width;
+    V[I].LocalH      := ARect.Height;
+    V[I].ClipIndex   := AClipIndex;
+    V[I].ExtraParam1 := 1.0; // 1.0 = Glyph mask mode in shader
+  end;
+
+  // Top-Left
+  V[0].PosX := ARect.Left;  V[0].PosY := ARect.Top;
+  V[0].TexU := ATexRect.Left; V[0].TexV := ATexRect.Top;
+  // Top-Right
+  V[1].PosX := ARect.Right; V[1].PosY := ARect.Top;
+  V[1].TexU := ATexRect.Right; V[1].TexV := ATexRect.Top;
+  // Bottom-Right
+  V[2].PosX := ARect.Right; V[2].PosY := ARect.Bottom;
+  V[2].TexU := ATexRect.Right; V[2].TexV := ATexRect.Bottom;
+  // Bottom-Left
+  V[3].PosX := ARect.Left;  V[3].PosY := ARect.Bottom;
+  V[3].TexU := ATexRect.Left; V[3].TexV := ATexRect.Bottom;
+
+  if CanMergeWithCurrent(gbtTexturedQuad, ATextureID, ABlendMode, AClipIndex) then
+    Inc(FDrawCalls[FDrawCallCount - 1].VertexCount, 6)
+  else
+  begin
+    EnsureDrawCallCapacity();
+    with FDrawCalls[FDrawCallCount] do
+    begin
+      BatchType   := gbtTexturedQuad;
+      TextureID   := ATextureID;
+      BlendMode   := ABlendMode;
+      ClipIndex   := AClipIndex;
+      StartIndex  := FVertexCount;
+      VertexCount := 6;
+    end;
+    Inc(FDrawCallCount);
+  end;
+
+  AppendQuadVertices(V[0], V[1], V[2], V[3]);
+end;
+
 procedure TFloriaRenderBatch.EmitRoundedRect(const ARect: TRectD; const ARadii: TFloriaClipCornerRadii;
                                             const AFillColor: TBgraPixel; const ABorderColor: TBgraPixel;
                                             ABorderWidth: Double = 0.0; ABlendMode: TFloriaBlendMode = fbmSrcOver;
@@ -364,6 +425,7 @@ begin
     V[I].BorderG    := ABorderColor.G / 255.0;
     V[I].BorderB    := ABorderColor.B / 255.0;
     V[I].ClipIndex  := AClipIndex;
+    V[I].ExtraParam1:= ABorderColor.A / 255.0;
   end;
 
   V[0].PosX := ARect.Left;  V[0].PosY := ARect.Top;

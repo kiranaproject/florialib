@@ -40,7 +40,8 @@ type
     FUTexture        : Integer;
     FUClipCount      : Integer;
     FUClipMinMax     : Integer;
-    FUClipRadii      : Integer;
+    FUClipRadiiTL_TR : Integer;
+    FUClipRadiiBR_BL : Integer;
     FUClipKind       : Integer;
 
     // Standard Attribute Locations
@@ -139,7 +140,8 @@ const
     '#endif'#10 +
     'uniform int u_ClipCount;'#10 +
     'uniform vec4 u_ClipMinMax[16];'#10 +
-    'uniform vec4 u_ClipRadii[16];'#10 +
+    'uniform vec4 u_ClipRadiiTL_TR[16];'#10 +
+    'uniform vec4 u_ClipRadiiBR_BL[16];'#10 +
     'uniform vec4 u_ClipKind[16];'#10 +
     'bool evaluateClip(vec2 pos) {'#10 +
     '  for (int i = 0; i < 16; i++) {'#10 +
@@ -147,14 +149,20 @@ const
     '    vec4 box = u_ClipMinMax[i];'#10 +
     '    if (pos.x < box.x || pos.x > box.z || pos.y < box.y || pos.y > box.w) return false;'#10 +
     '    if (u_ClipKind[i].x > 1.5) {'#10 +
-    '      vec4 radii = u_ClipRadii[i];'#10 +
-    '      vec2 r = (pos.x < box.x + (box.z - box.x) * 0.5) ?'#10 +
-    '        ((pos.y < box.y + (box.w - box.y) * 0.5) ? radii.xy : radii.zw) :'#10 +
-    '        ((pos.y < box.y + (box.w - box.y) * 0.5) ? radii.xy : radii.zw);'#10 +
-    '      vec2 halfSz = (box.zw - box.xy) * 0.5;'#10 +
+    '      vec4 rTL_TR = u_ClipRadiiTL_TR[i];'#10 +
+    '      vec4 rBR_BL = u_ClipRadiiBR_BL[i];'#10 +
+    '      vec2 size = box.zw - box.xy;'#10 +
+    '      vec2 halfSz = size * 0.5;'#10 +
     '      vec2 center = box.xy + halfSz;'#10 +
-    '      vec2 q = abs(pos - center) - halfSz + r;'#10 +
-    '      if (q.x > 0.0 && q.y > 0.0 && length(q) > r.x) return false;'#10 +
+    '      vec2 p = pos - center;'#10 +
+    '      vec2 r;'#10 +
+    '      if (p.x < 0.0) {'#10 +
+    '        r = (p.y < 0.0) ? rTL_TR.xy : rBR_BL.zw;'#10 +
+    '      } else {'#10 +
+    '        r = (p.y < 0.0) ? rTL_TR.zw : rBR_BL.xy;'#10 +
+    '      }'#10 +
+    '      vec2 q = abs(p) - halfSz + r;'#10 +
+    '      if (q.x > 0.0 && q.y > 0.0 && r.x > 0.0 && r.y > 0.0 && (length(q / r) > 1.0)) return false;'#10 +
     '    }'#10 +
     '  }'#10 +
     '  return true;'#10 +
@@ -186,7 +194,18 @@ const
     'void main() {'#10 +
     '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
     '  vec4 tex = texture2D(u_Texture, v_TexCoord);'#10 +
-    '  gl_FragColor = tex * v_Color;'#10 +
+    '  if (v_Extra.y > 0.5) {'#10 +
+    '    float textAlpha = tex.a;'#10 +
+    '    float lum = dot(v_Color.rgb, vec3(0.299, 0.587, 0.114));'#10 +
+    '    if (lum > 0.45) {'#10 +
+    '      textAlpha = pow(textAlpha, 0.82);'#10 +
+    '    }'#10 +
+    '    float finalA = v_Color.a * textAlpha;'#10 +
+    '    if (finalA <= 0.001) discard;'#10 +
+    '    gl_FragColor = vec4(v_Color.rgb, finalA);'#10 +
+    '  } else {'#10 +
+    '    gl_FragColor = tex * v_Color;'#10 +
+    '  }'#10 +
     '}'#10;
 
   // ---------------------------------------------------------------------------
@@ -222,8 +241,16 @@ const
     '  if (v_Border.x > 0.0) {'#10 +
     '    float innerD = d + v_Border.x;'#10 +
     '    float borderAlpha = clamp(innerD + 0.5, 0.0, 1.0);'#10 +
-    '    vec4 c = mix(v_Color, vec4(v_Border.yzw, 1.0), borderAlpha);'#10 +
-    '    gl_FragColor = vec4(c.rgb, c.a * alpha * v_Color.a);'#10 +
+    '    vec4 borderCol = vec4(v_Border.yzw, v_Extra.y);'#10 +
+    '    vec4 c;'#10 +
+    '    if (v_Color.a <= 0.0) {'#10 +
+    '      c = vec4(borderCol.rgb, borderCol.a * borderAlpha);'#10 +
+    '    } else {'#10 +
+    '      c = mix(v_Color, borderCol, borderAlpha);'#10 +
+    '    }'#10 +
+    '    float finalAlpha = c.a * alpha;'#10 +
+    '    if (finalAlpha <= 0.0) discard;'#10 +
+    '    gl_FragColor = vec4(c.rgb, finalAlpha);'#10 +
     '  } else {'#10 +
     '    gl_FragColor = vec4(v_Color.rgb, v_Color.a * alpha);'#10 +
     '  }'#10 +
@@ -326,9 +353,10 @@ begin
     FUViewport   := gl.GetUniformLocation(FProgramID, 'u_Viewport');
     FUTexture    := gl.GetUniformLocation(FProgramID, 'u_Texture');
     FUClipCount  := gl.GetUniformLocation(FProgramID, 'u_ClipCount');
-    FUClipMinMax := gl.GetUniformLocation(FProgramID, 'u_ClipMinMax');
-    FUClipRadii  := gl.GetUniformLocation(FProgramID, 'u_ClipRadii');
-    FUClipKind   := gl.GetUniformLocation(FProgramID, 'u_ClipKind');
+    FUClipMinMax     := gl.GetUniformLocation(FProgramID, 'u_ClipMinMax');
+    FUClipRadiiTL_TR := gl.GetUniformLocation(FProgramID, 'u_ClipRadiiTL_TR');
+    FUClipRadiiBR_BL := gl.GetUniformLocation(FProgramID, 'u_ClipRadiiBR_BL');
+    FUClipKind       := gl.GetUniformLocation(FProgramID, 'u_ClipKind');
 
     // Query Attributes
     FAttribPosition   := gl.GetAttribLocation(FProgramID, 'a_Position');
@@ -408,9 +436,10 @@ end;
 
 procedure TFloriaGPUShaderProgram.UploadClipChain(gl: TGLEngine; const AClipItems: TFloriaGPUClipItemArray; ACount: Integer);
 var
-  MinMax: array[0..MAX_GPU_CLIP_ITEMS * 4 - 1] of cfloat;
-  Radii:  array[0..MAX_GPU_CLIP_ITEMS * 4 - 1] of cfloat;
-  Kind:   array[0..MAX_GPU_CLIP_ITEMS * 4 - 1] of cfloat;
+  MinMax:    array[0..MAX_GPU_CLIP_ITEMS * 4 - 1] of cfloat;
+  RadiiTLTR: array[0..MAX_GPU_CLIP_ITEMS * 4 - 1] of cfloat;
+  RadiiBRBL: array[0..MAX_GPU_CLIP_ITEMS * 4 - 1] of cfloat;
+  Kind:      array[0..MAX_GPU_CLIP_ITEMS * 4 - 1] of cfloat;
   I, ActualCount: Integer;
 begin
   if not Assigned(gl) or not gl.Available or (FUClipCount < 0) then Exit;
@@ -427,10 +456,15 @@ begin
     MinMax[I * 4 + 2] := AClipItems[I].RectMaxX;
     MinMax[I * 4 + 3] := AClipItems[I].RectMaxY;
 
-    Radii[I * 4 + 0]  := AClipItems[I].RadiiTL_X;
-    Radii[I * 4 + 1]  := AClipItems[I].RadiiTL_Y;
-    Radii[I * 4 + 2]  := AClipItems[I].RadiiTR_X;
-    Radii[I * 4 + 3]  := AClipItems[I].RadiiTR_Y;
+    RadiiTLTR[I * 4 + 0] := AClipItems[I].RadiiTL_X;
+    RadiiTLTR[I * 4 + 1] := AClipItems[I].RadiiTL_Y;
+    RadiiTLTR[I * 4 + 2] := AClipItems[I].RadiiTR_X;
+    RadiiTLTR[I * 4 + 3] := AClipItems[I].RadiiTR_Y;
+
+    RadiiBRBL[I * 4 + 0] := AClipItems[I].RadiiBR_X;
+    RadiiBRBL[I * 4 + 1] := AClipItems[I].RadiiBR_Y;
+    RadiiBRBL[I * 4 + 2] := AClipItems[I].RadiiBL_X;
+    RadiiBRBL[I * 4 + 3] := AClipItems[I].RadiiBL_Y;
 
     Kind[I * 4 + 0]   := AClipItems[I].ClipKind;
     Kind[I * 4 + 1]   := AClipItems[I].AntiAlias;
@@ -440,8 +474,10 @@ begin
 
   if FUClipMinMax >= 0 then
     gl.Uniform4fv(FUClipMinMax, ActualCount, @MinMax[0]);
-  if FUClipRadii >= 0 then
-    gl.Uniform4fv(FUClipRadii, ActualCount, @Radii[0]);
+  if FUClipRadiiTL_TR >= 0 then
+    gl.Uniform4fv(FUClipRadiiTL_TR, ActualCount, @RadiiTLTR[0]);
+  if FUClipRadiiBR_BL >= 0 then
+    gl.Uniform4fv(FUClipRadiiBR_BL, ActualCount, @RadiiBRBL[0]);
   if FUClipKind >= 0 then
     gl.Uniform4fv(FUClipKind, ActualCount, @Kind[0]);
 end;

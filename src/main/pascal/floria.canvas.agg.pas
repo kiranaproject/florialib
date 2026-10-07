@@ -49,13 +49,10 @@ uses
   Floria.Image.Core,
   Floria.Image.Blur,
   Floria.Unicode.BiDi,
+  Floria.Canvas,
   Floria.Canvas.Blend;
 
 type
-  TFtClipRect = record
-    X1, Y1, X2, Y2: Integer;
-  end;
-
   TFtCornerSnapshot = record
     X, Y, W, H: Integer;
     Pixels    : array of TBgraPixel;
@@ -69,10 +66,9 @@ type
     Corners                   : array[0..3] of TFtCornerSnapshot;
   end;
 
-  TFloriaCanvasAgg = class
+  TFloriaCanvasAgg = class(TFloriaCanvas)
   private
     FBuffer               : Pointer;
-    FWidth, FHeight       : Integer;
     FRenderingBuf         : rendering_buffer;
     FPixFormat            : pixel_formats;
     FRendererBase         : renderer_base;
@@ -84,11 +80,10 @@ type
     FRoundedClipStackCount: Integer;
     FAlphaStack           : array[0..63] of Double;
     FAlphaStackCount      : Integer;
-    FCurrentAlpha         : Double;
-    FBlendMode            : TFloriaBlendMode;
-    procedure SetBlendMode(AMode: TFloriaBlendMode);
     procedure DrawTextHershey(X, Y: Double; const AText: string; ASize: Double; R, G, B: Double);
     procedure DrawTextCenteredHershey(X, Y, W, H: Integer; const AText: string; ASize: Double; R, G, B: Double);
+  protected
+    procedure SetBlendMode(AMode: TFloriaBlendMode); override;
   public
     constructor Create(ABuffer: Pointer; AWidth, AHeight: Integer); overload;
     constructor Create(AImage: TFloriaImage); overload;
@@ -96,64 +91,61 @@ type
 
     procedure Resize(ABuffer: Pointer; AWidth, AHeight: Integer); overload;
     procedure Resize(AImage: TFloriaImage); overload;
+    procedure Resize(AWidth, AHeight: Integer); override; overload;
 
-    procedure Clear(R, G, B: Double);
-    procedure DrawRect(X, Y, W, H: Integer; R, G, B: Double; A: Double = 1.0);
-    procedure DrawRoundedRect(X, Y, W, H: Double; Radius: Double; R, G, B: Double; A: Double = 1.0);
-    procedure DrawRoundedRectOutline(X, Y, W, H: Double; Radius: Double; BorderWidth: Double; R, G, B: Double; A: Double = 1.0);
-    procedure DrawShadow(X, Y, W, H: Double; Radius: Double; OffsetX, OffsetY: Double; BlurRadius: Double; ShadowR, ShadowG, ShadowB, ShadowOpacity: Double);
-    procedure BlurRoundedRect(X, Y, W, H: Double; Radius: Double; BlurRadius: Double);
-    procedure BlurRect(X, Y, W, H: Double; BlurRadius: Double);
+    procedure Clear(R, G, B: Double); override;
+    procedure DrawRect(X, Y, W, H: Integer; R, G, B: Double; A: Double = 1.0); override;
+    procedure DrawRoundedRect(X, Y, W, H: Double; Radius: Double; R, G, B: Double; A: Double = 1.0); override;
+    procedure DrawRoundedRectOutline(X, Y, W, H: Double; Radius: Double; BorderWidth: Double; R, G, B: Double; A: Double = 1.0); override;
+    procedure DrawShadow(X, Y, W, H: Double; Radius: Double; OffsetX, OffsetY: Double; BlurRadius: Double; ShadowR, ShadowG, ShadowB, ShadowOpacity: Double); override;
+    procedure BlurRoundedRect(X, Y, W, H: Double; Radius: Double; BlurRadius: Double); override;
+    procedure BlurRect(X, Y, W, H: Double; BlurRadius: Double); override;
 
-    procedure PushClipRect(X, Y, W, H: Integer);
-    procedure PopClipRect();
-    procedure PushClipRoundedRect(X, Y, W, H: Double; Radius: Double); overload;
-    procedure PushClipRoundedRect(X, Y, W, H: Double; TopRadius, BottomRadius: Double); overload;
-    procedure PopClipRoundedRect();
-    procedure SetClipRect(X, Y, W, H: Integer);
-    procedure ResetClipRect();
-    procedure ResetAllClipping();
-    function GetClipRect(out X, Y, W, H: Integer): Boolean;
-    function IntersectsClip(X, Y, W, H: Integer): Boolean;
+    procedure PushClipRect(X, Y, W, H: Integer); override;
+    procedure PopClipRect(); override;
+    procedure PushClipRoundedRect(X, Y, W, H: Double; Radius: Double); override; overload;
+    procedure PushClipRoundedRect(X, Y, W, H: Double; TopRadius, BottomRadius: Double); override; overload;
+    procedure PopClipRoundedRect(); override;
+    procedure SetClipRect(X, Y, W, H: Integer); override;
+    procedure ResetClipRect(); override;
+    procedure ResetAllClipping(); override;
+    function GetClipRect(out X, Y, W, H: Integer): Boolean; override;
+    function IntersectsClip(X, Y, W, H: Integer): Boolean; override;
 
-    procedure PushAlpha(AAlpha: Double);
-    procedure PopAlpha();
-    procedure ResetAlpha();
-    property CurrentAlpha: Double read FCurrentAlpha;
+    procedure PushAlpha(AAlpha: Double); override;
+    procedure PopAlpha(); override;
+    procedure ResetAlpha(); override;
 
-    procedure DrawText(X, Y: Double; const AText: string; AFont: TFloriaFont; R, G, B: Double); overload;
-    procedure DrawTextCentered(X, Y, W, H: Integer; const AText: string; AFont: TFloriaFont; R, G, B: Double); overload;
-    procedure DrawTextLeft(X, Y, W, H: Double; const AText: string; AFont: TFloriaFont; R, G, B: Double);
+    procedure DrawText(X, Y: Double; const AText: string; AFont: TFloriaFont; R, G, B: Double); override; overload;
+    procedure DrawTextCentered(X, Y, W, H: Integer; const AText: string; AFont: TFloriaFont; R, G, B: Double); override; overload;
+    procedure DrawTextLeft(X, Y, W, H: Double; const AText: string; AFont: TFloriaFont; R, G, B: Double); override;
 
-    procedure DrawCheckMark(CX, CY: Double; R, G, B: Double; A: Double = 1.0);
-    procedure DrawSubMenuArrow(CX, CY: Double; R, G, B: Double; A: Double = 1.0);
-    procedure DrawCircle(CX, CY, Radius: Double; R, G, B: Double; A: Double = 1.0);
-    procedure DrawCircleOutline(CX, CY, Radius, BorderWidth: Double; R, G, B: Double; A: Double = 1.0);
-    procedure DrawLine(X1, Y1, X2, Y2, Width: Double; R, G, B: Double; A: Double = 1.0);
+    procedure DrawCheckMark(CX, CY: Double; R, G, B: Double; A: Double = 1.0); override;
+    procedure DrawSubMenuArrow(CX, CY: Double; R, G, B: Double; A: Double = 1.0); override;
+    procedure DrawCircle(CX, CY, Radius: Double; R, G, B: Double; A: Double = 1.0); override;
+    procedure DrawCircleOutline(CX, CY, Radius, BorderWidth: Double; R, G, B: Double; A: Double = 1.0); override;
+    procedure DrawLine(X1, Y1, X2, Y2, LineWidth: Double; R, G, B: Double; A: Double = 1.0); override;
 
     // Image & Bitmap Drawing
-    procedure DrawImage(X, Y: Double; AImage: TFloriaImage; AOpacity: Double = 1.0);
-    procedure DrawImageScaled(X, Y, W, H: Double; AImage: TFloriaImage; AOpacity: Double = 1.0);
-    procedure DrawImagePart(X, Y, W, H: Double; AImage: TFloriaImage; SrcX, SrcY, SrcW, SrcH: Integer; AOpacity: Double = 1.0);
+    procedure DrawImage(X, Y: Double; AImage: TFloriaImage; AOpacity: Double = 1.0); override;
+    procedure DrawImageScaled(X, Y, W, H: Double; AImage: TFloriaImage; AOpacity: Double = 1.0); override;
+    procedure DrawImagePart(X, Y, W, H: Double; AImage: TFloriaImage; SrcX, SrcY, SrcW, SrcH: Integer; AOpacity: Double = 1.0); override;
 
     // Vector & Path Drawing
     procedure RenderPath(var APath: path_storage; const AStyle: TSVGStyleRecord; Scale: Double = 1.0);
     procedure RenderPathGradient(var APath: path_storage; const AStyle: TSVGStyleRecord;
       AGradient: TSVGGradientElement; const ABounds: TSVGRect; const AMatrix: TSVGMatrix;
       IsStroke: Boolean = False; Scale: Double = 1.0);
-    procedure DrawSVG(X, Y: Double; ADoc: TSVGDocument);
-    procedure DrawSVGScaled(X, Y, W, H: Double; ADoc: TSVGDocument);
-    procedure DrawSVGFile(X, Y, W, H: Double; const AFileName: string);
-    procedure DrawSVGString(X, Y, W, H: Double; const ASVGContent: string);
+    procedure DrawSVG(X, Y: Double; ADoc: TSVGDocument); override;
+    procedure DrawSVGScaled(X, Y, W, H: Double; ADoc: TSVGDocument); override;
+    procedure DrawSVGFile(X, Y, W, H: Double; const AFileName: string); override;
+    procedure DrawSVGString(X, Y, W, H: Double; const ASVGContent: string); override;
 
     // Font size convenience overloads
-    procedure DrawText(X, Y: Double; const AText: string; ASize: Double; R, G, B: Double); overload;
-    procedure DrawTextCentered(X, Y, W, H: Integer; const AText: string; ASize: Double; R, G, B: Double); overload;
+    procedure DrawText(X, Y: Double; const AText: string; ASize: Double; R, G, B: Double); override; overload;
+    procedure DrawTextCentered(X, Y, W, H: Integer; const AText: string; ASize: Double; R, G, B: Double); override; overload;
 
-    property Width : Integer read FWidth;
-    property Height: Integer read FHeight;
     property Buffer: Pointer read FBuffer;
-    property BlendMode: TFloriaBlendMode read FBlendMode write SetBlendMode;
   end;
 
   // Backward-compatibility alias
@@ -251,6 +243,11 @@ begin
     Resize(AImage.PixelBuffer, AImage.Width, AImage.Height)
   else
     Resize(nil, 0, 0);
+end;
+
+procedure TFloriaCanvasAgg.Resize(AWidth, AHeight: Integer);
+begin
+  Resize(FBuffer, AWidth, AHeight);
 end;
 
 procedure TFloriaCanvasAgg.PushClipRect(X, Y, W, H: Integer);
@@ -796,7 +793,7 @@ begin
   DrawRoundedRectOutline(CX - Radius, CY - Radius, Radius * 2.0, Radius * 2.0, Radius, BorderWidth, R, G, B, A);
 end;
 
-procedure TFloriaCanvasAgg.DrawLine(X1, Y1, X2, Y2, Width: Double; R, G, B: Double; A: Double = 1.0);
+procedure TFloriaCanvasAgg.DrawLine(X1, Y1, X2, Y2, LineWidth: Double; R, G, B: Double; A: Double = 1.0);
 var
   Path: path_storage;
   Stroke: conv_stroke;
@@ -809,7 +806,7 @@ begin
   Path.move_to(X1, Y1);
   Path.line_to(X2, Y2);
   Stroke.Construct(@Path);
-  Stroke.width_(Width);
+  Stroke.width_(LineWidth);
   Stroke.line_cap_(round_cap);
   C.ConstrDbl(R, G, B, effA);
   FRasterizer.reset();

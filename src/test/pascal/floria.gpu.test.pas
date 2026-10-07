@@ -19,7 +19,10 @@ uses
   Floria.GPU.Shaders,
   Floria.GPU.Renderer,
   Floria.GPU.Tessellator,
-  Floria.GPU.Context;
+  Floria.GPU.Context,
+  Floria.Font,
+  Floria.Canvas,
+  Floria.Canvas.GL;
 
 type
   { TFloriaGPUTest }
@@ -45,6 +48,9 @@ type
     procedure TestGPUBackendAvailability;
     procedure TestGPUOffscreenContextLifecycle;
     procedure TestGPURendererWithOffscreenContext;
+    procedure TestCanvasGLDirectDraw;
+    procedure TestCanvasGLClipping;
+    procedure TestCanvasGLTextRasterization;
   end;
 
 implementation
@@ -738,6 +744,95 @@ begin
     finally
       Ctx.Free();
     end;
+  end;
+end;
+
+procedure TFloriaGPUTest.TestCanvasGLDirectDraw;
+var
+  Canvas: TFloriaCanvasGL;
+begin
+  Canvas := TFloriaCanvasGL.Create(400, 300);
+  try
+    AssertEquals('Canvas width', 400, Canvas.Width);
+    AssertEquals('Canvas height', 300, Canvas.Height);
+    AssertNotNull('Renderer assigned', Canvas.Renderer);
+
+    Canvas.BeginFrame(400, 300);
+    AssertTrue('In frame', Canvas.InFrame);
+
+    // Primitives
+    Canvas.Clear(0.1, 0.1, 0.1);
+    Canvas.DrawRect(10, 10, 100, 50, 1.0, 0.0, 0.0);
+    Canvas.DrawRoundedRect(20, 20, 80, 40, 6.0, 0.0, 1.0, 0.0);
+    Canvas.DrawShadow(10, 10, 100, 50, 4.0, 0.0, 4.0, 8.0, 0.0, 0.0, 0.0, 0.5);
+    Canvas.DrawCircle(200.0, 150.0, 30.0, 0.0, 0.0, 1.0);
+    Canvas.DrawLine(0.0, 0.0, 400.0, 300.0, 2.0, 1.0, 1.0, 1.0);
+
+    AssertTrue('Render batch accumulated draw calls', Canvas.Renderer.Batch.DrawCallCount > 0);
+    AssertTrue('Render batch accumulated vertices', Canvas.Renderer.Batch.VertexCount > 0);
+
+    Canvas.EndFrame();
+    AssertFalse('Frame finished', Canvas.InFrame);
+  finally
+    Canvas.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestCanvasGLClipping;
+var
+  Canvas: TFloriaCanvasGL;
+  ClipX, ClipY, ClipW, ClipH: Integer;
+begin
+  Canvas := TFloriaCanvasGL.Create(400, 300);
+  try
+    Canvas.BeginFrame(400, 300);
+
+    // Initial clip is full canvas
+    AssertTrue('Initial clip is full canvas', Canvas.GetClipRect(ClipX, ClipY, ClipW, ClipH));
+    AssertEquals('Clip W', 400, ClipW);
+    AssertEquals('Clip H', 300, ClipH);
+
+    // Push clip rect
+    Canvas.PushClipRect(50, 50, 100, 100);
+    AssertTrue('GetClipRect succeeds', Canvas.GetClipRect(ClipX, ClipY, ClipW, ClipH));
+    AssertEquals('Clip X', 50, ClipX);
+    AssertEquals('Clip Y', 50, ClipY);
+    AssertEquals('Clip W', 100, ClipW);
+    AssertEquals('Clip H', 100, ClipH);
+
+    AssertTrue('Intersects inside', Canvas.IntersectsClip(60, 60, 20, 20));
+    AssertFalse('Does not intersect outside', Canvas.IntersectsClip(200, 200, 20, 20));
+
+    // Pop clip rect
+    Canvas.PopClipRect();
+    AssertTrue('Clip restored', Canvas.GetClipRect(ClipX, ClipY, ClipW, ClipH));
+    AssertEquals('Restored Clip W', 400, ClipW);
+
+    Canvas.EndFrame();
+  finally
+    Canvas.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestCanvasGLTextRasterization;
+var
+  Canvas: TFloriaCanvasGL;
+  Font: TFloriaFont;
+begin
+  Canvas := TFloriaCanvasGL.Create(400, 300);
+  try
+    Canvas.BeginFrame(400, 300);
+
+    Font := FloriaGetSystemFont();
+    Canvas.DrawText(50.0, 100.0, 'Hello GPU Canvas', Font, 1.0, 1.0, 1.0);
+
+    // Verifies that text was emitted into the batch as a textured quad from the atlas
+    AssertTrue('Atlas allocated page for text', Canvas.Renderer.Atlas.PageCount > 0);
+    AssertTrue('Batch emitted draw calls for text quad', Canvas.Renderer.Batch.DrawCallCount > 0);
+
+    Canvas.EndFrame();
+  finally
+    Canvas.Free();
   end;
 end;
 

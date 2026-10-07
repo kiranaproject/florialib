@@ -35,6 +35,7 @@ type
 
     class function Uniform(Radius: Double): TFloriaClipCornerRadii; static;
     class function Rounded(RadiusX, RadiusY: Double): TFloriaClipCornerRadii; static;
+    class function TopBottom(TopRad, BottomRad: Double): TFloriaClipCornerRadii; static;
     class function Zero(): TFloriaClipCornerRadii; static;
     function IsUniform(): Boolean;
     function HasRoundedCorners(): Boolean;
@@ -105,6 +106,7 @@ type
 
     // --- GPU Uniform Buffer Packing ---
     function PackGPUUniforms(out AItems: TFloriaGPUClipItemArray): Integer;
+    function PackGPUUniformsForNode(ANodeIndex: Integer; out AItems: TFloriaGPUClipItemArray): Integer;
 
     property Count      : Integer read FCount;
     property CurrentNode: Integer read FCurrentNode;
@@ -134,6 +136,14 @@ begin
   Result.TopRightX    := RadiusX; Result.TopRightY    := RadiusY;
   Result.BottomRightX := RadiusX; Result.BottomRightY := RadiusY;
   Result.BottomLeftX  := RadiusX; Result.BottomLeftY  := RadiusY;
+end;
+
+class function TFloriaClipCornerRadii.TopBottom(TopRad, BottomRad: Double): TFloriaClipCornerRadii;
+begin
+  Result.TopLeftX     := TopRad;    Result.TopLeftY     := TopRad;
+  Result.TopRightX    := TopRad;    Result.TopRightY    := TopRad;
+  Result.BottomRightX := BottomRad; Result.BottomRightY := BottomRad;
+  Result.BottomLeftX  := BottomRad; Result.BottomLeftY  := BottomRad;
 end;
 
 class function TFloriaClipCornerRadii.Zero(): TFloriaClipCornerRadii;
@@ -557,22 +567,22 @@ begin
   Result := ctrIntersecting;
 end;
 
-function TFloriaClipChain.PackGPUUniforms(out AItems: TFloriaGPUClipItemArray): Integer;
+function TFloriaClipChain.PackGPUUniformsForNode(ANodeIndex: Integer; out AItems: TFloriaGPUClipItemArray): Integer;
 var
   CurIdx, ItemCount: Integer;
   TempList: array of Integer;
   I, N: Integer;
 begin
-  if FCurrentNode < 0 then
+  if (ANodeIndex < 0) or (ANodeIndex >= FCount) then
   begin
     SetLength(AItems, 0);
     Exit(0);
   end;
 
-  // Collect path from root down to current node
+  // Collect path from root down to ANodeIndex
   ItemCount := 0;
   SetLength(TempList, 16);
-  CurIdx := FCurrentNode;
+  CurIdx := ANodeIndex;
   while CurIdx >= 0 do
   begin
     if ItemCount >= Length(TempList) then
@@ -617,6 +627,11 @@ begin
   end;
 
   Result := ItemCount;
+end;
+
+function TFloriaClipChain.PackGPUUniforms(out AItems: TFloriaGPUClipItemArray): Integer;
+begin
+  Result := PackGPUUniformsForNode(FCurrentNode, AItems);
 end;
 
 end.

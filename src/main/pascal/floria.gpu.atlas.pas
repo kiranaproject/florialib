@@ -20,6 +20,7 @@ interface
 uses
   Classes, SysUtils, Math,
   Floria.Image.Core,
+  Floria.Font,
   Floria.Canvas.Agg,
   Floria.Path.Clipper.Core,
   Floria.Path.Ops,
@@ -92,6 +93,12 @@ type
     property DirtyRect: TRectD read FDirtyRect;
   end;
 
+  TFloriaTextCacheEntry = record
+    Text: string;
+    FontKey: string;
+    Alloc: TFloriaAtlasAlloc;
+  end;
+
   TFloriaAtlasPageArray = array of TFloriaAtlasPage;
 
   // ---------------------------------------------------------------------------
@@ -99,12 +106,14 @@ type
   // ---------------------------------------------------------------------------
   TFloriaGPUAtlas = class
   private
-    FPages      : TFloriaAtlasPageArray;
-    FPageCount  : Integer;
-    FPageSize   : Integer;
-    FPadding    : Integer;
+    FPages         : TFloriaAtlasPageArray;
+    FPageCount     : Integer;
+    FPageSize      : Integer;
+    FPadding       : Integer;
+    FTextCache     : array of TFloriaTextCacheEntry;
+    FTextCacheCount: Integer;
 
-    function AddPage(): TFloriaAtlasPage;
+    function AddPage(APageWidth: Integer = 0; APageHeight: Integer = 0): TFloriaAtlasPage;
   public
     constructor Create(APageSize: Integer = DEFAULT_ATLAS_PAGE_SIZE; APadding: Integer = DEFAULT_ATLAS_PADDING);
     destructor Destroy(); override;
@@ -122,6 +131,12 @@ type
     function RasterizePath(APath: TFloriaPath; const AFillColor, AStrokeColor: TBgraPixel;
                            AStrokeWidth: Double; AFillRule: TFillRule;
                            out Alloc: TFloriaAtlasAlloc): Boolean;
+
+    // High-performance Text/Glyph Rasterizer into Atlas with string reuse cache
+    function RasterizeText(const AText: string; AFont: TFloriaFont;
+                           out Alloc: TFloriaAtlasAlloc): Boolean; overload;
+    function RasterizeText(const AText: string; AFont: TFloriaFont; const AColor: TBgraPixel;
+                           out Alloc: TFloriaAtlasAlloc): Boolean; overload;
 
     // GPU Synchronization
     procedure SyncToGPU(gl: TGLEngine);
@@ -153,6 +168,8 @@ end;
 // TFloriaAtlasPage Implementation
 // -----------------------------------------------------------------------------
 constructor TFloriaAtlasPage.Create(AIndex, AWidth, AHeight: Integer);
+var
+  gl: TGLEngine;
 begin
   inherited Create();
   FIndex        := AIndex;
@@ -168,6 +185,18 @@ begin
   FSkyline[0].Width := AWidth;
   FDirty        := False;
   FDirtyRect    := NullRectD;
+
+  gl := FloriaGL();
+  if gl.Available and Assigned(gl.GenTextures) then
+  begin
+    gl.GenTextures(1, @FTextureID);
+    gl.BindTexture(GL_TEXTURE_2D, FTextureID);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FWidth, FHeight, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, FSurface.Data);
+  end;
 end;
 
 destructor TFloriaAtlasPage.Destroy();
@@ -396,9 +425,11 @@ begin
     FPageSize := DEFAULT_ATLAS_PAGE_SIZE
   else
     FPageSize := APageSize;
-  FPadding    := APadding;
-  FPageCount  := 0;
+  FPadding        := APadding;
+  FPageCount      := 0;
   SetLength(FPages, 0);
+  FTextCacheCount := 0;
+  SetLength(FTextCache, 0);
 end;
 
 destructor TFloriaGPUAtlas.Destroy();
@@ -416,11 +447,17 @@ begin
       FreeAndNil(FPages[I]);
   FPageCount := 0;
   SetLength(FPages, 0);
+  FTextCacheCount := 0;
+  SetLength(FTextCache, 0);
 end;
 
-function TFloriaGPUAtlas.AddPage(): TFloriaAtlasPage;
+function TFloriaGPUAtlas.AddPage(APageWidth: Integer = 0; APageHeight: Integer = 0): TFloriaAtlasPage;
+var
+  pw, ph: Integer;
 begin
-  Result := TFloriaAtlasPage.Create(FPageCount, FPageSize, FPageSize);
+  if APageWidth <= 0 then pw := FPageSize else pw := APageWidth;
+  if APageHeight <= 0 then ph := FPageSize else ph := APageHeight;
+  Result := TFloriaAtlasPage.Create(FPageCount, pw, ph);
   SetLength(FPages, FPageCount + 1);
   FPages[FPageCount] := Result;
   Inc(FPageCount);
@@ -436,43 +473,50 @@ end;
 
 function TFloriaGPUAtlas.Allocate(W, H: Integer; out Alloc: TFloriaAtlasAlloc): Boolean;
 var
-  I: Integer;
+  I, TargetW, TargetH: Integer;
   Page: TFloriaAtlasPage;
   AllocRect: TRectD;
 begin
-  if (W <= 0) or (H <= 0) or (W > FPageSize) or (H > FPageSize) then
+  if (W <= 0) or (H <= 0) then
   begin
     Alloc := TFloriaAtlasAlloc.Invalid();
     Exit(False);
   end;
 
-  // 1. Try existing pages
+  // 1. Try existing pages if W and H fit within page bounds
   for I := 0 to FPageCount - 1 do
   begin
     Page := FPages[I];
-    if Page.Allocate(W, H, FPadding, AllocRect) then
+    if (W <= Page.Width) and (H <= Page.Height) and Page.Allocate(W, H, FPadding, AllocRect) then
     begin
       Alloc.PageIndex := Page.Index;
       Alloc.Rect      := AllocRect;
-      Alloc.U1        := AllocRect.Left / FPageSize;
-      Alloc.V1        := AllocRect.Top / FPageSize;
-      Alloc.U2        := AllocRect.Right / FPageSize;
-      Alloc.V2        := AllocRect.Bottom / FPageSize;
+      Alloc.U1        := AllocRect.Left / Page.Width;
+      Alloc.V1        := AllocRect.Top / Page.Height;
+      Alloc.U2        := AllocRect.Right / Page.Width;
+      Alloc.V2        := AllocRect.Bottom / Page.Height;
       Alloc.IsValid   := True;
       Exit(True);
     end;
   end;
 
-  // 2. Allocate new page
-  Page := AddPage();
+  // 2. Allocate new page (at least FPageSize, or larger if W or H exceeds FPageSize)
+  TargetW := FPageSize;
+  while TargetW < W + FPadding * 2 do
+    TargetW := TargetW * 2;
+  TargetH := FPageSize;
+  while TargetH < H + FPadding * 2 do
+    TargetH := TargetH * 2;
+
+  Page := AddPage(TargetW, TargetH);
   if Page.Allocate(W, H, FPadding, AllocRect) then
   begin
     Alloc.PageIndex := Page.Index;
     Alloc.Rect      := AllocRect;
-    Alloc.U1        := AllocRect.Left / FPageSize;
-    Alloc.V1        := AllocRect.Top / FPageSize;
-    Alloc.U2        := AllocRect.Right / FPageSize;
-    Alloc.V2        := AllocRect.Bottom / FPageSize;
+    Alloc.U1        := AllocRect.Left / Page.Width;
+    Alloc.V1        := AllocRect.Top / Page.Height;
+    Alloc.U2        := AllocRect.Right / Page.Width;
+    Alloc.V2        := AllocRect.Bottom / Page.Height;
     Alloc.IsValid   := True;
     Exit(True);
   end;
@@ -600,6 +644,91 @@ begin
 
   Page.MarkDirty(Alloc.Rect);
   Result := True;
+end;
+
+function TFloriaGPUAtlas.RasterizeText(const AText: string; AFont: TFloriaFont;
+                                      out Alloc: TFloriaAtlasAlloc): Boolean;
+var
+  W, H, Row, I: Integer;
+  Page: TFloriaAtlasPage;
+  Canvas: TFloriaCanvasAgg;
+  TextW: Double;
+  Font: TFloriaFont;
+  FKey: string;
+begin
+  if AText = '' then
+  begin
+    Alloc := TFloriaAtlasAlloc.Invalid();
+    Exit(False);
+  end;
+
+  Font := AFont;
+  if not Assigned(Font) then Font := FloriaGetSystemFont();
+
+  if Assigned(Font) then
+    FKey := Font.FamilyName + '#' + IntToStr(Round(Font.Size * 10.0)) + '#' + BoolToStr(Font.Bold, True) + '#' + BoolToStr(Font.Italic, True)
+  else
+    FKey := 'default';
+
+  // 1. Search text cache
+  for I := 0 to FTextCacheCount - 1 do
+  begin
+    if (FTextCache[I].Text = AText) and (FTextCache[I].FontKey = FKey) then
+    begin
+      Alloc := FTextCache[I].Alloc;
+      Exit(True);
+    end;
+  end;
+
+  // 2. Measure & allocate in atlas
+  TextW := Font.GetTextWidth(AText);
+  W := Ceil(TextW) + 4;
+  H := Ceil(Font.Height) + 4;
+  if (W <= 0) or (H <= 0) then
+  begin
+    Alloc := TFloriaAtlasAlloc.Invalid();
+    Exit(False);
+  end;
+
+  if not Allocate(W, H, Alloc) then
+    Exit(False);
+
+  // 3. Clear target slot
+  Page := FPages[Alloc.PageIndex];
+  for Row := Round(Alloc.Rect.Top) to Round(Alloc.Rect.Bottom) - 1 do
+    FillChar(PByte(Page.Surface.PixelBuffer)[Row * Page.Surface.Stride + Round(Alloc.Rect.Left) * 4], W * 4, 0);
+
+  // 4. Rasterize text in pure white so alpha channel holds font coverage
+  Canvas := TFloriaCanvasAgg.Create(Page.Surface);
+  try
+    Canvas.DrawText(Alloc.Rect.Left + 2.0, Alloc.Rect.Top + Round(Font.Ascent) + 2.0, AText, Font,
+                    1.0, 1.0, 1.0);
+  finally
+    Canvas.Free();
+  end;
+
+  Page.MarkDirty(Alloc.Rect);
+
+  // 5. Cache result
+  if FTextCacheCount >= Length(FTextCache) then
+  begin
+    if Length(FTextCache) = 0 then
+      SetLength(FTextCache, 64)
+    else
+      SetLength(FTextCache, Length(FTextCache) * 2);
+  end;
+  FTextCache[FTextCacheCount].Text := AText;
+  FTextCache[FTextCacheCount].FontKey := FKey;
+  FTextCache[FTextCacheCount].Alloc := Alloc;
+  Inc(FTextCacheCount);
+
+  Result := True;
+end;
+
+function TFloriaGPUAtlas.RasterizeText(const AText: string; AFont: TFloriaFont; const AColor: TBgraPixel;
+                                      out Alloc: TFloriaAtlasAlloc): Boolean;
+begin
+  Result := RasterizeText(AText, AFont, Alloc);
 end;
 
 procedure TFloriaGPUAtlas.SyncToGPU(gl: TGLEngine);

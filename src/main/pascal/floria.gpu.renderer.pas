@@ -71,7 +71,8 @@ type
     procedure OnRestore(); override;
     procedure OnTransform(const AMatrix: TFloriaMatrix2D); override;
     procedure OnPushClipRect(const ARect: TRectD; AAntiAlias: Boolean); override;
-    procedure OnPushClipRoundedRect(const ARect: TRectD; ARadiusX, ARadiusY: Double; AAntiAlias: Boolean); override;
+    procedure OnPushClipRoundedRect(const ARect: TRectD; ARadiusX, ARadiusY: Double; AAntiAlias: Boolean); override; overload;
+    procedure OnPushClipRoundedRect(const ARect: TRectD; const ARadii: TFloriaClipCornerRadii; AAntiAlias: Boolean); overload;
     procedure OnPopClip(); override;
     procedure OnSetAlpha(AAlpha: Double); override;
     procedure OnSetBlendMode(AMode: TFloriaBlendMode); override;
@@ -165,6 +166,7 @@ begin
 
   if FGL.Available then
   begin
+    FGL.Disable(GL_SCISSOR_TEST);
     FGL.Viewport(0, 0, AWidth, AHeight);
     FPipelines.EnsureInitialized(FGL);
   end;
@@ -203,9 +205,10 @@ procedure TFloriaGPURenderer.Flush();
 var
   I: Integer;
   DC: TFloriaGPUDrawCall;
-  Prog: TFloriaGPUShaderProgram;
+  Prog, LastProg: TFloriaGPUShaderProgram;
   ClipItems: TFloriaGPUClipItemArray;
   ClipCount: Integer;
+  LastClipIndex: Integer;
   Stride: cint;
 begin
   if not FGL.Available or (FBatch.VertexCount = 0) then Exit;
@@ -221,11 +224,12 @@ begin
   FGL.Disable(GL_DEPTH_TEST);
   FGL.Disable(GL_CULL_FACE);
 
-  ClipCount := FClipChain.PackGPUUniforms(ClipItems);
-
   // 4. Bind VBO and configure attribute pointers
   FGL.BindBuffer(GL_ARRAY_BUFFER, FBatch.VBO);
   Stride := SizeOf(TFloriaGPUVertex);
+
+  LastClipIndex := -999;
+  LastProg := nil;
 
   // 5. Execute each batched draw call
   for I := 0 to FBatch.DrawCallCount - 1 do
@@ -236,7 +240,15 @@ begin
 
     Prog.Bind(FGL);
     Prog.SetViewport(FGL, FViewportW, FViewportH);
-    Prog.UploadClipChain(FGL, ClipItems, ClipCount);
+
+    if (DC.ClipIndex <> LastClipIndex) or (Prog <> LastProg) then
+    begin
+      ClipCount := FClipChain.PackGPUUniformsForNode(DC.ClipIndex, ClipItems);
+      Prog.UploadClipChain(FGL, ClipItems, ClipCount);
+      LastClipIndex := DC.ClipIndex;
+      LastProg := Prog;
+    end;
+
     Prog.SetupVertexPointers(FGL);
 
     ApplyBlendMode(DC.BlendMode);
@@ -277,6 +289,11 @@ end;
 procedure TFloriaGPURenderer.OnPushClipRoundedRect(const ARect: TRectD; ARadiusX, ARadiusY: Double; AAntiAlias: Boolean);
 begin
   FClipChain.PushClipRoundedRect(ARect, ARadiusX, ARadiusY, AAntiAlias);
+end;
+
+procedure TFloriaGPURenderer.OnPushClipRoundedRect(const ARect: TRectD; const ARadii: TFloriaClipCornerRadii; AAntiAlias: Boolean);
+begin
+  FClipChain.PushClipRoundedRect(ARect, ARadii, TFloriaMatrix2D.Identity(), AAntiAlias);
 end;
 
 procedure TFloriaGPURenderer.OnPopClip();
@@ -443,8 +460,35 @@ begin
 end;
 
 procedure TFloriaGPURenderer.OnDrawText(const AText: string; AX, AY: Double; AFont: TFloriaFont; AFontSize: Double; const AColor: TBgraPixel);
+var
+  Alloc: TFloriaAtlasAlloc;
+  DstRect, TexRect: TRectD;
+  Font: TFloriaFont;
+  Page: TFloriaAtlasPage;
 begin
-  // Typography glyph runs can be rendered into Atlas as text blobs or glyph quads
+  if (AText = '') or (AColor.A = 0) then Exit;
+  Font := AFont;
+  if not Assigned(Font) then Font := FloriaGetSystemFont();
+
+  if FAtlas.RasterizeText(AText, Font, Alloc) then
+  begin
+    Page := FAtlas.Pages[Alloc.PageIndex];
+    if (Page.TextureID = 0) and FGL.Available then
+      Page.SyncToGPU(FGL);
+
+    TexRect.Left   := Alloc.U1;
+    TexRect.Top    := Alloc.V1;
+    TexRect.Right  := Alloc.U2;
+    TexRect.Bottom := Alloc.V2;
+
+    DstRect.Left   := Round(AX - 2.0);
+    DstRect.Top    := Round(AY) - Round(Font.Ascent) - 2.0;
+    DstRect.Right  := DstRect.Left + Alloc.Rect.Width;
+    DstRect.Bottom := DstRect.Top + Alloc.Rect.Height;
+
+    FBatch.EmitGlyphRect(DstRect, TexRect, Page.TextureID,
+                         AColor, FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
+  end;
 end;
 
 procedure TFloriaGPURenderer.OnDrawParagraph(AParagraph: TFloriaParagraph; AX, AY: Double);
@@ -455,16 +499,21 @@ procedure TFloriaGPURenderer.OnDrawImage(AImage: TFloriaImage; const ADstRect, A
 var
   Alloc: TFloriaAtlasAlloc;
   TexRect: TRectD;
+  Page: TFloriaAtlasPage;
 begin
   if not Assigned(AImage) then Exit;
 
   if FAtlas.AddImagePart(AImage, ASrcRect, Alloc) then
   begin
+    Page := FAtlas.Pages[Alloc.PageIndex];
+    if (Page.TextureID = 0) and FGL.Available then
+      Page.SyncToGPU(FGL);
+
     TexRect.Left   := Alloc.U1;
     TexRect.Top    := Alloc.V1;
     TexRect.Right  := Alloc.U2;
     TexRect.Bottom := Alloc.V2;
-    FBatch.EmitTexturedRect(ADstRect, TexRect, FAtlas.Pages[Alloc.PageIndex].TextureID,
+    FBatch.EmitTexturedRect(ADstRect, TexRect, Page.TextureID,
                             AOpacity * FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
   end;
 end;
