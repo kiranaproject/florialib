@@ -273,6 +273,14 @@
         <Filename Value="floria.displaylist.pas"/>
         <UnitName Value="Floria.DisplayList"/>
       </Item>
+      <Item>
+        <Filename Value="floria.displaylist.clip.pas"/>
+        <UnitName Value="Floria.DisplayList.Clip"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.displaylist.spatial.pas"/>
+        <UnitName Value="Floria.DisplayList.Spatial"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

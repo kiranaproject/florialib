@@ -230,9 +230,20 @@ gantt
     - Diagnostic `Dump()` method generating detailed human-readable logs of recorded operation streams.
 - Verified with 18 dedicated unit tests (535/535 passing in `florialib`, 48/48 in `ft`).
 
-#### 2.2 Analytical Clip Chains & Spatial Viewport Culling
-- **Analytical Clip Chains**: Pack nested clipping regions (rectangles, rounded boxes) into a uniform buffer and pass them as a clip chain to fragment shaders, eliminating offscreen FBO allocation or stencil buffer roundtrips during clipping.
-- **Spatial R-Tree Indexing**: Index display list items in an **R-Tree** spatial acceleration structure. During paint traversal, query the dirty damage region against the R-Tree to instantly skip drawing off-screen or undamaged visual elements.
+#### 2.2 Analytical Clip Chains & Spatial Viewport Culling (`Floria.DisplayList.Clip` & `Floria.DisplayList.Spatial`) — [COMPLETED]
+- Implemented WebRender-inspired analytical clip chains and 2D R-Tree spatial acceleration:
+  - **Analytical Clip Chains (`Floria.DisplayList.Clip`)**:
+    - Primitives: Rectangles (`fckRect`) and rounded rectangles (`fckRoundedRect`) with per-corner radii (`TopLeft`, `TopRight`, `BottomRight`, `BottomLeft`).
+    - Hierarchical `TFloriaClipChain` managing nested clip stacks with affine matrix coordinate transformations and cumulative conservative bounding boxes.
+    - Exact analytical point containment (`ContainsPoint`, `AnalyticalPointInRoundedRect`) and signed distance field evaluation (`SignedDistance`, `AnalyticalRoundedRectSDF`).
+    - Three-way conservative intersection testing (`TestRect`: `ctrOutside`, `ctrInside`, `ctrIntersecting`) allowing non-intersecting geometry to be completely bypassed and fully enclosed geometry to avoid shader clip tests.
+    - GPU uniform buffer packing: `PackGPUUniforms` generating 64-byte std140-aligned uniform structs (`TFloriaGPUClipItem`) ready for direct upload to uniform buffers / UBOs in shaders.
+  - **2D R-Tree Spatial Acceleration Structure (`Floria.DisplayList.Spatial`)**:
+    - Pure Pascal 2D R-Tree implementation (`TFloriaRTree2D`, `TFloriaRTreeNode`) with Guttman Quadratic split algorithm (`PickSeeds`, `Distribute`).
+    - Bulk indexing from retained display lists: `TFloriaRTree2D.BuildFromPicture` automatically extracts bounding boxes of all visual draw commands.
+    - Logarithmic spatial querying: `Search(QueryRect)` returning candidate draw operations with strict Z-order preservation.
+    - Integrated `TFloriaSpatialDisplayList`: Combines retained pictures with the R-Tree index for $O(\log N)$ damage-region queries and viewport-culled playback.
+- Verified with 12 dedicated unit tests (547/547 passing in `florialib`, 48/48 in `ft`).
 
 #### 2.3 Retained Picture Tile Caching (`TFloriaTileCache`)
 - Implement WebRender-style picture caching:
