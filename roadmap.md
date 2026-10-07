@@ -194,13 +194,16 @@ gantt
   - Direct AggPas `path_storage` boolean functions: `PathUnion`, `PathDifference`, `PathIntersect`, `PathXor`.
 - Verified with 16 dedicated unit tests (499/499 passing in `florialib`, 48/48 in `ft`).
 
-#### 1.5 Rich Paragraph Layout Engine (`Floria.Text.Paragraph`)
-- Decouple text wrapping and layout from GUI widgets into a standalone typography engine:
-  - Unicode line breaking conforming to **UAX #14** (Unicode Line Breaking Algorithm).
-  - Bidirectional text layout using the existing FriBidi binding (`Floria.Unicode.BiDi`).
-  - Cascading font fallbacks (system emoji, CJK, Arabic, Latin glyph fallbacks).
-  - Variable font axis manipulation (Weight, Width, Slant, Optical Size).
-  - Color emoji rendering supporting `COLR`/`CPAL` vector tables and `CBDT`/`CBLC`/`sbix` embedded bitmaps.
+#### 1.5 Rich Paragraph Layout Engine (`Floria.Text.Paragraph`) — [COMPLETED]
+- Decoupled rich multi-style text layout and shaping from GUI widgets into a standalone typography engine:
+  - **Multi-Style Spans**: Fluent `TFloriaParagraphBuilder` (`PushStyle`, `PopStyle`, `AddText`, `AddPlaceholder`, `Build`) managing nested character styles with independent font family, size, weights, italic slants, colors, background highlights, letter spacing, word spacing, height multipliers, and baseline offsets.
+  - **Unicode Line Breaking (UAX #14)**: Multilingual line breaking supporting whitespace word breaks, mandatory newline sequences (`\n`, `\r\n`), CJK ideographs/Kana/Hangul boundary breaks, Kinsoku Shori punctuation rules (opening/closing punctuation constraints), soft hyphens (`&shy;`), and emergency break-all wrapping.
+  - **Paragraph Formatting & Alignment**: `TFloriaParagraphStyle` supporting text alignments (`ftaLeft`, `ftaRight`, `ftaCenter`, `ftaJustify`, `ftaStart`, `ftaEnd`), text directions (`ftdLTR`, `ftdRTL`), first-line indentation (`TextIndent`), `MaxLines` constraints, and overflow behaviors (`ftoClip`, `ftoEllipsis` with custom ellipsis string).
+  - **Vertical Baseline Alignment**: True typographic baseline alignment calculating ascents and descents across mixed font sizes and inline elements on identical lines.
+  - **Inline Placeholders**: Support for inline chips, badges, icons, and embedded widgets (`AddPlaceholder`, `GetPlaceholderBounds`) with custom width, height, and alignment (`fpaBaseline`, `fpaTop`, `fpaBottom`, `fpaMiddle`).
+  - **Hit-Testing & Selection**: `GetPositionForOffset(X, Y)` for accurate caret placement, `GetRectsForRange(Start, End)` generating contiguous multi-line selection bounding rectangles, and line metrics inspection (`GetLineMetrics`).
+  - **Direct Canvas Painting**: `Paragraph.Paint(Canvas, X, Y)` rendering text decorations (underline, overline, strikethrough), background highlight fills, and text runs with sub-pixel precision.
+- Verified with 18 dedicated unit tests (517/517 passing in `florialib`, 48/48 in `ft`).
 
 ---
 

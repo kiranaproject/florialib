@@ -233,6 +233,42 @@
         <Filename Value="floria.compression.gzip.pas"/>
         <UnitName Value="Floria.Compression.Gzip"/>
       </Item>
+      <Item>
+        <Filename Value="floria.path.clipper.core.pas"/>
+        <UnitName Value="Floria.Path.Clipper.Core"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.clipper.engine.pas"/>
+        <UnitName Value="Floria.Path.Clipper.Engine"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.clipper.inc"/>
+        <Type Value="Include"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.clipper.minkowski.pas"/>
+        <UnitName Value="Floria.Path.Clipper.Minkowski"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.clipper.offset.pas"/>
+        <UnitName Value="Floria.Path.Clipper.Offset"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.clipper.pas"/>
+        <UnitName Value="Floria.Path.Clipper"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.clipper.rectclip.pas"/>
+        <UnitName Value="Floria.Path.Clipper.RectClip"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.ops.pas"/>
+        <UnitName Value="Floria.Path.Ops"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.text.paragraph.pas"/>
+        <UnitName Value="Floria.Text.Paragraph"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>
