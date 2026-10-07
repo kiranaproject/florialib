@@ -18,7 +18,7 @@ uses
   Floria.SVG.DOM, Floria.SVG.Parser, Floria.HTML.Types, Floria.HTML.Tokenizer, 
   Floria.HTML.DOM, Floria.HTML.Parser, Floria.Image.Core, Floria.Image.BMP, 
   Floria.Image.PNG, Floria.Image.JPEG, Floria.Image.Blur, Floria.Font, 
-  Floria.Canvas.Agg, Floria.Canvas.Blend, Floria.SVG.Rasterizer, Floria.Unicode.BiDi, 
+  Floria.Canvas.Agg, Floria.Canvas.Blend, Floria.ColorSpace, Floria.SVG.Rasterizer, Floria.Unicode.BiDi, 
   Floria.Text.HarfBuzz, Floria.EGL, Floria.XCB.WM.Compositor;
 
 implementation

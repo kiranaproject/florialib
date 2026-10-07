@@ -151,14 +151,18 @@ gantt
 - Integrated directly with `Floria.Canvas.Agg` via `FloriaAggBlendAdaptor` (`pixfmt_custom_blend_rgba`) and updated `DrawImage` / `DrawImagePart`.
 - Verified with 39 dedicated unit tests and full canvas integration tests (404/404 passing in `florialib`, 48/48 in `ft`).
 
-#### 1.2 Color Management & Linear Float Pipeline (`Floria.ColorSpace`)
-- Introduce `TFloriaColorSpace` with support for:
-  - sRGB, Display P3, Rec. 2020, and Adobe RGB.
-  - Transfer functions (sRGB IEC 61966-2-1, Linear, PQ ST 2084, HLG).
-- Introduce high-precision pixel formats alongside `TBgraPixel`:
-  - `TRgbaF16` (half-precision float for HDR).
-  - `TRgbaF32` (single-precision float for color-correct grading).
-- Perform color interpolation and alpha compositing in **linear light** rather than non-linear gamma space, eliminating dark fringing on anti-aliased boundaries.
+#### 1.2 Color Management & Linear Float Pipeline (`Floria.ColorSpace`) — [COMPLETED]
+- Implemented `TFloriaColorSpace` with chromaticities and 3x3 conversion matrices:
+  - CIE 1931 D65 white point: sRGB, Linear sRGB, Display P3, Rec. 2020, Adobe RGB (1998).
+  - Transfer functions: Linear, sRGB (IEC 61966-2-1 piecewise), Gamma 2.2, Gamma 2.8, SMPTE ST 2084 PQ (HDR10), and ITU-R BT.2100 HLG.
+  - Precomputed fast lookup table `GSRGBToLinearLUT[0..255]` for zero-overhead 8-bit conversions.
+- Implemented high-precision pixel formats alongside `TBgraPixel`:
+  - `TRgbaF16`: 64-bit IEEE 754 half-precision float (`FloatToHalf`, `HalfToFloat` bitwise algorithms handling subnormals and infinity).
+  - `TRgbaF32`: 128-bit single-precision float with premultiply/demultiply and clamp operations.
+- Linear light alpha compositing & anti-aliased edge blending:
+  - `FloriaBlendPixelLinear` and `FloriaBlendScanlineLinear` evaluate all 29 blend modes in physical linear light.
+  - Mathematically eliminates dark fringing (muddy brown/olive halo) on semi-transparent and anti-aliased boundaries.
+- Verified with 25 dedicated unit tests (429/429 passing in `florialib`, 48/48 in `ft`).
 
 #### 1.3 Composable Filter Graph (`Floria.Canvas.Filter`)
 - Architect a clean, non-destructive filter tree:

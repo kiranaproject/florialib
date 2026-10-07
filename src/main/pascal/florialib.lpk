@@ -189,6 +189,10 @@
         <Filename Value="floria.canvas.blend.pas"/>
         <UnitName Value="Floria.Canvas.Blend"/>
       </Item>
+      <Item>
+        <Filename Value="floria.colorspace.pas"/>
+        <UnitName Value="Floria.ColorSpace"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>
