@@ -25,6 +25,7 @@ uses
   Floria.Text.Paragraph.Test,
   Floria.DisplayList.Test,
   Floria.DisplayList.Spatial.Test,
+  Floria.DisplayList.Cache.Test,
   Floria.ColorSpace.Test,
   Floria.Hash.Test,
   Floria.Compression.Test,

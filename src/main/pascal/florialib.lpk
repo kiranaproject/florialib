@@ -281,6 +281,10 @@
         <Filename Value="floria.displaylist.spatial.pas"/>
         <UnitName Value="Floria.DisplayList.Spatial"/>
       </Item>
+      <Item>
+        <Filename Value="floria.displaylist.cache.pas"/>
+        <UnitName Value="Floria.DisplayList.Cache"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

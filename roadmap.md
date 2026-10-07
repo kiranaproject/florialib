@@ -245,10 +245,21 @@ gantt
     - Integrated `TFloriaSpatialDisplayList`: Combines retained pictures with the R-Tree index for $O(\log N)$ damage-region queries and viewport-culled playback.
 - Verified with 12 dedicated unit tests (547/547 passing in `florialib`, 48/48 in `ft`).
 
-#### 2.3 Retained Picture Tile Caching (`TFloriaTileCache`)
-- Implement WebRender-style picture caching:
-  - Break scrollable containers, desktop panels, and static background decor into retained GPU tiles.
-  - When scrolling or dragging windows in `shellsama`, update only the quad transform matrix without re-rasterizing any contents, achieving zero-CPU-overhead 120 FPS scrolling.
+#### 2.3 Retained Picture Tile Caching (`Floria.DisplayList.Cache`) — [COMPLETED]
+- Implemented WebRender-style retained picture tile caching:
+  - **Tile Grid Slicing & Storage**:
+    - Uniform 2D tile coordinate grid (`TFloriaTileCoord`, `Col`, `Row`) dividing display list space into fixed-size square tiles (`DEFAULT_TILE_SIZE = 256` or custom).
+    - Dedicated `TFloriaPictureTile` maintaining local world bounds, raster surface backing buffer (`TFloriaImage`), dirty damage state, scale factor, and LRU access epoch timestamp.
+  - **Selective Damage Invalidation**:
+    - `InvalidateRect(DirtyRect)` maps dirty region bounds to the minimal set of intersecting tile coordinates, ensuring unchanged tiles remain cached and never re-render.
+    - Full cache invalidation via `InvalidateAll()`.
+  - **High-Performance Viewport & Scroll Rendering**:
+    - `PrepareViewport(Viewport)`: Pre-rasterizes only dirty visible tiles on demand using clipped picture playback, recording cache hits and rasterization statistics.
+    - `RenderViewport(Canvas, Viewport, DestPoint)` and `RenderScroll(Canvas, Viewport, DestX, DestY)`: Directly composites cached tile bitmaps with automatic canvas boundary clipping. Panning or scrolling a document/window reuses 100% of existing tiles with zero CPU vector recalculation.
+  - **LRU Memory Budget & HiDPI Awareness**:
+    - Configurable cache budget (`MaxCachedTiles`, default 128 tiles / ~32MB). Automatic LRU eviction drops oldest off-screen tiles while safeguarding active frame tiles.
+    - HiDPI sub-pixel scaling: `ScaleFactor` renders tile raster buffers at device pixel density for crisp vector display on Retina/4K screens.
+- Verified with 9 dedicated unit tests (556/556 passing in `florialib`, 48/48 in `ft`).
 
 ---
 
