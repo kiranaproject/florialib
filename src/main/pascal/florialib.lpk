@@ -269,6 +269,10 @@
         <Filename Value="floria.text.paragraph.pas"/>
         <UnitName Value="Floria.Text.Paragraph"/>
       </Item>
+      <Item>
+        <Filename Value="floria.displaylist.pas"/>
+        <UnitName Value="Floria.DisplayList"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

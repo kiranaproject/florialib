@@ -23,6 +23,7 @@ uses
   Floria.Canvas.Filter.Test,
   Floria.Path.Ops.Test,
   Floria.Text.Paragraph.Test,
+  Floria.DisplayList.Test,
   Floria.ColorSpace.Test,
   Floria.Hash.Test,
   Floria.Compression.Test,

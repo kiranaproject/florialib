@@ -210,11 +210,25 @@ gantt
 ### Phase 2: Retained Display Lists & Scene Graph Caching (Months 7–9)
 *Goal: Prevent redundant CPU vector re-rasterization by introducing WebRender-inspired semantic display lists, analytical clip chains, and picture tile caching.*
 
-#### 2.1 Semantic Retained Display List (`TFloriaDisplayList` / `TFloriaPicture`)
-- Implement a semantic recording model for UI canvas calls:
-  - `TFloriaPictureRecorder` records structured UI primitives (`DrawRoundedBox`, `DrawBorder`, `DrawBoxShadow`, `DrawTextRun`, `DrawImageBlob`, `PushClipRect`, `PushClipRoundedRect`) rather than flat pixel-blitting commands.
-  - `TFloriaDisplayList` encapsulates the recorded commands with an exact conservative bounding box.
-  - Can be replayed onto software canvas (`TFloriaCanvasAgg`) or GPU instanced renderers without re-evaluating widget layout.
+#### 2.1 Semantic Retained Display List (`TFloriaDisplayList` / `TFloriaPicture`) — [COMPLETED]
+- Implemented a high-performance semantic recording model and retained display list container:
+  - **`TFloriaPictureRecorder` / `TFloriaDisplayListBuilder`**: Fluent, canvas-like recording interface:
+    - Transform and state management: `Save`, `Restore`, `SetTransform`, `Translate`, `Scale`, `Rotate` (degrees about arbitrary center), `PushAlpha`, `PopAlpha`, `SetBlendMode`.
+    - Clipping: `PushClipRect`, `PushClipRoundedRect`, `PopClip`.
+    - Drawing primitives: `Clear`, `DrawRect`, `DrawRoundedRect`, `DrawRoundedRectOutline`, `DrawCircle`, `DrawLine`, `DrawPath` (integrating `TFloriaPath` with cloned resource ownership and winding rules).
+    - Semantic high-level UI items: `DrawShadow` (with spread and blur dilation), `DrawBorder` (uniform and per-side widths/colors with corner radii), `DrawLinearGradient` (multi-stop color interpolation along arbitrary angles and vectors).
+    - Typography: `DrawText` (with Font and Font-size overloads) and `DrawParagraph` (`Floria.Text.Paragraph` layout integration).
+    - Images & Sub-Pictures: `DrawImage` (scaled and sub-rect blits) and `DrawPicture` (arbitrary recursive sub-picture nesting).
+    - Layer compositing: `SaveLayer` (with opacity, blend mode, and filter graph integration) and `RestoreLayer`.
+  - **Conservative Analytical Bounding Boxes & Viewport Culling**:
+    - `TFloriaMatrix2D`: Complete 2D affine transformation record (Identity, Translation, Scaling, Rotation, Inversion, Determinant, Point/Rect transforms).
+    - Every recorded operation calculates its conservative bounding box in root coordinate space.
+    - `CullRect`: The picture computes the tight conservative axis-aligned bounding box of all visual items.
+    - `Playback(Canvas, ClipBounds)`: Automatic spatial culling skips non-intersecting drawing primitives, eliminating redundant vertex math and rasterization.
+  - **Visitor / Receiver Pattern**:
+    - `IFloriaDisplayListReceiver` / `TFloriaDisplayListReceiver`: Extensible receiver interface enabling GPU compilation, custom analyzers, SVG export, and debugging.
+    - Diagnostic `Dump()` method generating detailed human-readable logs of recorded operation streams.
+- Verified with 18 dedicated unit tests (535/535 passing in `florialib`, 48/48 in `ft`).
 
 #### 2.2 Analytical Clip Chains & Spatial Viewport Culling
 - **Analytical Clip Chains**: Pack nested clipping regions (rectangles, rounded boxes) into a uniform buffer and pass them as a clip chain to fragment shaders, eliminating offscreen FBO allocation or stencil buffer roundtrips during clipping.
