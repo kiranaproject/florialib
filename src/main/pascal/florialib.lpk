@@ -194,6 +194,22 @@
         <UnitName Value="Floria.ColorSpace"/>
       </Item>
       <Item>
+        <Filename Value="floria.hash.crc.pas"/>
+        <UnitName Value="Floria.Hash.CRC"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.hash.adler.pas"/>
+        <UnitName Value="Floria.Hash.Adler"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.hash.fnv.pas"/>
+        <UnitName Value="Floria.Hash.FNV"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.hash.murmur.pas"/>
+        <UnitName Value="Floria.Hash.Murmur"/>
+      </Item>
+      <Item>
         <Filename Value="floria.compression.crc.pas"/>
         <UnitName Value="Floria.Compression.CRC"/>
       </Item>
