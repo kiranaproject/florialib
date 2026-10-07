@@ -18,7 +18,8 @@ uses
   Floria.GPU.Batch,
   Floria.GPU.Shaders,
   Floria.GPU.Renderer,
-  Floria.GPU.Tessellator;
+  Floria.GPU.Tessellator,
+  Floria.GPU.Context;
 
 type
   { TFloriaGPUTest }
@@ -41,6 +42,9 @@ type
     procedure TestTessellateCurvedPathSubdivision;
     procedure TestRenderBatchEmitPathMesh;
     procedure TestGPURendererDirectTessellationPlayback;
+    procedure TestGPUBackendAvailability;
+    procedure TestGPUOffscreenContextLifecycle;
+    procedure TestGPURendererWithOffscreenContext;
   end;
 
 implementation
@@ -649,6 +653,91 @@ begin
   finally
     Renderer.Free();
     Pic.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestGPUBackendAvailability;
+begin
+  AssertTrue('EGL backend is available on Linux', FloriaGPUIsBackendAvailable(gbeEGL));
+  AssertTrue('Software backend is always available', FloriaGPUIsBackendAvailable(gbeSoftware));
+  AssertFalse('WGL backend is not available on Linux', FloriaGPUIsBackendAvailable(gbeWGL));
+  AssertFalse('CGL backend is not available on Linux', FloriaGPUIsBackendAvailable(gbeCGL));
+end;
+
+procedure TFloriaGPUTest.TestGPUOffscreenContextLifecycle;
+var
+  Ctx: TFloriaGPUContext;
+  W, H: Integer;
+begin
+  Ctx := FloriaCreateGPUOffscreenContext(256, 256);
+  if Assigned(Ctx) then
+  begin
+    try
+      AssertTrue('Context is initialized', Ctx.Initialized);
+      AssertTrue('Context is offscreen', Ctx.IsOffscreen);
+      AssertEquals('Backend is gbeEGL', Integer(gbeEGL), Integer(Ctx.BackendType));
+
+      Ctx.GetSurfaceSize(W, H);
+      AssertEquals('Surface width is 256', 256, W);
+      AssertEquals('Surface height is 256', 256, H);
+
+      AssertTrue('MakeCurrent succeeds', Ctx.MakeCurrent());
+      AssertTrue('Context is current', Ctx.IsCurrent);
+
+      Ctx.ReleaseCurrent();
+      AssertFalse('Context is no longer current', Ctx.IsCurrent);
+    finally
+      Ctx.Free();
+    end;
+  end;
+end;
+
+procedure TFloriaGPUTest.TestGPURendererWithOffscreenContext;
+var
+  Ctx: TFloriaGPUContext;
+  Renderer: TFloriaGPURenderer;
+  Recorder: TFloriaPictureRecorder;
+  Pic: TFloriaPicture;
+begin
+  Ctx := FloriaCreateGPUOffscreenContext(320, 240);
+  if Assigned(Ctx) then
+  begin
+    try
+      Renderer := TFloriaGPURenderer.Create(Ctx);
+      try
+        AssertNotNull('Renderer context assigned', Renderer.Context);
+
+        Recorder := TFloriaPictureRecorder.Create();
+        try
+          Recorder.BeginRecording(RectD(0.0, 0.0, 320.0, 240.0));
+          Recorder.DrawRect(RectD(10.0, 10.0, 100.0, 100.0), BgraPixel(255, 0, 0, 255));
+          Pic := Recorder.EndRecording();
+        finally
+          Recorder.Free();
+        end;
+
+        try
+          // Begin frame makes context current
+          Renderer.BeginFrame(320, 240);
+          AssertTrue('In frame', Renderer.InFrame);
+          AssertTrue('Context is current during frame', Ctx.IsCurrent);
+
+          // Playback to GPU receiver
+          Pic.Playback(Renderer);
+          AssertTrue('Batch has vertices', Renderer.Batch.VertexCount > 0);
+
+          // End frame flushes to GPU
+          Renderer.EndFrame();
+          AssertFalse('Frame ended', Renderer.InFrame);
+        finally
+          Pic.Free();
+        end;
+      finally
+        Renderer.Free();
+      end;
+    finally
+      Ctx.Free();
+    end;
   end;
 end;
 

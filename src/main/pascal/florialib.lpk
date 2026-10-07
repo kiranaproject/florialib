@@ -309,6 +309,10 @@
         <Filename Value="floria.gpu.tessellator.pas"/>
         <UnitName Value="Floria.GPU.Tessellator"/>
       </Item>
+      <Item>
+        <Filename Value="floria.gpu.context.pas"/>
+        <UnitName Value="Floria.GPU.Context"/>
+      </Item>
     </Files>
     <RequiredPkgs>
       <Item>

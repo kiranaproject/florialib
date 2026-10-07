@@ -31,7 +31,8 @@ uses
   Floria.GPU.Atlas,
   Floria.GPU.Batch,
   Floria.GPU.Shaders,
-  Floria.GPU.Tessellator;
+  Floria.GPU.Tessellator,
+  Floria.GPU.Context;
 
 type
   // ---------------------------------------------------------------------------
@@ -40,6 +41,8 @@ type
   TFloriaGPURenderer = class(TFloriaDisplayListReceiver)
   private
     FGL                       : TGLEngine;
+    FContext                  : TFloriaGPUContext;
+    FAutoSwapBuffers          : Boolean;
     FAtlas                    : TFloriaGPUAtlas;
     FBatch                    : TFloriaRenderBatch;
     FPipelines                : TFloriaGPUPipelineManager;
@@ -54,7 +57,8 @@ type
 
     procedure ApplyBlendMode(AMode: TFloriaBlendMode);
   public
-    constructor Create(gl: TGLEngine = nil);
+    constructor Create(gl: TGLEngine = nil); overload;
+    constructor Create(AContext: TFloriaGPUContext); overload;
     destructor Destroy(); override;
 
     // Frame Lifecycle
@@ -93,6 +97,8 @@ type
     property ClipChain                : TFloriaClipChain read FClipChain;
     property Tessellator              : TFloriaGPUTessellator read FTessellator;
     property DirectTessellationEnabled: Boolean read FDirectTessellationEnabled write FDirectTessellationEnabled;
+    property Context                  : TFloriaGPUContext read FContext;
+    property AutoSwapBuffers          : Boolean read FAutoSwapBuffers write FAutoSwapBuffers;
     property InFrame                  : Boolean read FInFrame;
   end;
 
@@ -109,6 +115,8 @@ begin
   else
     FGL := FloriaGL();
 
+  FContext                   := nil;
+  FAutoSwapBuffers           := True;
   FAtlas                     := TFloriaGPUAtlas.Create();
   FBatch                     := TFloriaRenderBatch.Create();
   FPipelines                 := TFloriaGPUPipelineManager.Create();
@@ -120,6 +128,16 @@ begin
   FViewportW                 := 0;
   FViewportH                 := 0;
   FInFrame                   := False;
+end;
+
+constructor TFloriaGPURenderer.Create(AContext: TFloriaGPUContext);
+begin
+  if Assigned(AContext) then
+    Create(AContext.GL)
+  else
+    Create(TGLEngine(nil));
+
+  FContext := AContext;
 end;
 
 destructor TFloriaGPURenderer.Destroy();
@@ -142,6 +160,9 @@ begin
   FCurrentAlpha := 1.0;
   FBlendMode    := fbmSrcOver;
 
+  if Assigned(FContext) and not FContext.IsCurrent() then
+    FContext.MakeCurrent();
+
   if FGL.Available then
   begin
     FGL.Viewport(0, 0, AWidth, AHeight);
@@ -152,6 +173,8 @@ end;
 procedure TFloriaGPURenderer.EndFrame();
 begin
   Flush();
+  if Assigned(FContext) and FAutoSwapBuffers and not FContext.IsOffscreen then
+    FContext.SwapBuffers();
   FInFrame := False;
 end;
 
