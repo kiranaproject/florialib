@@ -403,8 +403,11 @@ procedure TFloriaRenderBatch.EmitRoundedRect(const ARect: TRectD; const ARadii: 
 var
   V: array[0..3] of TFloriaGPUVertex;
   I: Integer;
+  MaxR: Double;
 begin
   if ARect.IsEmpty then Exit;
+
+  MaxR := Min(ARect.Width * 0.5, ARect.Height * 0.5);
 
   FillChar(V, SizeOf(V), 0);
   for I := 0 to 3 do
@@ -417,14 +420,14 @@ begin
     V[I].LocalY     := ARect.Top;
     V[I].LocalW     := ARect.Width;
     V[I].LocalH     := ARect.Height;
-    V[I].RadiusTL_X := ARadii.TopLeftX;
-    V[I].RadiusTL_Y := ARadii.TopLeftY;
-    V[I].RadiusTR_X := ARadii.TopRightX;
-    V[I].RadiusTR_Y := ARadii.TopRightY;
-    V[I].RadiusBR_X := ARadii.BottomRightX;
-    V[I].RadiusBR_Y := ARadii.BottomRightY;
-    V[I].RadiusBL_X := ARadii.BottomLeftX;
-    V[I].RadiusBL_Y := ARadii.BottomLeftY;
+    V[I].RadiusTL_X := Min(ARadii.TopLeftX, MaxR);
+    V[I].RadiusTL_Y := Min(ARadii.TopLeftY, MaxR);
+    V[I].RadiusTR_X := Min(ARadii.TopRightX, MaxR);
+    V[I].RadiusTR_Y := Min(ARadii.TopRightY, MaxR);
+    V[I].RadiusBR_X := Min(ARadii.BottomRightX, MaxR);
+    V[I].RadiusBR_Y := Min(ARadii.BottomRightY, MaxR);
+    V[I].RadiusBL_X := Min(ARadii.BottomLeftX, MaxR);
+    V[I].RadiusBL_Y := Min(ARadii.BottomLeftY, MaxR);
     V[I].BorderWidth:= ABorderWidth;
     V[I].BorderR    := ABorderColor.R / 255.0;
     V[I].BorderG    := ABorderColor.G / 255.0;

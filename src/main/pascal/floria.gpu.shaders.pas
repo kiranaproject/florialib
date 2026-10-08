@@ -153,6 +153,7 @@ const
     '  } else {'#10 +
     '    r = (p.y < 0.0) ? rTL_TR.zw : rBR_BL.xy;'#10 +
     '  }'#10 +
+    '  r = min(r, vec2(min(halfSz.x, halfSz.y)));'#10 +
     '  vec2 q = abs(p) - halfSz + r;'#10 +
     '  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r.x;'#10 +
     '}'#10 +
@@ -276,7 +277,7 @@ const
     '  vec2 halfSz = v_LocalRect.zw * 0.5 + vec2(v_Extra.z);'#10 +
     '  vec2 center = v_LocalRect.xy + v_LocalRect.zw * 0.5;'#10 +
     '  vec2 p = abs(v_Position - center);'#10 +
-    '  float r = v_RadiiTL_TR.x;'#10 +
+    '  float r = min(v_RadiiTL_TR.x, min(halfSz.x, halfSz.y));'#10 +
     '  vec2 q = p - halfSz + vec2(r);'#10 +
     '  float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;'#10 +
     '  float blur = max(1.0, v_Extra.y);'#10 +
