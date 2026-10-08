@@ -143,29 +143,39 @@ const
     'uniform vec4 u_ClipRadiiTL_TR[16];'#10 +
     'uniform vec4 u_ClipRadiiBR_BL[16];'#10 +
     'uniform vec4 u_ClipKind[16];'#10 +
-    'bool evaluateClip(vec2 pos) {'#10 +
+    'float evalSDF(vec2 pos, vec4 box, vec4 rTL_TR, vec4 rBR_BL) {'#10 +
+    '  vec2 halfSz = box.zw * 0.5;'#10 +
+    '  vec2 center = box.xy + halfSz;'#10 +
+    '  vec2 p = pos - center;'#10 +
+    '  vec2 r;'#10 +
+    '  if (p.x < 0.0) {'#10 +
+    '    r = (p.y < 0.0) ? rTL_TR.xy : rBR_BL.zw;'#10 +
+    '  } else {'#10 +
+    '    r = (p.y < 0.0) ? rTL_TR.zw : rBR_BL.xy;'#10 +
+    '  }'#10 +
+    '  vec2 q = abs(p) - halfSz + r;'#10 +
+    '  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r.x;'#10 +
+    '}'#10 +
+    'float evaluateClipAlpha(vec2 pos) {'#10 +
+    '  float a = 1.0;'#10 +
     '  for (int i = 0; i < 16; i++) {'#10 +
     '    if (i >= u_ClipCount) break;'#10 +
     '    vec4 box = u_ClipMinMax[i];'#10 +
-    '    if (pos.x < box.x || pos.x > box.z || pos.y < box.y || pos.y > box.w) return false;'#10 +
+    '    float d;'#10 +
     '    if (u_ClipKind[i].x > 1.5) {'#10 +
-    '      vec4 rTL_TR = u_ClipRadiiTL_TR[i];'#10 +
-    '      vec4 rBR_BL = u_ClipRadiiBR_BL[i];'#10 +
-    '      vec2 size = box.zw - box.xy;'#10 +
-    '      vec2 halfSz = size * 0.5;'#10 +
-    '      vec2 center = box.xy + halfSz;'#10 +
-    '      vec2 p = pos - center;'#10 +
-    '      vec2 r;'#10 +
-    '      if (p.x < 0.0) {'#10 +
-    '        r = (p.y < 0.0) ? rTL_TR.xy : rBR_BL.zw;'#10 +
-    '      } else {'#10 +
-    '        r = (p.y < 0.0) ? rTL_TR.zw : rBR_BL.xy;'#10 +
-    '      }'#10 +
-    '      vec2 q = abs(p) - halfSz + r;'#10 +
-    '      if (q.x > 0.0 && q.y > 0.0 && r.x > 0.0 && r.y > 0.0 && (length(q / r) > 1.0)) return false;'#10 +
+    '      d = evalSDF(pos, vec4(box.xy, box.zw - box.xy), u_ClipRadiiTL_TR[i], u_ClipRadiiBR_BL[i]);'#10 +
+    '    } else {'#10 +
+    '      vec2 dBox = max(box.xy - pos, pos - box.zw);'#10 +
+    '      d = max(dBox.x, dBox.y);'#10 +
     '    }'#10 +
+    '    float itemA = (u_ClipKind[i].y < 0.5) ? ((d <= 0.0) ? 1.0 : 0.0) : clamp(0.5 - d, 0.0, 1.0);'#10 +
+    '    a *= itemA;'#10 +
+    '    if (a <= 0.0) return 0.0;'#10 +
     '  }'#10 +
-    '  return true;'#10 +
+    '  return a;'#10 +
+    '}'#10 +
+    'bool evaluateClip(vec2 pos) {'#10 +
+    '  return evaluateClipAlpha(pos) > 0.0;'#10 +
     '}'#10;
 
   // ---------------------------------------------------------------------------
@@ -177,8 +187,9 @@ const
     'varying vec4 v_Color;'#10 +
     'varying vec4 v_Extra;'#10 +
     'void main() {'#10 +
-    '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
-    '  gl_FragColor = v_Color;'#10 +
+    '  float clipA = (v_Extra.x >= 0.0) ? evaluateClipAlpha(v_Position) : 1.0;'#10 +
+    '  if (clipA <= 0.0) discard;'#10 +
+    '  gl_FragColor = vec4(v_Color.rgb, v_Color.a * clipA);'#10 +
     '}'#10;
 
   // ---------------------------------------------------------------------------
@@ -192,7 +203,8 @@ const
     'varying vec4 v_Color;'#10 +
     'varying vec4 v_Extra;'#10 +
     'void main() {'#10 +
-    '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
+    '  float clipA = (v_Extra.x >= 0.0) ? evaluateClipAlpha(v_Position) : 1.0;'#10 +
+    '  if (clipA <= 0.0) discard;'#10 +
     '  vec4 tex = texture2D(u_Texture, v_TexCoord);'#10 +
     '  if (v_Extra.y > 0.5) {'#10 +
     '    float textAlpha = tex.a;'#10 +
@@ -200,11 +212,12 @@ const
     '    if (lum > 0.45) {'#10 +
     '      textAlpha = pow(textAlpha, 0.82);'#10 +
     '    }'#10 +
-    '    float finalA = v_Color.a * textAlpha;'#10 +
+    '    float finalA = v_Color.a * textAlpha * clipA;'#10 +
     '    if (finalA <= 0.001) discard;'#10 +
     '    gl_FragColor = vec4(v_Color.rgb, finalA);'#10 +
     '  } else {'#10 +
-    '    gl_FragColor = tex * v_Color;'#10 +
+    '    vec4 c = tex * v_Color;'#10 +
+    '    gl_FragColor = vec4(c.rgb, c.a * clipA);'#10 +
     '  }'#10 +
     '}'#10;
 
@@ -220,21 +233,9 @@ const
     'varying vec4 v_RadiiBR_BL;'#10 +
     'varying vec4 v_Border;'#10 +
     'varying vec4 v_Extra;'#10 +
-    'float evalSDF(vec2 pos, vec4 box, vec4 rTL_TR, vec4 rBR_BL) {'#10 +
-    '  vec2 halfSz = box.zw * 0.5;'#10 +
-    '  vec2 center = box.xy + halfSz;'#10 +
-    '  vec2 p = pos - center;'#10 +
-    '  vec2 r;'#10 +
-    '  if (p.x < 0.0) {'#10 +
-    '    r = (p.y < 0.0) ? rTL_TR.xy : rBR_BL.zw;'#10 +
-    '  } else {'#10 +
-    '    r = (p.y < 0.0) ? rTL_TR.zw : rBR_BL.xy;'#10 +
-    '  }'#10 +
-    '  vec2 q = abs(p) - halfSz + r;'#10 +
-    '  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r.x;'#10 +
-    '}'#10 +
     'void main() {'#10 +
-    '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
+    '  float clipA = (v_Extra.x >= 0.0) ? evaluateClipAlpha(v_Position) : 1.0;'#10 +
+    '  if (clipA <= 0.0) discard;'#10 +
     '  float d = evalSDF(v_Position, v_LocalRect, v_RadiiTL_TR, v_RadiiBR_BL);'#10 +
     '  float alpha = clamp(0.5 - d, 0.0, 1.0);'#10 +
     '  if (alpha <= 0.0) discard;'#10 +
@@ -248,11 +249,13 @@ const
     '    } else {'#10 +
     '      c = mix(v_Color, borderCol, borderAlpha);'#10 +
     '    }'#10 +
-    '    float finalAlpha = c.a * alpha;'#10 +
+    '    float finalAlpha = c.a * alpha * clipA;'#10 +
     '    if (finalAlpha <= 0.0) discard;'#10 +
     '    gl_FragColor = vec4(c.rgb, finalAlpha);'#10 +
     '  } else {'#10 +
-    '    gl_FragColor = vec4(v_Color.rgb, v_Color.a * alpha);'#10 +
+    '    float finalAlpha = v_Color.a * alpha * clipA;'#10 +
+    '    if (finalAlpha <= 0.0) discard;'#10 +
+    '    gl_FragColor = vec4(v_Color.rgb, finalAlpha);'#10 +
     '  }'#10 +
     '}'#10;
 
@@ -268,7 +271,8 @@ const
     'varying vec4 v_RadiiBR_BL;'#10 +
     'varying vec4 v_Extra;'#10 +
     'void main() {'#10 +
-    '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
+    '  float clipA = (v_Extra.x >= 0.0) ? evaluateClipAlpha(v_Position) : 1.0;'#10 +
+    '  if (clipA <= 0.0) discard;'#10 +
     '  vec2 halfSz = v_LocalRect.zw * 0.5 + vec2(v_Extra.z);'#10 +
     '  vec2 center = v_LocalRect.xy + v_LocalRect.zw * 0.5;'#10 +
     '  vec2 p = abs(v_Position - center);'#10 +
@@ -277,7 +281,7 @@ const
     '  float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;'#10 +
     '  float blur = max(1.0, v_Extra.y);'#10 +
     '  float alpha = clamp(0.5 - d / blur, 0.0, 1.0);'#10 +
-    '  alpha = alpha * alpha * (3.0 - 2.0 * alpha);'#10 +
+    '  alpha = alpha * alpha * (3.0 - 2.0 * alpha) * clipA;'#10 +
     '  if (alpha <= 0.0) discard;'#10 +
     '  gl_FragColor = vec4(v_Color.rgb, v_Color.a * alpha);'#10 +
     '}'#10;
@@ -293,7 +297,8 @@ const
     'varying vec4 v_Border;'#10 +
     'varying vec4 v_Extra;'#10 +
     'void main() {'#10 +
-    '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
+    '  float clipA = (v_Extra.x >= 0.0) ? evaluateClipAlpha(v_Position) : 1.0;'#10 +
+    '  if (clipA <= 0.0) discard;'#10 +
     '  float angleRad = radians(v_Extra.y);'#10 +
     '  vec2 dir = vec2(cos(angleRad), sin(angleRad));'#10 +
     '  vec2 rel = v_Position - v_LocalRect.xy;'#10 +
@@ -302,7 +307,8 @@ const
     '  float t = clamp(proj / totalLen, 0.0, 1.0);'#10 +
     '  vec4 cStart = v_Color;'#10 +
     '  vec4 cEnd = vec4(v_Border.yzw, v_Border.x);'#10 +
-    '  gl_FragColor = mix(cStart, cEnd, t);'#10 +
+    '  vec4 finalC = mix(cStart, cEnd, t);'#10 +
+    '  gl_FragColor = vec4(finalC.rgb, finalC.a * clipA);'#10 +
     '}'#10;
 
   // ---------------------------------------------------------------------------
@@ -314,9 +320,38 @@ const
     'varying vec4 v_Color;'#10 +
     'varying vec4 v_Extra;'#10 +
     'void main() {'#10 +
-    '  if (v_Extra.x >= 0.0 && !evaluateClip(v_Position)) discard;'#10 +
+    '  float clipA = (v_Extra.x >= 0.0) ? evaluateClipAlpha(v_Position) : 1.0;'#10 +
+    '  if (clipA <= 0.0) discard;'#10 +
     '  if (v_Color.a <= 0.0) discard;'#10 +
-    '  gl_FragColor = v_Color;'#10 +
+    '  gl_FragColor = vec4(v_Color.rgb, v_Color.a * clipA);'#10 +
+    '}'#10;
+
+  // ---------------------------------------------------------------------------
+  // Analytical Capsule / Line Fragment Shader
+  // ---------------------------------------------------------------------------
+  CAPSULE_LINE_FRAG =
+    CLIP_HEADER +
+    'varying vec2 v_Position;'#10 +
+    'varying vec4 v_Color;'#10 +
+    'varying vec4 v_LocalRect;'#10 +
+    'varying vec4 v_RadiiTL_TR;'#10 +
+    'varying vec4 v_Extra;'#10 +
+    'void main() {'#10 +
+    '  float clipA = (v_Extra.x >= 0.0) ? evaluateClipAlpha(v_Position) : 1.0;'#10 +
+    '  if (clipA <= 0.0) discard;'#10 +
+    '  vec2 p = v_Position;'#10 +
+    '  vec2 a = v_LocalRect.xy;'#10 +
+    '  vec2 b = v_LocalRect.zw;'#10 +
+    '  vec2 pa = p - a;'#10 +
+    '  vec2 ba = b - a;'#10 +
+    '  float baLenSq = dot(ba, ba);'#10 +
+    '  float h = (baLenSq > 0.0001) ? clamp(dot(pa, ba) / baLenSq, 0.0, 1.0) : 0.0;'#10 +
+    '  float d = length(pa - ba * h) - v_RadiiTL_TR.x;'#10 +
+    '  float alpha = clamp(0.5 - d, 0.0, 1.0);'#10 +
+    '  if (v_RadiiTL_TR.y < 1.0) alpha *= v_RadiiTL_TR.y;'#10 +
+    '  alpha *= clipA;'#10 +
+    '  if (alpha <= 0.0) discard;'#10 +
+    '  gl_FragColor = vec4(v_Color.rgb, v_Color.a * alpha);'#10 +
     '}'#10;
 
 // -----------------------------------------------------------------------------
@@ -578,6 +613,7 @@ begin
   FPrograms[gbtBoxShadow]      := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, BOX_SHADOW_FRAG);
   FPrograms[gbtLinearGradient] := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, LINEAR_GRADIENT_FRAG);
   FPrograms[gbtPathMesh]       := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, PATH_MESH_FRAG);
+  FPrograms[gbtCapsuleLine]    := TFloriaGPUShaderProgram.Create(gl, COMMON_VERTEX_SHADER, CAPSULE_LINE_FRAG);
 
   FInitialized := True;
 end;

@@ -35,7 +35,8 @@ type
     gbtRoundedRect,
     gbtBoxShadow,
     gbtLinearGradient,
-    gbtPathMesh
+    gbtPathMesh,
+    gbtCapsuleLine
   );
 
   // ---------------------------------------------------------------------------
@@ -125,6 +126,10 @@ type
 
     procedure EmitPathMesh(const AMesh: TFloriaTessMesh; const AColor: TBgraPixel;
                            ABlendMode: TFloriaBlendMode = fbmSrcOver; AClipIndex: Integer = -1);
+
+    procedure EmitCapsuleLine(const AP1, AP2: TPointD; AStrokeWidth: Double;
+                             const AColor: TBgraPixel; ABlendMode: TFloriaBlendMode = fbmSrcOver;
+                             AClipIndex: Integer = -1);
 
     // Buffer Synchronization
     procedure UploadToVBO(gl: TGLEngine);
@@ -428,10 +433,11 @@ begin
     V[I].ExtraParam1:= ABorderColor.A / 255.0;
   end;
 
-  V[0].PosX := ARect.Left;  V[0].PosY := ARect.Top;
-  V[1].PosX := ARect.Right; V[1].PosY := ARect.Top;
-  V[2].PosX := ARect.Right; V[2].PosY := ARect.Bottom;
-  V[3].PosX := ARect.Left;  V[3].PosY := ARect.Bottom;
+  // Expand quad geometry by 1.5px skirt margin to accommodate the full SDF antialiasing falloff
+  V[0].PosX := ARect.Left - 1.5;  V[0].PosY := ARect.Top - 1.5;
+  V[1].PosX := ARect.Right + 1.5; V[1].PosY := ARect.Top - 1.5;
+  V[2].PosX := ARect.Right + 1.5; V[2].PosY := ARect.Bottom + 1.5;
+  V[3].PosX := ARect.Left - 1.5;  V[3].PosY := ARect.Bottom + 1.5;
 
   if CanMergeWithCurrent(gbtRoundedRect, 0, ABlendMode, AClipIndex) then
     Inc(FDrawCalls[FDrawCallCount - 1].VertexCount, 6)
@@ -628,6 +634,89 @@ begin
     FVertices[FVertexCount] := V;
     Inc(FVertexCount);
   end;
+end;
+
+procedure TFloriaRenderBatch.EmitCapsuleLine(const AP1, AP2: TPointD; AStrokeWidth: Double;
+                                            const AColor: TBgraPixel; ABlendMode: TFloriaBlendMode = fbmSrcOver;
+                                            AClipIndex: Integer = -1);
+var
+  V: array[0..3] of TFloriaGPUVertex;
+  I: Integer;
+  Dx, Dy, Len, InvLen, Nx, Ny, DirX, DirY, R, Margin: Double;
+begin
+  if (AColor.A = 0) or (AStrokeWidth <= 0.0) then Exit;
+
+  Dx := AP2.X - AP1.X;
+  Dy := AP2.Y - AP1.Y;
+  Len := Sqrt(Dx * Dx + Dy * Dy);
+
+  R := AStrokeWidth * 0.5;
+  if R < 0.5 then
+    Margin := 1.5
+  else
+    Margin := R + 1.5;
+
+  if Len < 1e-4 then
+  begin
+    DirX := 1.0; DirY := 0.0;
+    Nx := 0.0;   Ny := 1.0;
+  end
+  else
+  begin
+    InvLen := 1.0 / Len;
+    DirX := Dx * InvLen;
+    DirY := Dy * InvLen;
+    Nx := -DirY;
+    Ny :=  DirX;
+  end;
+
+  FillChar(V, SizeOf(V), 0);
+  for I := 0 to 3 do
+  begin
+    V[I].ColorR     := AColor.R / 255.0;
+    V[I].ColorG     := AColor.G / 255.0;
+    V[I].ColorB     := AColor.B / 255.0;
+    V[I].ColorA     := AColor.A / 255.0;
+    V[I].LocalX     := AP1.X;
+    V[I].LocalY     := AP1.Y;
+    V[I].LocalW     := AP2.X;
+    V[I].LocalH     := AP2.Y;
+    V[I].RadiusTL_X := R;
+    V[I].RadiusTL_Y := AStrokeWidth;
+    V[I].ClipIndex  := AClipIndex;
+  end;
+
+  // Oriented quad vertices enclosing the capsule segment + AA margin
+  V[0].PosX := AP1.X - DirX * Margin + Nx * Margin;
+  V[0].PosY := AP1.Y - DirY * Margin + Ny * Margin;
+
+  V[1].PosX := AP2.X + DirX * Margin + Nx * Margin;
+  V[1].PosY := AP2.Y + DirY * Margin + Ny * Margin;
+
+  V[2].PosX := AP2.X + DirX * Margin - Nx * Margin;
+  V[2].PosY := AP2.Y + DirY * Margin - Ny * Margin;
+
+  V[3].PosX := AP1.X - DirX * Margin - Nx * Margin;
+  V[3].PosY := AP1.Y - DirY * Margin - Ny * Margin;
+
+  if CanMergeWithCurrent(gbtCapsuleLine, 0, ABlendMode, AClipIndex) then
+    Inc(FDrawCalls[FDrawCallCount - 1].VertexCount, 6)
+  else
+  begin
+    EnsureDrawCallCapacity();
+    with FDrawCalls[FDrawCallCount] do
+    begin
+      BatchType   := gbtCapsuleLine;
+      TextureID   := 0;
+      BlendMode   := ABlendMode;
+      ClipIndex   := AClipIndex;
+      StartIndex  := FVertexCount;
+      VertexCount := 6;
+    end;
+    Inc(FDrawCallCount);
+  end;
+
+  AppendQuadVertices(V[0], V[1], V[2], V[3]);
 end;
 
 procedure TFloriaRenderBatch.UploadToVBO(gl: TGLEngine);

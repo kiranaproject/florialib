@@ -345,30 +345,11 @@ begin
 end;
 
 procedure TFloriaGPURenderer.OnDrawLine(AX1, AY1, AX2, AY2: Double; const AColor: TBgraPixel; AStrokeWidth: Double);
-var
-  R: TRectD;
-  LineMesh: TFloriaTessMesh;
 begin
-  if AColor.A = 0 then Exit;
+  if (AColor.A = 0) or (AStrokeWidth <= 0.0) then Exit;
 
-  // Axis-aligned lines as thin rects
-  if Abs(AY1 - AY2) < 1e-4 then
-  begin
-    R := RectD(Min(AX1, AX2), AY1 - AStrokeWidth * 0.5, Max(AX1, AX2), AY1 + AStrokeWidth * 0.5);
-    FBatch.EmitSolidRect(R, AColor, FBlendMode, FClipChain.CurrentNode);
-  end
-  else if Abs(AX1 - AX2) < 1e-4 then
-  begin
-    R := RectD(AX1 - AStrokeWidth * 0.5, Min(AY1, AY2), AX1 + AStrokeWidth * 0.5, Max(AY1, AY2));
-    FBatch.EmitSolidRect(R, AColor, FBlendMode, FClipChain.CurrentNode);
-  end
-  else if FDirectTessellationEnabled then
-  begin
-    LineMesh.Clear();
-    FTessellator.TessellateLine(PointD(AX1, AY1), PointD(AX2, AY2), AStrokeWidth, True, LineMesh);
-    if LineMesh.IndexCount > 0 then
-      FBatch.EmitPathMesh(LineMesh, AColor, FBlendMode, FClipChain.CurrentNode);
-  end;
+  // Use analytical SDF capsule line rendering for subpixel antialiasing and round caps
+  FBatch.EmitCapsuleLine(PointD(AX1, AY1), PointD(AX2, AY2), AStrokeWidth, AColor, FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawPath(APath: TFloriaPath; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double; AFillRule: TFillRule);
