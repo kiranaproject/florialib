@@ -116,11 +116,70 @@ type
 
 ---
 
-## 5. File & Unit Conventions
+## 5. Rich Paragraph Layout Engine (`Floria.Text.Paragraph`)
+
+`Floria.Text.Paragraph` provides multi-style, internationalized rich text paragraph layout decoupled from individual GUI widgets:
+
+### 5.1 Multi-Style Span Builder
+
+```pascal
+uses
+  Floria.Text.Paragraph;
+
+var
+  Builder: TFloriaParagraphBuilder;
+  Paragraph: TFloriaParagraph;
+begin
+  Builder := TFloriaParagraphBuilder.Create();
+  try
+    // Outer paragraph configuration
+    Builder.Style.Alignment := ftaLeft;
+    Builder.Style.MaxLines := 3;
+    Builder.Style.Overflow := ftoEllipsis;
+
+    // Rich span building
+    Builder.PushStyle(TFloriaTextStyle.Create('Sans', 14.0, [fsBold], RGBA(30, 41, 59, 255)));
+    Builder.AddText('Important: ');
+    Builder.PopStyle();
+
+    Builder.PushStyle(TFloriaTextStyle.Create('Sans', 14.0, [], RGBA(71, 85, 105, 255)));
+    Builder.AddText('Floria Toolkit features international typography and UAX #14 line breaking.');
+    Builder.PopStyle();
+
+    Paragraph := Builder.Build();
+  finally
+    Builder.Free();
+  end;
+
+  try
+    // Layout to desired width constraint
+    Paragraph.Layout(300.0);
+
+    // Direct canvas painting
+    Paragraph.Paint(Canvas, 20.0, 40.0);
+  finally
+    Paragraph.Free();
+  end;
+end;
+```
+
+### 5.2 Core Capabilities
+- **Unicode Line Breaking (UAX #14)**: Multilingual line breaking, whitespace wrapping, CJK ideographs/Kana/Hangul boundary breaks, Kinsoku Shori punctuation rules, and soft hyphens.
+- **Vertical Baseline Alignment**: True typographic baseline alignment calculating ascents and descents across mixed font sizes and inline elements on identical lines.
+- **Inline Placeholders**: Support for embedded badges/chips (`AddPlaceholder`) with custom dimensions and baseline/middle/top alignment.
+- **Hit-Testing & Selection**:
+  - `GetPositionForOffset(X, Y)`: Returns precise text cluster index for caret placement.
+  - `GetRectsForRange(Start, End)`: Generates contiguous multi-line bounding rectangles for mouse-drag selection highlighting.
+
+---
+
+## 6. File & Unit Conventions
 
 | Unit | Filename | Description |
 |---|---|---|
 | `Floria.Unicode.BiDi` | `floria.unicode.bidi.pas` | UAX #9 Bidirectional algorithm |
 | `Floria.Text.HarfBuzz` | `floria.text.harfbuzz.pas` | Dynamic HarfBuzz shaper |
-| `Floria.Unicode.BiDi.Test` | `floria.unicode.bidi.test.pas` | 8 BiDi unit tests |
-| `Floria.Text.HarfBuzz.Test` | `floria.text.harfbuzz.test.pas` | 6 HarfBuzz shaper unit tests |
+| `Floria.Text.Paragraph` | `floria.text.paragraph.pas` | Rich paragraph layout & UAX #14 line breaker |
+| `Floria.Unicode.BiDi.Test` | `floria.unicode.bidi.test.pas` | BiDi unit tests |
+| `Floria.Text.HarfBuzz.Test` | `floria.text.harfbuzz.test.pas` | HarfBuzz shaper unit tests |
+| `Floria.Text.Paragraph.Test` | `floria.text.paragraph.test.pas` | Paragraph engine unit tests |

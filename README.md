@@ -6,7 +6,7 @@ Developed by **Dio Affriza** &bull; Licensed under the **Mozilla Public License 
 
 [![FPC](https://img.shields.io/badge/Language-Free%20Pascal%203.2%2B-blue.svg)](https://www.freepascal.org/)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Tests](https://img.shields.io/badge/Tests-346%20passed%20%7C%200%20errors-success.svg)](src/test/pascal/)
+[![Tests](https://img.shields.io/badge/Tests-579%20passed%20%7C%200%20errors-success.svg)](src/test/pascal/)
 
 ---
 
@@ -103,7 +103,82 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 
 ---
 
-### 6. Internationalized Text Layout & Shaping (`Floria.Unicode.BiDi`, `Floria.Text.HarfBuzz`)
+### 6. Extended Blend Modes & Physical Linear Color Pipeline (`Floria.Blend`, `Floria.ColorSpace`)
+
+- **29 W3C & Skia Blend Modes**:
+  - 14 Porter-Duff & Arithmetic: `Clear`, `Src`, `Dst`, `SrcOver`, `DstOver`, `SrcIn`, `DstIn`, `SrcOut`, `DstOut`, `SrcATop`, `DstATop`, `Xor`, `Plus`, `Modulate`.
+  - 11 Separable Color: `Multiply`, `Screen`, `Overlay`, `Darken`, `Lighten`, `ColorDodge`, `ColorBurn`, `HardLight`, `SoftLight`, `Difference`, `Exclusion`.
+  - 4 Non-Separable HSL: `Hue`, `Saturation`, `Color`, `Luminosity`.
+- **Color Spaces & HDR Types (`floria.colorspace.pas`)**:
+  - Standard spaces: sRGB, Linear sRGB, Display P3, Rec. 2020, Adobe RGB (1998).
+  - Transfer functions: Linear, sRGB (IEC 61966-2-1), Gamma 2.2 / 2.8, SMPTE ST 2084 PQ (HDR10), ITU-R BT.2100 HLG.
+  - High-precision pixels: `TRgbaF16` (64-bit half-precision IEEE 754) and `TRgbaF32` (128-bit single-precision float).
+  - Physical linear-light compositing eliminates dark fringing around anti-aliased edges.
+
+---
+
+### 7. Composable Filter Graph (`Floria.Canvas.Filter`)
+
+- **Non-Destructive Filter Tree (`floria.filter.*`)**:
+  - `TBlurFilter`: Multi-algorithm blur supporting 3-pass Gaussian (Central Limit Theorem $O(1)$), fast Box blur, and Dual Kawase blur.
+  - `TColorMatrixFilter`: $4 \times 5$ color matrix transforms with presets for Grayscale, Invert, Sepia, Saturation, Brightness, and Contrast.
+  - `TDropShadowFilter`: Configurable offset, sigma blur, tint color, and composite mode.
+  - `TMorphologyFilter`: Mathematical morphology operators (Dilate / Erode).
+  - `TDisplacementMapFilter`: SVG `<feDisplacementMap>` sub-pixel bilinear sampling.
+  - Fluent pipelining with `Compose` and `Composite`.
+
+---
+
+### 8. Boolean Path Operations & Vector Math (`Floria.Path.*`, Clipper2)
+
+- **Pure Object Pascal Clipper2 Engine**: Angus Johnson's polygon clipping engine with native dotted namespaces (`Floria.Path.Clipper.*`).
+- **High-Level `TFloriaPath`**:
+  - Primitives: `MoveTo`, `LineTo`, `QuadTo`, `CubicTo` (adaptive de Casteljau subdivision), `ArcTo`, and `Close`.
+  - Boolean operations: `Union`, `Difference`, `Intersect`, and `XorOp`.
+  - Path offset / inflation: `Inflate` with Miter, Round, Bevel joins and Butt, Square, Round caps.
+  - Simplification: Douglas-Peucker contour reduction.
+  - Two-way interop with SVG path data strings (`d="..."`) and AggPas `path_storage`.
+
+---
+
+### 9. Rich Paragraph Layout Engine (`Floria.Text.Paragraph`)
+
+- **Multi-Style Spans**: Fluent `TFloriaParagraphBuilder` (`PushStyle`, `PopStyle`, `AddText`, `AddPlaceholder`, `Build`) managing independent styles per span.
+- **Unicode Line Breaking (UAX #14)**: Multilingual line breaking, whitespace wrapping, CJK ideographs/Kana/Hangul boundary breaks, Kinsoku Shori punctuation rules, and soft hyphens.
+- **Paragraph Formatting & Alignment**: Left, Right, Center, Justify, LTR/RTL text direction, `TextIndent`, `MaxLines`, and ellipsis overflow (`ftoEllipsis`).
+- **Inline Placeholders & Hit-Testing**: Support for embedded badges/chips, `GetPositionForOffset` for caret positioning, and `GetRectsForRange` for multi-line selection bounding boxes.
+
+---
+
+### 10. Retained Display Lists & Scene Graph Caching (`Floria.DisplayList.*`)
+
+- **`TFloriaPicture` & `TFloriaPictureRecorder`**: Semantic command recording, affine 2D transform stack, viewport culling, and visitor playback.
+- **Analytical Clip Chains (`Floria.DisplayList.Clip`)**: WebRender-style analytical SDF clip evaluation in uniforms/shaders, bypassing offscreen FBO allocation.
+- **2D R-Tree Spatial Acceleration (`Floria.DisplayList.Spatial`)**: Logarithmic spatial indexing with quadratic split algorithm for damage-region queries and viewport culling.
+- **Retained Picture Tile Caching (`Floria.DisplayList.Cache`)**: 2D grid tile cache with selective damage invalidation (`InvalidateRect`) and LRU memory management, enabling zero-CPU-redraw scrolling.
+
+---
+
+### 11. Hardware-Accelerated GPU Vector Core (`Floria.GL`, `Floria.GPU.*`, `Floria.Canvas.GPU`)
+
+- **Dynamic OpenGL / GLES Loader (`Floria.GL`)**: Pure Pascal dynamic loader via `dynlibs` (`libGLESv2.so.2` / `libGL.so.1`) and `eglGetProcAddress`.
+- **EGL Presentation Driver (`Floria.GPU.Context`)**: Native X11 EGL 1.4/1.5 context management, VSync synchronization (`eglSwapInterval`), and offscreen PBuffers.
+- **Dynamic Texture Atlas & Fallback Blob Rasterizer (`Floria.GPU.Atlas`)**: Skyline bin-packing atlas with AggPas CPU rasterization for complex vector glyphs.
+- **Instanced Quad & Vertex Batching (`Floria.GPU.Batch`)**: Draw-call coalescing streaming 64-byte std140-aligned vertices to GPU VBOs.
+- **AOT Precompiled Mega-Shaders (`Floria.GPU.Shaders`)**: Zero runtime JIT stutter; SDF analytical rounded rectangles, borders, box shadows, linear gradients, and in-shader clip chains.
+- **Native GPU Path Tessellation (`Floria.GPU.Tessellator`)**: Single-pass stroke extrusion with Miter/Round/Bevel joins, ear-clipping polygon triangulation, and 1px analytic AA boundary skirts.
+- **Polymorphic GPU Canvas (`Floria.Canvas.GPU`)**: Implements standard canvas operations backed directly by hardware acceleration.
+
+---
+
+### 12. Compression & Hashing Utilities (`Floria.Compression`, `Floria.Hash`)
+
+- **Pure Pascal Compression**: Streaming BitStream, Huffman trees, Deflate, Zlib, and Gzip codecs.
+- **High-Performance Hashing**: CRC16, CRC32, CRC64, Adler32, FNV-1a, and MurmurHash3 algorithms.
+
+---
+
+### 13. Internationalized Text Layout & Shaping (`Floria.Unicode.BiDi`, `Floria.Text.HarfBuzz`)
 
 - **Unicode Bidirectional Algorithm (UAX #9)**: Complete pure Pascal implementation handling mixed LTR and RTL scripts (Arabic, Hebrew, Persian, Latin), weak/neutral character resolution, bracket pairing, and glyph mirroring.
 - **Dynamic HarfBuzz OpenType Shaper**: Dynamically loads `libharfbuzz.so.0` via `dynlibs` (zero hard binary dependency; automatic fallback if unavailable). Accurately shapes ligatures (`liga`, `calt`), cursive Arabic connections, and complex mark placement.
@@ -116,7 +191,7 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 
 - **Free Pascal**: FPC 3.2.0+ (recommended: FPC 3.2.3+).
 - **Pasbuild**: Free Pascal build tool.
-- **System Libraries**: `libxcb`, `libxcb-render`, `libxcb-randr`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`, `libfreetype`, `libharfbuzz` (optional at runtime).
+- **System Libraries**: `libxcb`, `libxcb-render`, `libxcb-randr`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`, `libfreetype`, `libharfbuzz` (optional at runtime), `libEGL`, `libGLESv2` (optional at runtime for GPU acceleration).
 
 ### Build Commands
 
@@ -124,7 +199,7 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 # Compile library
 pasbuild compile
 
-# Run complete test suite (346 tests)
+# Run complete test suite (579 tests)
 pasbuild test
 
 # Force clean build and run tests
@@ -154,6 +229,7 @@ Comprehensive guides and API references are available in the [`docs/`](docs/) di
 - [**XCB & Window Manager Guide**](docs/xcb.md)
 - [**WM Framework Specification**](docs/wm.md)
 - [**Coding Standards & Development Guide**](docs/coding-style.md)
+- [**Skia-Parity Graphics Architecture Roadmap**](roadmap.md)
 
 ---
 

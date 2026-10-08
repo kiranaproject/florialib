@@ -323,11 +323,37 @@ gantt
     - Abstract backend dispatch (`gbeEGL`, `gbeWGL`, `gbeCGL`, `gbeSoftware`) ready for future platform bindings.
 - Verified with 3 dedicated unit tests (576/576 passing in `florialib`, 48/48 in `ft`).
 
+#### 3.4 Polymorphic GPU Canvas & Crisp Typography (`Floria.Canvas.GPU`) — [COMPLETED]
+- Implemented polymorphic hardware canvas integrating GPU batch rendering with standard canvas abstractions:
+  - Polymorphic canvas operations: `DrawRect`, `DrawRoundedRect`, `DrawShadow`, `DrawText`, `PushClipRect`, `PopClipRect`.
+  - Analytical clip falloff and expanded rounded-rect AA boundary skirts.
+  - Corner radius clamping conforming to CSS3 corner overlap specification (§4.5), ensuring large-radius pill capsules (`border-radius: 9999px`) render flawlessly without SDF discard.
+  - Sub-pixel glyph positioning and dynamic texture atlas integration for crisp typography.
+- Verified with unit tests and full toolkit regression tests (579/579 passing in `florialib`, 53/53 in `ft`).
+
 ---
 
-## 5. Summary of Recommended Next Steps
+## 5. Summary of Completed Milestones & Future Initiatives
 
-1. **Immediate (Sprint 1)**: Implement extended blend modes and gamma-correct linear color space blending in `Floria.Canvas.Agg`.
-2. **Short-Term (Sprint 2–3)**: Port or bind **Clipper2** to deliver first-class boolean path operations (`Floria.Path.Ops`).
-3. **Mid-Term (Sprint 4–6)**: Construct the standalone `TFloriaParagraph` engine with UAX #14 line-breaking and cascading font fallback.
-4. **Long-Term**: Build the `TFloriaPicture` command recording pipeline and transition the EGL backend from a simple texture quad into a fragment-shader layer compositor.
+### Completed Milestones
+1. **Phase 1: High-End 2D CPU Parity** [100% Completed]
+   - 29 W3C/Skia blend modes (`Floria.Blend`).
+   - Physical linear-light color pipeline, sRGB/Display P3/Rec.2020, and `TRgbaF16`/`TRgbaF32` pixels (`Floria.ColorSpace`).
+   - Composable non-destructive filter graph with Gaussian/Box/Dual-Kawase blur, ColorMatrix, DropShadow, Morphology, and DisplacementMap (`Floria.Filter.*`).
+   - Pure Pascal Clipper2 engine and high-level `TFloriaPath` with boolean operations, inflation, and simplification (`Floria.Path.*`).
+   - Rich multi-style paragraph layout with UAX #14 line breaking, bi-directional text flow, hit-testing, and selection bounding boxes (`Floria.Text.Paragraph`).
+2. **Phase 2: Retained Display Lists & Scene Graph Caching** [100% Completed]
+   - Semantic display lists, `TFloriaPicture`, and `TFloriaPictureRecorder` (`Floria.DisplayList`).
+   - Analytical clip chains and 2D R-Tree spatial indexing with logarithmic query times (`Floria.DisplayList.Clip`, `Floria.DisplayList.Spatial`).
+   - Retained picture tile cache (`Floria.DisplayList.Cache`) with selective damage invalidation.
+3. **Phase 3: Hardware-Accelerated GPU Vector Core** [100% Completed]
+   - Dynamic OpenGL/GLES loader and native X11 EGL context management (`Floria.GL`, `Floria.GPU.Context`).
+   - High-throughput instanced quad batching and dynamic skyline texture atlas (`Floria.GPU.Batch`, `Floria.GPU.Atlas`).
+   - 100% AOT precompiled shaders with SDF rounded rectangles, box shadows, and linear gradients (`Floria.GPU.Shaders`).
+   - Native GPU stroke tessellation, ear-clipping polygon triangulation, and 1px analytic AA boundary skirts (`Floria.GPU.Tessellator`).
+   - Polymorphic GPU canvas abstraction (`Floria.Canvas.GPU`).
+
+### Future Initiatives
+1. **Vulkan Vector Backend**: Low-overhead explicit memory management and multi-threaded command recording (`Floria.GPU.Vulkan`).
+2. **Desktop Compositor & Window Manager Integration (`shellsama`)**: High-refresh-rate desktop environment leveraging retained display lists, analytical clip chains, and damage culling.
+3. **Input Method Editor (IME) Subsystem**: Client bridge for `ibus` and `fcitx5` for seamless East Asian (CJK) text composition.

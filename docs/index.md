@@ -8,29 +8,26 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
 
 ## Subsystems Overview
 
-`florialib` provides two core subsystems:
+`florialib` provides comprehensive foundations for modern desktop graphics and applications:
 
 ```
-                  ┌───────────────────────────────────────────────┐
-                  │                   florialib                   │
-                  └──────┬─────────────────────────────────┬──────┘
-                         │                                 │
-                         ▼                                 ▼
-      ┌────────────────────────────────────┐    ┌────────────────────────────────────┐
-      │           CSS Subsystem            │    │       XCB & X11 WM Subsystem       │
-      ├────────────────────────────────────┤    ├────────────────────────────────────┤
-      │ • W3C CSS Syntax Level 3 §4        │    │ • Pure XCB Pascal Bindings         │
-      │   Streaming Push Tokenizer         │    │ • ICCCM 2.0 Protocol Helpers       │
-      │ • W3C CSS Syntax Level 3 §5        │    │ • EWMH (Extended Window Manager)   │
-      │   Streaming & One-shot Parser      │    │ • RandR Multi-Monitor Management   │
-      │ • Complete AST Model (Ownership)   │    │ • XRender Hardware-Accelerated 2D  │
-      │ • Typed Value Parsers (RGBA, Hex,  │    │ • SHM Shared Memory Framebuffers   │
-      │   Units, Lengths, Box Model)       │    │ • Shape Extension (Non-rectangular)│
-      │ • 70+ Style Property IDs           │    │ • XFixes Cursor Tracking & Damage  │
-      │ • Automatic Shorthand Expansion    │    │ • XCB Cursor & KeySyms Management  │
-      │ • W3C Selectors & Specificity      │    │ • Complete X11 KeySym Constants    │
-      │ • Element Matching & Cascade Engine│    │                                    │
-      └────────────────────────────────────┘    └────────────────────────────────────┘
+                  ┌─────────────────────────────────────────────────────────────┐
+                  │                          florialib                          │
+                  └──────┬───────────────────────┬───────────────────────┬──────┘
+                         │                       │                       │
+                         ▼                       ▼                       ▼
+      ┌─────────────────────────┐ ┌─────────────────────────┐ ┌─────────────────────────┐
+      │      CSS Subsystem      │ │    2D Graphics & GPU    │ │  XCB & X11 WM Subsystem │
+      ├─────────────────────────┤ ├─────────────────────────┤ ├─────────────────────────┤
+      │ • W3C CSS Syntax L3 §4  │ │ • AggPas Vector Canvas  │ │ • Pure XCB Bindings     │
+      │   Streaming Push Parser │ │ • 29 W3C/Skia Blends    │ │ • ICCCM 2.0 & EWMH/NetWM│
+      │ • Complete AST Model    │ │ • Linear Float16/32 HDR │ │ • RandR Multi-Monitor   │
+      │ • Typed Value Parsers   │ │ • Composable Filter Tree│ │ • XRender 2D Compositing │
+      │ • 70+ Style Properties  │ │ • Clipper2 Path Ops     │ │ • SHM Framebuffers      │
+      │ • W3C Selectors & Spec  │ │ • Retained Display List │ │ • Shape & XFixes        │
+      │ • Style Cascade Resolver│ │ • GPU EGL/GLES2 Batcher │ │ • Themed Cursors & Keys │
+      │ • Rich Typography (BiDi)│ │ • Dynamic Texture Atlas │ │ • Window Reparenting WM │
+      └─────────────────────────┘ └─────────────────────────┘ └─────────────────────────┘
 ```
 
 ---
@@ -45,9 +42,10 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
 | [**XCB & Window Manager Guide**](xcb.md) | Documentation and code examples for XCB, ICCCM, EWMH, RandR, XRender, SHM, Shape, and KeySyms. |
 | [**WM Framework Specification**](wm.md) | Architecture and specifications for Floria.XCB.WM (reparenting, EWMH, virtual desktops, client management). |
 | [**Image Subsystem Guide**](image.md) | Pure Pascal image buffer, BMP/PNG/JPEG codecs, and AggPas-compatible 32-bit raster graphics. |
-| [**Canvas & 2D Graphics Guide**](canvas.md) | 2D vector & raster anti-aliased canvas (`Floria.Canvas.Agg`), fast blur (`Floria.Image.Blur`), and FreeType fonts (`Floria.Font`). |
-| [**Text Layout & Shaping Guide**](text.md) | Pure Pascal Unicode BiDi (UAX #9) and dynamic HarfBuzz OpenType text shaping (`Floria.Unicode.BiDi`, `Floria.Text.HarfBuzz`). |
+| [**Canvas & 2D Graphics Guide**](canvas.md) | 2D vector canvas (`Floria.Canvas.Agg`), 29 blend modes, color spaces, filter graph, display lists, and GPU hardware canvas. |
+| [**Text Layout & Shaping Guide**](text.md) | Rich paragraph layout (`Floria.Text.Paragraph`, UAX #14), Unicode BiDi (UAX #9), and dynamic HarfBuzz text shaping. |
 | [**Coding Standards & Development**](coding-style.md) | Object Pascal conventions, mandatory `()` routine rules, memory ownership, and Pasbuild build workflow. |
+| [**Skia-Parity Graphics Architecture Roadmap**](../roadmap.md) | Architectural roadmap documenting the evolution toward Google Skia-parity graphics and GPU vector core. |
 
 ---
 
@@ -57,7 +55,7 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
 
 - **Free Pascal Compiler** (FPC 3.2.0 or newer, recommended: FPC 3.2.3+).
 - **Pasbuild** build tool (or Lazarus IDE via `florialib.lpk`).
-- Standard Linux/Unix X11 development libraries (`libxcb`, `libxcb-render`, `libxcb-randr`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`).
+- Standard Linux/Unix X11 development libraries (`libxcb`, `libxcb-render`, `libxcb-randr`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`, `libfreetype`, `libharfbuzz`, `libEGL`, `libGLESv2`).
 
 ### Compiling the Library
 
@@ -67,7 +65,7 @@ pasbuild compile
 
 ### Running the Test Suite
 
-`florialib` features an extensive test suite (346 unit tests) powered by FPCUnit:
+`florialib` features an extensive test suite (579 unit tests) powered by FPCUnit:
 
 ```bash
 pasbuild test
