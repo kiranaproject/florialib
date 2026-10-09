@@ -7,7 +7,7 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   Floria.Image.Core, Floria.Canvas.Agg, Floria.SVG.DOM, Floria.SVG.Parser, Floria.SVG.Rasterizer,
-  Floria.Canvas.Blend;
+  Floria.Canvas.Blend, Floria.Font;
 
 type
   TFloriaCanvasAggTest = class(TTestCase)
@@ -24,6 +24,7 @@ type
     procedure TestDrawImagePremultipliedAlpha();
     procedure TestCanvasBlendModeRect();
     procedure TestCanvasBlendModeImage();
+    procedure TestFontFallbackChainingAndSymbols();
   end;
 
 implementation
@@ -419,6 +420,71 @@ begin
   finally
     DestImg.Free();
     SrcImg.Free();
+  end;
+end;
+
+procedure TFloriaCanvasAggTest.TestFontFallbackChainingAndSymbols();
+var
+  Font, FallbackCJK, FallbackSym: TFloriaFont;
+  Img: TFloriaImage;
+  Canvas: TFloriaCanvasAgg;
+  w: Double;
+  x, y: Integer;
+  hasDrawnPixel: Boolean;
+begin
+  // Verify font manager fallback detection
+  FallbackCJK := FloriaGetFallbackFont(12.0);
+  AssertTrue('Fallback CJK font assigned', Assigned(FallbackCJK));
+  AssertTrue('Fallback CJK font loaded', FallbackCJK.Loaded);
+
+  FallbackSym := FloriaGetSymbolFallbackFont(12.0);
+  AssertTrue('Fallback Symbol font assigned', Assigned(FallbackSym));
+  AssertTrue('Fallback Symbol font loaded', FallbackSym.Loaded);
+
+  // Test primary font fallback chaining
+  Font := FloriaFontManager().GetFont('Ubuntu-12.0');
+  AssertTrue('Primary font assigned', Assigned(Font));
+  AssertTrue('Primary font loaded', Font.Loaded);
+
+  // Check fallback chaining: Ubuntu -> CJK -> Symbol
+  AssertTrue('Primary fallback assigned', Assigned(Font.FallbackFont));
+  AssertSame('Primary fallback is CJK', FallbackCJK, Font.FallbackFont);
+  AssertTrue('CJK fallback has symbol fallback', Assigned(Font.FallbackFont.FallbackFont));
+  AssertSame('Secondary fallback is Symbol', FallbackSym, Font.FallbackFont.FallbackFont);
+
+  // Check text width measurement for checkmark symbol U+2714
+  w := Font.GetTextWidth('✔');
+  AssertTrue('Heavy check mark width > 0', w > 0.0);
+
+  // Measure text combining Latin, CJK, and Symbol
+  w := Font.GetTextWidth('✔ Hello 你好');
+  AssertTrue('Mixed Latin CJK and Symbol width > 0', w > 20.0);
+
+  // Render on canvas and verify glyph rasterization
+  Img := TFloriaImage.Create(100, 40);
+  try
+    Img.Clear(255, 255, 255, 255); // White background
+    Canvas := TFloriaCanvasAgg.Create(Img);
+    try
+      // Draw black checkmark
+      Canvas.DrawText(10.0, 25.0, '✔', Font, 0.0, 0.0, 0.0);
+
+      // Verify that at least some pixels were rendered (non-white)
+      hasDrawnPixel := False;
+      for y := 0 to Img.Height - 1 do
+        for x := 0 to Img.Width - 1 do
+          if Img.Pixels[x, y].R < 200 then
+          begin
+            hasDrawnPixel := True;
+            Break;
+          end;
+
+      AssertTrue('Checkmark rendered to canvas', hasDrawnPixel);
+    finally
+      Canvas.Free();
+    end;
+  finally
+    Img.Free();
   end;
 end;
 

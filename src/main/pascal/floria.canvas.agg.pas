@@ -893,12 +893,13 @@ var
   str_: PChar;
   charLen: LongInt;
   charId: Cardinal;
-  glyph: glyph_cache_ptr;
+  glyph, origGlyph, fbGlyph: glyph_cache_ptr;
   curX, curY: Double;
-  first: Boolean;
-  cm, curCM: font_cache_manager_ptr;
+  first, foundFb: Boolean;
+  cm, curCM, prevCM: font_cache_manager_ptr;
   fb: TFloriaFont;
   renderText: string;
+  depth: Integer;
 begin
   if (AText = '') or (FCurrentAlpha <= 0.0) then Exit;
   if not Assigned(AFont) then AFont := FloriaGetSystemFont();
@@ -923,6 +924,7 @@ begin
   curY := Y;
   str_ := PChar(renderText);
   first := True;
+  prevCM := nil;
 
   while str_^ <> #0 do
   begin
@@ -933,20 +935,36 @@ begin
     curCM := cm;
     if (glyph = nil) or (glyph^.glyph_index = 0) then
     begin
+      origGlyph := glyph;
       fb := AFont.FallbackFont;
-      if Assigned(fb) and fb.Loaded and (fb <> AFont) then
+      depth := 0;
+      foundFb := False;
+      while Assigned(fb) and fb.Loaded and (fb <> AFont) and (depth < 8) do
       begin
-        glyph := fb.CacheManagerPtr()^.glyph(charId);
-        if (glyph <> nil) and (glyph^.glyph_index <> 0) then
+        fbGlyph := fb.CacheManagerPtr()^.glyph(charId);
+        if (fbGlyph <> nil) and (fbGlyph^.glyph_index <> 0) then
+        begin
+          glyph := fbGlyph;
           curCM := fb.CacheManagerPtr();
+          foundFb := True;
+          Break;
+        end;
+        fb := fb.FallbackFont;
+        Inc(depth);
+      end;
+      if not foundFb then
+      begin
+        glyph := origGlyph;
+        curCM := cm;
       end;
     end;
 
     if glyph <> nil then
     begin
-      if not first then
+      if (not first) and (prevCM = curCM) then
         curCM^.add_kerning(@curX, @curY);
       first := False;
+      prevCM := curCM;
 
       curCM^.init_embedded_adaptors(glyph, curX, curY);
       if glyph^.data_type = glyph_data_gray8 then

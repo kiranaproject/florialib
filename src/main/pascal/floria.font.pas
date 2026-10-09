@@ -78,9 +78,11 @@ type
     FScreenDPI         : Double;
     FFontGamma         : Double;
     FFallbackFontFamily: string;
+    FSymbolFallbackFontFamily: string;
     function DetectScreenDPI(): Double;
     function DetectSystemFontDesc(): string;
     function DetectFallbackFontFamily(): string;
+    function DetectSymbolFallbackFontFamily(): string;
     function ResolveFontFile(const AFamily: string; ABold, AItalic: Boolean; out AFaceIndex: Cardinal): string;
     function BuildCanonicalDesc(const AFamily: string; ASize: Double; ABold, AItalic: Boolean; AFaceIndex: Cardinal): string;
     procedure ParseFontDesc(ADesc: string; out AFamily: string; out ASize: Double; out ABold, AItalic: Boolean);
@@ -93,13 +95,15 @@ type
     function GetFont(const AFontDesc: string): TFloriaFont;
     function GetSystemFont(): TFloriaFont;
     function GetFallbackFont(ASize: Double): TFloriaFont;
+    function GetSymbolFallbackFont(ASize: Double): TFloriaFont;
     procedure SetSystemFontDesc(const AFontDesc: string);
 
-    property SystemFont        : TFloriaFont read GetSystemFont;
-    property DefaultFontDesc   : string      read FDefaultFontDesc write SetSystemFontDesc;
-    property ScreenDPI         : Double      read FScreenDPI write SetScreenDPI;
-    property FontGamma         : Double      read FFontGamma write SetFontGamma;
-    property FallbackFontFamily: string      read FFallbackFontFamily write FFallbackFontFamily;
+    property SystemFont              : TFloriaFont read GetSystemFont;
+    property DefaultFontDesc         : string      read FDefaultFontDesc write SetSystemFontDesc;
+    property ScreenDPI               : Double      read FScreenDPI write SetScreenDPI;
+    property FontGamma               : Double      read FFontGamma write SetFontGamma;
+    property FallbackFontFamily      : string      read FFallbackFontFamily write FFallbackFontFamily;
+    property SymbolFallbackFontFamily: string      read FSymbolFallbackFontFamily write FSymbolFallbackFontFamily;
   end;
 
   // Backward-compatibility aliases
@@ -109,6 +113,8 @@ type
 function UTF8CharToUnicode(p: PChar; out CharLen: LongInt): Cardinal;
 function FloriaFontManager(): TFloriaFontManager;
 function FloriaGetSystemFont(): TFloriaFont;
+function FloriaGetFallbackFont(ASize: Double): TFloriaFont;
+function FloriaGetSymbolFallbackFont(ASize: Double): TFloriaFont;
 function FloriaGetScreenDPI(): Double;
 procedure FloriaSetScreenDPI(ADPI: Double);
 function FloriaGetFontGamma(): Double;
@@ -117,6 +123,8 @@ procedure FloriaSetFontGamma(AGamma: Double);
 // Backward-compatibility alias functions
 function FtFontManager(): TFtFontManager;
 function FtGetSystemFont(): TFtFont;
+function FtGetFallbackFont(ASize: Double): TFtFont;
+function FtGetSymbolFallbackFont(ASize: Double): TFtFont;
 function FtGetScreenDPI(): Double;
 procedure FtSetScreenDPI(ADPI: Double);
 function FtGetFontGamma(): Double;
@@ -274,16 +282,34 @@ begin
 end;
 
 function TFloriaFont.GetFallbackFont(): TFloriaFont;
+var
+  famLower: string;
+  mgr: TFloriaFontManager;
 begin
   if Assigned(FFallbackFont) then
     Exit(FFallbackFont);
 
-  // If this font itself is a CJK font or contains CJK glyphs, skip fallback recursion
-  if (Pos('cjk', LowerCase(FFamilyName)) > 0) or
-     (Pos('droid sans fallback', LowerCase(FFamilyName)) > 0) then
+  famLower := LowerCase(FFamilyName);
+  mgr := FloriaFontManager();
+
+  // If this font itself is a symbol/wide-Unicode font, terminate fallback chain to avoid recursion
+  if (Pos('dejavu', famLower) > 0) or
+     (Pos('symbol', famLower) > 0) or
+     (Pos('freesans', famLower) > 0) or
+     ((mgr.SymbolFallbackFontFamily <> '') and (Pos(LowerCase(mgr.SymbolFallbackFontFamily), famLower) > 0)) then
     Exit(nil);
 
-  FFallbackFont := FloriaFontManager().GetFallbackFont(FSize);
+  // If this font itself is a CJK font, fall back to symbol/wide-Unicode fallback font
+  if (Pos('cjk', famLower) > 0) or
+     (Pos('droid sans fallback', famLower) > 0) or
+     ((mgr.FallbackFontFamily <> '') and (Pos(LowerCase(mgr.FallbackFontFamily), famLower) > 0)) then
+  begin
+    FFallbackFont := mgr.GetSymbolFallbackFont(FSize);
+    Exit(FFallbackFont);
+  end;
+
+  // Otherwise (primary font), fall back to CJK font (which in turn chains to symbol fallback font)
+  FFallbackFont := mgr.GetFallbackFont(FSize);
   Result := FFallbackFont;
 end;
 
@@ -292,12 +318,13 @@ var
   str_: PChar;
   charLen: LongInt;
   charId: Cardinal;
-  glyph: glyph_cache_ptr;
-  first: Boolean;
+  glyph, origGlyph, fbGlyph: glyph_cache_ptr;
+  first, foundFb: Boolean;
   x, y: Double;
   fb: TFloriaFont;
-  curCM: font_cache_manager_ptr;
+  curCM, prevCM: font_cache_manager_ptr;
   measText: string;
+  depth: Integer;
 begin
   if not FLoaded or (AText = '') then
     Exit(Length(AText) * (FSize * (FDPI / 72.0)) * 0.55);
@@ -310,6 +337,7 @@ begin
   x := 0.0;
   y := 0.0;
   first := True;
+  prevCM := nil;
   str_ := PChar(measText);
 
   while str_^ <> #0 do
@@ -321,20 +349,36 @@ begin
     curCM := @FCacheManager;
     if (glyph = nil) or (glyph^.glyph_index = 0) then
     begin
+      origGlyph := glyph;
       fb := FallbackFont;
-      if Assigned(fb) and fb.Loaded and (fb <> Self) then
+      depth := 0;
+      foundFb := False;
+      while Assigned(fb) and fb.Loaded and (fb <> Self) and (depth < 8) do
       begin
-        glyph := fb.CacheManagerPtr()^.glyph(charId);
-        if (glyph <> nil) and (glyph^.glyph_index <> 0) then
+        fbGlyph := fb.CacheManagerPtr()^.glyph(charId);
+        if (fbGlyph <> nil) and (fbGlyph^.glyph_index <> 0) then
+        begin
+          glyph := fbGlyph;
           curCM := fb.CacheManagerPtr();
+          foundFb := True;
+          Break;
+        end;
+        fb := fb.FallbackFont;
+        Inc(depth);
+      end;
+      if not foundFb then
+      begin
+        glyph := origGlyph;
+        curCM := @FCacheManager;
       end;
     end;
 
     if glyph <> nil then
     begin
-      if not first then
+      if (not first) and (prevCM = curCM) then
         curCM^.add_kerning(@x, @y);
       first := False;
+      prevCM := curCM;
       x := x + glyph^.advance_x;
     end;
   end;
@@ -628,6 +672,35 @@ begin
   Result := 'Noto Sans CJK SC';
 end;
 
+function TFloriaFontManager.DetectSymbolFallbackFontFamily(): string;
+var
+  outStr: string;
+const
+  CandidateFamilies: array[0..3] of string = (
+    'DejaVu Sans',
+    'Noto Sans Symbols2',
+    'FreeSans',
+    'DejaVu Sans Condensed'
+  );
+var
+  i: Integer;
+begin
+  Result := '';
+  // 1. Try fontconfig match for heavy checkmark (U+2714) specifically
+  if RunCommand('fc-match', ['-f', '%{family}', ':charset=2714'], outStr) and (Trim(outStr) <> '') then
+    Exit(Trim(outStr));
+
+  // 2. Try known ubiquitous Linux symbol font candidates
+  for i := Low(CandidateFamilies) to High(CandidateFamilies) do
+  begin
+    if RunCommand('fc-match', ['-f', '%{family}', CandidateFamilies[i]], outStr) and (Trim(outStr) <> '') then
+      Exit(Trim(outStr));
+  end;
+
+  // 3. Fallback default
+  Result := 'DejaVu Sans';
+end;
+
 function TFloriaFontManager.GetFallbackFont(ASize: Double): TFloriaFont;
 var
   Desc: string;
@@ -635,6 +708,16 @@ begin
   if FFallbackFontFamily = '' then
     FFallbackFontFamily := DetectFallbackFontFamily();
   Desc := Format('%s-%.1f', [FFallbackFontFamily, ASize]);
+  Result := GetFont(Desc);
+end;
+
+function TFloriaFontManager.GetSymbolFallbackFont(ASize: Double): TFloriaFont;
+var
+  Desc: string;
+begin
+  if FSymbolFallbackFontFamily = '' then
+    FSymbolFallbackFontFamily := DetectSymbolFallbackFontFamily();
+  Desc := Format('%s-%.1f', [FSymbolFallbackFontFamily, ASize]);
   Result := GetFont(Desc);
 end;
 
@@ -727,6 +810,16 @@ begin
   FloriaFontManager().FontGamma := AGamma;
 end;
 
+function FloriaGetFallbackFont(ASize: Double): TFloriaFont;
+begin
+  Result := FloriaFontManager().GetFallbackFont(ASize);
+end;
+
+function FloriaGetSymbolFallbackFont(ASize: Double): TFloriaFont;
+begin
+  Result := FloriaFontManager().GetSymbolFallbackFont(ASize);
+end;
+
 // Backward-compatibility wrappers
 function FtFontManager(): TFtFontManager;
 begin
@@ -736,6 +829,16 @@ end;
 function FtGetSystemFont(): TFtFont;
 begin
   Result := FloriaGetSystemFont();
+end;
+
+function FtGetFallbackFont(ASize: Double): TFtFont;
+begin
+  Result := FloriaGetFallbackFont(ASize);
+end;
+
+function FtGetSymbolFallbackFont(ASize: Double): TFtFont;
+begin
+  Result := FloriaGetSymbolFallbackFont(ASize);
 end;
 
 function FtGetScreenDPI(): Double;
