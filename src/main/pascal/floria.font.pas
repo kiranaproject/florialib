@@ -37,14 +37,17 @@ type
     FGamPower    : gamma_power;
     FEngine      : font_engine_freetype_int32;
     FCacheManager: font_cache_manager;
-    FLoaded      : Boolean;
-    FAscent      : Double;   // In device pixels
-    FDescent     : Double;   // In device pixels
-    FHeight      : Double;   // In device pixels
-    FFallbackFont: TFloriaFont;
+    FLoaded          : Boolean;
+    FAscent          : Double;   // In device pixels
+    FDescent         : Double;   // In device pixels
+    FHeight          : Double;   // In device pixels
+    FFallbackFont    : TFloriaFont;
+    FFallbackIndex   : Integer;
+    FDynamicLatinFont: TFloriaFont;
     procedure LoadFont();
     procedure SetGamma(AValue: Double);
     function GetFallbackFont(): TFloriaFont;
+    function GetDynamicLatinFont(): TFloriaFont;
   public
     constructor Create(const AFamily: string; ASize: Double; ABold, AItalic: Boolean;
                        const APath: string; AFaceIndex: Cardinal = 0; ADPI: Double = 96.0; AGamma: Double = 0.75);
@@ -53,32 +56,34 @@ type
     function GetTextWidth(const AText: string): Double;
     function CacheManagerPtr(): font_cache_manager_ptr;
 
-    property FamilyName  : string       read FFamilyName;
-    property Size        : Double       read FSize;
-    property DPI         : Double       read FDPI;
-    property Gamma       : Double       read FGamma write SetGamma;
-    property Bold        : Boolean      read FBold;
-    property Italic      : Boolean      read FItalic;
-    property FontPath    : string       read FFontPath;
-    property FaceIndex   : Cardinal     read FFaceIndex;
-    property FontDesc    : string       read FFontDesc;
-    property Loaded      : Boolean      read FLoaded;
-    property Ascent      : Double       read FAscent;
-    property Descent     : Double       read FDescent;
-    property Height      : Double       read FHeight;
-    property FallbackFont: TFloriaFont  read GetFallbackFont write FFallbackFont;
+    property FamilyName      : string       read FFamilyName;
+    property Size            : Double       read FSize;
+    property DPI             : Double       read FDPI;
+    property Gamma           : Double       read FGamma write SetGamma;
+    property Bold            : Boolean      read FBold;
+    property Italic          : Boolean      read FItalic;
+    property FontPath        : string       read FFontPath;
+    property FaceIndex       : Cardinal     read FFaceIndex;
+    property FontDesc        : string       read FFontDesc;
+    property Loaded          : Boolean      read FLoaded;
+    property Ascent          : Double       read FAscent;
+    property Descent         : Double       read FDescent;
+    property Height          : Double       read FHeight;
+    property FallbackFont    : TFloriaFont  read GetFallbackFont write FFallbackFont;
+    property FallbackIndex   : Integer      read FFallbackIndex write FFallbackIndex;
+    property DynamicLatinFont: TFloriaFont  read GetDynamicLatinFont;
   end;
 
   // TFloriaFontManager: Centralized font management, DPI scaling, and persistent cache
   TFloriaFontManager = class
   private
-    FCache             : TFPList;
-    FDefaultFontDesc   : string;
-    FSystemFont        : TFloriaFont;
-    FScreenDPI         : Double;
-    FFontGamma         : Double;
-    FFallbackFontFamily: string;
-    FSymbolFallbackFontFamily: string;
+    FCache                   : TFPList;
+    FDefaultFontDesc         : string;
+    FSystemFont              : TFloriaFont;
+    FScreenDPI               : Double;
+    FFontGamma               : Double;
+    FDynamicLatinSwap        : Boolean;
+    FFallbackFamilies        : TStringList;
     function DetectScreenDPI(): Double;
     function DetectSystemFontDesc(): string;
     function DetectFallbackFontFamily(): string;
@@ -88,6 +93,11 @@ type
     procedure ParseFontDesc(ADesc: string; out AFamily: string; out ASize: Double; out ABold, AItalic: Boolean);
     procedure SetScreenDPI(AValue: Double);
     procedure SetFontGamma(AValue: Double);
+    procedure InitFallbackFamilies();
+    function GetFallbackFontFamily(): string;
+    procedure SetFallbackFontFamily(const AValue: string);
+    function GetSymbolFallbackFontFamily(): string;
+    procedure SetSymbolFallbackFontFamily(const AValue: string);
   public
     constructor Create();
     destructor Destroy(); override;
@@ -96,14 +106,18 @@ type
     function GetSystemFont(): TFloriaFont;
     function GetFallbackFont(ASize: Double): TFloriaFont;
     function GetSymbolFallbackFont(ASize: Double): TFloriaFont;
+    function FallbackFontCount(): Integer;
+    function GetFallbackFontAt(AIndex: Integer; ASize: Double): TFloriaFont;
+    function IndexOfFallbackFamily(const AFamily: string): Integer;
     procedure SetSystemFontDesc(const AFontDesc: string);
 
     property SystemFont              : TFloriaFont read GetSystemFont;
     property DefaultFontDesc         : string      read FDefaultFontDesc write SetSystemFontDesc;
     property ScreenDPI               : Double      read FScreenDPI write SetScreenDPI;
     property FontGamma               : Double      read FFontGamma write SetFontGamma;
-    property FallbackFontFamily      : string      read FFallbackFontFamily write FFallbackFontFamily;
-    property SymbolFallbackFontFamily: string      read FSymbolFallbackFontFamily write FSymbolFallbackFontFamily;
+    property DynamicLatinSwap        : Boolean     read FDynamicLatinSwap write FDynamicLatinSwap;
+    property FallbackFontFamily      : string      read GetFallbackFontFamily write SetFallbackFontFamily;
+    property SymbolFallbackFontFamily: string      read GetSymbolFallbackFontFamily write SetSymbolFallbackFontFamily;
   end;
 
   // Backward-compatibility aliases
@@ -218,6 +232,8 @@ begin
   FFontPath := APath;
   FFaceIndex := AFaceIndex;
   FFallbackFont := nil;
+  FFallbackIndex := -1;
+  FDynamicLatinFont := nil;
   FLoaded := False;
 
   px := FSize * (FDPI / 72.0);
@@ -283,34 +299,92 @@ end;
 
 function TFloriaFont.GetFallbackFont(): TFloriaFont;
 var
-  famLower: string;
   mgr: TFloriaFontManager;
+  nextIdx: Integer;
 begin
   if Assigned(FFallbackFont) then
     Exit(FFallbackFont);
 
-  famLower := LowerCase(FFamilyName);
   mgr := FloriaFontManager();
-
-  // If this font itself is a symbol/wide-Unicode font, terminate fallback chain to avoid recursion
-  if (Pos('dejavu', famLower) > 0) or
-     (Pos('symbol', famLower) > 0) or
-     (Pos('freesans', famLower) > 0) or
-     ((mgr.SymbolFallbackFontFamily <> '') and (Pos(LowerCase(mgr.SymbolFallbackFontFamily), famLower) > 0)) then
-    Exit(nil);
-
-  // If this font itself is a CJK font, fall back to symbol/wide-Unicode fallback font
-  if (Pos('cjk', famLower) > 0) or
-     (Pos('droid sans fallback', famLower) > 0) or
-     ((mgr.FallbackFontFamily <> '') and (Pos(LowerCase(mgr.FallbackFontFamily), famLower) > 0)) then
+  if FFallbackIndex >= 0 then
   begin
-    FFallbackFont := mgr.GetSymbolFallbackFont(FSize);
-    Exit(FFallbackFont);
+    nextIdx := FFallbackIndex + 1;
+    if nextIdx < mgr.FallbackFontCount() then
+      FFallbackFont := mgr.GetFallbackFontAt(nextIdx, FSize)
+    else
+      FFallbackFont := nil;
+  end
+  else
+  begin
+    // Check if this font family matches one of the fallback families
+    nextIdx := mgr.IndexOfFallbackFamily(FFamilyName);
+    if nextIdx >= 0 then
+    begin
+      Inc(nextIdx);
+      if nextIdx < mgr.FallbackFontCount() then
+        FFallbackFont := mgr.GetFallbackFontAt(nextIdx, FSize)
+      else
+        FFallbackFont := nil;
+    end
+    else
+      FFallbackFont := mgr.GetFallbackFontAt(0, FSize);
   end;
 
-  // Otherwise (primary font), fall back to CJK font (which in turn chains to symbol fallback font)
-  FFallbackFont := mgr.GetFallbackFont(FSize);
   Result := FFallbackFont;
+end;
+
+function TFloriaFont.GetDynamicLatinFont(): TFloriaFont;
+var
+  mgr: TFloriaFontManager;
+  sysFont: TFloriaFont;
+  famLower: string;
+  isScript: Boolean;
+begin
+  if Assigned(FDynamicLatinFont) then
+    Exit(FDynamicLatinFont);
+
+  mgr := FloriaFontManager();
+  if not mgr.DynamicLatinSwap then
+    Exit(nil);
+
+  sysFont := mgr.GetSystemFont();
+  if not Assigned(sysFont) or not sysFont.Loaded then
+    Exit(nil);
+
+  // If this font itself IS the system font (e.g. Ubuntu), no swap needed
+  if SameText(FFamilyName, sysFont.FamilyName) then
+    Exit(nil);
+
+  famLower := LowerCase(FFamilyName);
+  isScript := (Pos('cjk', famLower) > 0) or
+              (Pos('thai', famLower) > 0) or
+              (Pos('arabic', famLower) > 0) or
+              (Pos('devanagari', famLower) > 0) or
+              (Pos('hebrew', famLower) > 0) or
+              (Pos('korean', famLower) > 0) or
+              (Pos('japanese', famLower) > 0) or
+              (Pos('chinese', famLower) > 0) or
+              (Pos('hangul', famLower) > 0) or
+              (Pos('bengali', famLower) > 0) or
+              (Pos('tamil', famLower) > 0) or
+              (Pos('telugu', famLower) > 0) or
+              (Pos('gujarati', famLower) > 0) or
+              (Pos('kannada', famLower) > 0) or
+              (Pos('malayalam', famLower) > 0) or
+              (Pos('myanmar', famLower) > 0) or
+              (Pos('khmer', famLower) > 0) or
+              (Pos('sinhala', famLower) > 0) or
+              (Pos('gurmukhi', famLower) > 0) or
+              (Pos('droid sans fallback', famLower) > 0);
+
+  if isScript then
+  begin
+    // Resolve system font at the exact size and style of this font
+    FDynamicLatinFont := mgr.GetFont(mgr.BuildCanonicalDesc(sysFont.FamilyName, FSize, FBold, FItalic, 0));
+    Result := FDynamicLatinFont;
+  end
+  else
+    Result := nil;
 end;
 
 function TFloriaFont.GetTextWidth(const AText: string): Double;
@@ -318,11 +392,11 @@ var
   str_: PChar;
   charLen: LongInt;
   charId: Cardinal;
-  glyph, origGlyph, fbGlyph: glyph_cache_ptr;
+  glyph, origGlyph, fbGlyph, latinGlyph: glyph_cache_ptr;
   first, foundFb: Boolean;
   x, y: Double;
-  fb: TFloriaFont;
-  curCM, prevCM: font_cache_manager_ptr;
+  fb, latinFont: TFloriaFont;
+  curCM, prevCM, latinCM: font_cache_manager_ptr;
   measText: string;
   depth: Integer;
 begin
@@ -340,36 +414,59 @@ begin
   prevCM := nil;
   str_ := PChar(measText);
 
+  latinFont := DynamicLatinFont;
+  if Assigned(latinFont) and latinFont.Loaded then
+    latinCM := latinFont.CacheManagerPtr()
+  else
+    latinCM := nil;
+
   while str_^ <> #0 do
   begin
     charId := UTF8CharToUnicode(str_, charLen);
     Inc(str_, charLen);
 
-    glyph := FCacheManager.glyph(charId);
+    glyph := nil;
     curCM := @FCacheManager;
-    if (glyph = nil) or (glyph^.glyph_index = 0) then
+
+    // Dynamic Latin swap: if active font is a script font, use system Latin font for ASCII/Latin
+    if (latinCM <> nil) and (charId >= 33) and (charId <= 255) then
     begin
-      origGlyph := glyph;
-      fb := FallbackFont;
-      depth := 0;
-      foundFb := False;
-      while Assigned(fb) and fb.Loaded and (fb <> Self) and (depth < 8) do
+      latinGlyph := latinCM^.glyph(charId);
+      if (latinGlyph <> nil) and (latinGlyph^.glyph_index <> 0) then
       begin
-        fbGlyph := fb.CacheManagerPtr()^.glyph(charId);
-        if (fbGlyph <> nil) and (fbGlyph^.glyph_index <> 0) then
-        begin
-          glyph := fbGlyph;
-          curCM := fb.CacheManagerPtr();
-          foundFb := True;
-          Break;
-        end;
-        fb := fb.FallbackFont;
-        Inc(depth);
+        glyph := latinGlyph;
+        curCM := latinCM;
       end;
-      if not foundFb then
+    end;
+
+    if glyph = nil then
+    begin
+      glyph := FCacheManager.glyph(charId);
+      curCM := @FCacheManager;
+      if (glyph = nil) or (glyph^.glyph_index = 0) then
       begin
-        glyph := origGlyph;
-        curCM := @FCacheManager;
+        origGlyph := glyph;
+        fb := FallbackFont;
+        depth := 0;
+        foundFb := False;
+        while Assigned(fb) and fb.Loaded and (fb <> Self) and (depth < 8) do
+        begin
+          fbGlyph := fb.CacheManagerPtr()^.glyph(charId);
+          if (fbGlyph <> nil) and (fbGlyph^.glyph_index <> 0) then
+          begin
+            glyph := fbGlyph;
+            curCM := fb.CacheManagerPtr();
+            foundFb := True;
+            Break;
+          end;
+          fb := fb.FallbackFont;
+          Inc(depth);
+        end;
+        if not foundFb then
+        begin
+          glyph := origGlyph;
+          curCM := @FCacheManager;
+        end;
       end;
     end;
 
@@ -415,12 +512,25 @@ begin
     if (code = 0) and (valDbl > 0.05) and (valDbl < 5.0) then
       FFontGamma := valDbl;
   end;
+
+  FDynamicLatinSwap := True;
+  envVal := GetEnvironmentVariable('FT_DYNAMIC_LATIN_SWAP');
+  if (envVal = '0') or SameText(envVal, 'false') or SameText(envVal, 'no') then
+    FDynamicLatinSwap := False;
+
+  InitFallbackFamilies();
 end;
 
 destructor TFloriaFontManager.Destroy();
 var
   i: Integer;
 begin
+  if Assigned(FFallbackFamilies) then
+  begin
+    FFallbackFamilies.Free();
+    FFallbackFamilies := nil;
+  end;
+
   for i := 0 to FCache.Count - 1 do
     TFloriaFont(FCache[i]).Free();
   FCache.Free();
@@ -616,12 +726,17 @@ var
   colonPos: Integer;
   valIdx: LongInt;
 const
-  StandardDirs: array[0..4] of string = (
+  StandardDirs: array[0..9] of string = (
     '/usr/share/fonts/truetype/ubuntu/Ubuntu[wdth,wght].ttf',
     '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+    '/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf',
     '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
     '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSans.ttf'
   );
 var
   i: Integer;
@@ -701,24 +816,103 @@ begin
   Result := 'DejaVu Sans';
 end;
 
-function TFloriaFontManager.GetFallbackFont(ASize: Double): TFloriaFont;
+procedure TFloriaFontManager.InitFallbackFamilies();
+begin
+  if not Assigned(FFallbackFamilies) then
+    FFallbackFamilies := TStringList.Create();
+  FFallbackFamilies.Clear();
+  // 1. CJK (Chinese / Japanese / Korean ideographs & kana/hangul)
+  FFallbackFamilies.Add(DetectFallbackFontFamily());
+  // 2. Thai
+  FFallbackFamilies.Add('Noto Sans Thai');
+  // 3. Devanagari (Hindi, Sanskrit, Marathi)
+  FFallbackFamilies.Add('Noto Sans Devanagari');
+  // 4. Arabic (Arabic, Persian, Urdu)
+  FFallbackFamilies.Add('Noto Sans Arabic');
+  // 5. Hebrew (Hebrew, Yiddish)
+  FFallbackFamilies.Add('Noto Sans Hebrew');
+  // 6. Symbols, Dingbats, Checkmarks, Math
+  FFallbackFamilies.Add(DetectSymbolFallbackFontFamily());
+  // 7. Universal Wide Unicode
+  FFallbackFamilies.Add('FreeSans');
+end;
+
+function TFloriaFontManager.GetFallbackFontFamily(): string;
+begin
+  if Assigned(FFallbackFamilies) and (FFallbackFamilies.Count > 0) then
+    Result := FFallbackFamilies[0]
+  else
+    Result := 'Noto Sans CJK SC';
+end;
+
+procedure TFloriaFontManager.SetFallbackFontFamily(const AValue: string);
+begin
+  if Assigned(FFallbackFamilies) and (FFallbackFamilies.Count > 0) then
+    FFallbackFamilies[0] := AValue;
+end;
+
+function TFloriaFontManager.GetSymbolFallbackFontFamily(): string;
+begin
+  if Assigned(FFallbackFamilies) and (FFallbackFamilies.Count > 5) then
+    Result := FFallbackFamilies[5]
+  else
+    Result := 'DejaVu Sans';
+end;
+
+procedure TFloriaFontManager.SetSymbolFallbackFontFamily(const AValue: string);
+begin
+  if Assigned(FFallbackFamilies) and (FFallbackFamilies.Count > 5) then
+    FFallbackFamilies[5] := AValue;
+end;
+
+function TFloriaFontManager.FallbackFontCount(): Integer;
+begin
+  if Assigned(FFallbackFamilies) then
+    Result := FFallbackFamilies.Count
+  else
+    Result := 0;
+end;
+
+function TFloriaFontManager.GetFallbackFontAt(AIndex: Integer; ASize: Double): TFloriaFont;
 var
   Desc: string;
+  F: TFloriaFont;
 begin
-  if FFallbackFontFamily = '' then
-    FFallbackFontFamily := DetectFallbackFontFamily();
-  Desc := Format('%s-%.1f', [FFallbackFontFamily, ASize]);
-  Result := GetFont(Desc);
+  if not Assigned(FFallbackFamilies) or (AIndex < 0) or (AIndex >= FFallbackFamilies.Count) then
+    Exit(nil);
+  Desc := Format('%s-%.1f', [FFallbackFamilies[AIndex], ASize]);
+  F := GetFont(Desc);
+  if Assigned(F) then
+    F.FFallbackIndex := AIndex;
+  Result := F;
+end;
+
+function TFloriaFontManager.IndexOfFallbackFamily(const AFamily: string): Integer;
+var
+  i: Integer;
+  famLower, candLower: string;
+begin
+  famLower := LowerCase(AFamily);
+  if Assigned(FFallbackFamilies) then
+  begin
+    for i := 0 to FFallbackFamilies.Count - 1 do
+    begin
+      candLower := LowerCase(FFallbackFamilies[i]);
+      if (Pos(candLower, famLower) > 0) or (Pos(famLower, candLower) > 0) then
+        Exit(i);
+    end;
+  end;
+  Result := -1;
+end;
+
+function TFloriaFontManager.GetFallbackFont(ASize: Double): TFloriaFont;
+begin
+  Result := GetFallbackFontAt(0, ASize);
 end;
 
 function TFloriaFontManager.GetSymbolFallbackFont(ASize: Double): TFloriaFont;
-var
-  Desc: string;
 begin
-  if FSymbolFallbackFontFamily = '' then
-    FSymbolFallbackFontFamily := DetectSymbolFallbackFontFamily();
-  Desc := Format('%s-%.1f', [FSymbolFallbackFontFamily, ASize]);
-  Result := GetFont(Desc);
+  Result := GetFallbackFontAt(5, ASize);
 end;
 
 function TFloriaFontManager.GetFont(const AFontDesc: string): TFloriaFont;

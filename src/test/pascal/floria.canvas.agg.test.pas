@@ -425,12 +425,12 @@ end;
 
 procedure TFloriaCanvasAggTest.TestFontFallbackChainingAndSymbols();
 var
-  Font, FallbackCJK, FallbackSym: TFloriaFont;
+  Font, FallbackCJK, FallbackSym, FontFb, ScriptFont: TFloriaFont;
   Img: TFloriaImage;
   Canvas: TFloriaCanvasAgg;
   w: Double;
   x, y: Integer;
-  hasDrawnPixel: Boolean;
+  hasDrawnPixel, hasSymbolInChain: Boolean;
 begin
   // Verify font manager fallback detection
   FallbackCJK := FloriaGetFallbackFont(12.0);
@@ -446,11 +446,31 @@ begin
   AssertTrue('Primary font assigned', Assigned(Font));
   AssertTrue('Primary font loaded', Font.Loaded);
 
-  // Check fallback chaining: Ubuntu -> CJK -> Symbol
+  // Check fallback chaining: Ubuntu -> CJK -> Thai -> ... -> Symbol
   AssertTrue('Primary fallback assigned', Assigned(Font.FallbackFont));
   AssertSame('Primary fallback is CJK', FallbackCJK, Font.FallbackFont);
-  AssertTrue('CJK fallback has symbol fallback', Assigned(Font.FallbackFont.FallbackFont));
-  AssertSame('Secondary fallback is Symbol', FallbackSym, Font.FallbackFont.FallbackFont);
+  AssertTrue('CJK fallback has next fallback', Assigned(Font.FallbackFont.FallbackFont));
+
+  // Follow chain to verify symbol fallback is in the multi-script chain
+  FontFb := Font.FallbackFont;
+  hasSymbolInChain := False;
+  while Assigned(FontFb) do
+  begin
+    if FontFb = FallbackSym then
+    begin
+      hasSymbolInChain := True;
+      Break;
+    end;
+    FontFb := FontFb.FallbackFont;
+  end;
+  AssertTrue('Symbol font found in fallback chain', hasSymbolInChain);
+
+  // Test dynamic Latin swap on script font
+  ScriptFont := FloriaFontManager().GetFont('Noto Sans CJK JP-12.0');
+  AssertTrue('Script font assigned', Assigned(ScriptFont));
+  AssertTrue('Script font loaded', ScriptFont.Loaded);
+  AssertTrue('Script font has DynamicLatinFont', Assigned(ScriptFont.DynamicLatinFont));
+  AssertEquals('DynamicLatinFont family is Ubuntu', 'Ubuntu', ScriptFont.DynamicLatinFont.FamilyName);
 
   // Check text width measurement for checkmark symbol U+2714
   w := Font.GetTextWidth('✔');

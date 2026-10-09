@@ -893,11 +893,11 @@ var
   str_: PChar;
   charLen: LongInt;
   charId: Cardinal;
-  glyph, origGlyph, fbGlyph: glyph_cache_ptr;
+  glyph, origGlyph, fbGlyph, latinGlyph: glyph_cache_ptr;
   curX, curY: Double;
   first, foundFb: Boolean;
-  cm, curCM, prevCM: font_cache_manager_ptr;
-  fb: TFloriaFont;
+  cm, curCM, prevCM, latinCM: font_cache_manager_ptr;
+  fb, latinFont: TFloriaFont;
   renderText: string;
   depth: Integer;
 begin
@@ -926,36 +926,59 @@ begin
   first := True;
   prevCM := nil;
 
+  latinFont := AFont.DynamicLatinFont;
+  if Assigned(latinFont) and latinFont.Loaded then
+    latinCM := latinFont.CacheManagerPtr()
+  else
+    latinCM := nil;
+
   while str_^ <> #0 do
   begin
     charId := UTF8CharToUnicode(str_, charLen);
     Inc(str_, charLen);
 
-    glyph := cm^.glyph(charId);
+    glyph := nil;
     curCM := cm;
-    if (glyph = nil) or (glyph^.glyph_index = 0) then
+
+    // Dynamic Latin swap: if active font is a script font, use system Latin font for ASCII/Latin
+    if (latinCM <> nil) and (charId >= 33) and (charId <= 255) then
     begin
-      origGlyph := glyph;
-      fb := AFont.FallbackFont;
-      depth := 0;
-      foundFb := False;
-      while Assigned(fb) and fb.Loaded and (fb <> AFont) and (depth < 8) do
+      latinGlyph := latinCM^.glyph(charId);
+      if (latinGlyph <> nil) and (latinGlyph^.glyph_index <> 0) then
       begin
-        fbGlyph := fb.CacheManagerPtr()^.glyph(charId);
-        if (fbGlyph <> nil) and (fbGlyph^.glyph_index <> 0) then
-        begin
-          glyph := fbGlyph;
-          curCM := fb.CacheManagerPtr();
-          foundFb := True;
-          Break;
-        end;
-        fb := fb.FallbackFont;
-        Inc(depth);
+        glyph := latinGlyph;
+        curCM := latinCM;
       end;
-      if not foundFb then
+    end;
+
+    if glyph = nil then
+    begin
+      glyph := cm^.glyph(charId);
+      curCM := cm;
+      if (glyph = nil) or (glyph^.glyph_index = 0) then
       begin
-        glyph := origGlyph;
-        curCM := cm;
+        origGlyph := glyph;
+        fb := AFont.FallbackFont;
+        depth := 0;
+        foundFb := False;
+        while Assigned(fb) and fb.Loaded and (fb <> AFont) and (depth < 8) do
+        begin
+          fbGlyph := fb.CacheManagerPtr()^.glyph(charId);
+          if (fbGlyph <> nil) and (fbGlyph^.glyph_index <> 0) then
+          begin
+            glyph := fbGlyph;
+            curCM := fb.CacheManagerPtr();
+            foundFb := True;
+            Break;
+          end;
+          fb := fb.FallbackFont;
+          Inc(depth);
+        end;
+        if not foundFb then
+        begin
+          glyph := origGlyph;
+          curCM := cm;
+        end;
       end;
     end;
 
