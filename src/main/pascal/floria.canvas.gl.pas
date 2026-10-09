@@ -27,6 +27,7 @@ uses
   Floria.GPU.Context,
   Floria.DisplayList,
   Floria.DisplayList.Clip,
+  Floria.Image.Blur,
   Floria.GPU.Renderer;
 
 type
@@ -40,6 +41,9 @@ type
     FClipStack: array[0..63] of TFtClipRect;
     FClipStackCount: Integer;
     FInFrame: Boolean;
+    FBlurTexture: Cardinal;
+    FBlurTextureW: Integer;
+    FBlurTextureH: Integer;
   protected
     procedure SetBlendMode(AMode: TFloriaBlendMode); override;
   public
@@ -164,6 +168,11 @@ end;
 
 destructor TFloriaCanvasGL.Destroy();
 begin
+  if (FBlurTexture <> 0) and Assigned(FGL) and FGL.Available then
+  begin
+    FGL.DeleteTextures(1, @FBlurTexture);
+    FBlurTexture := 0;
+  end;
   if FOwnsRenderer and Assigned(FRenderer) then
     FreeAndNil(FRenderer);
   inherited Destroy();
@@ -286,13 +295,121 @@ begin
 end;
 
 procedure TFloriaCanvasGL.BlurRoundedRect(X, Y, W, H: Double; Radius: Double; BlurRadius: Double);
+var
+  rx, ry, rw, rh, glY: Integer;
+  rawGL, flippedBuf: PByte;
+  rowSize, rowIdx: Integer;
+  srcRow, dstRow: PByte;
+  texRect: TRectD;
 begin
-  // Handled via GPU shader filter in pipeline
+  if (W <= 0.0) or (H <= 0.0) or (BlurRadius <= 0.5) then Exit;
+  if not Assigned(FGL) or not FGL.Available or not Assigned(FGL.ReadPixels) then Exit;
+
+  // 1. Commit all queued drawing so current OpenGL framebuffer is complete
+  Flush();
+
+  // 2. Compute clamped bounds in screen coordinates
+  rx := Max(0, Round(X));
+  ry := Max(0, Round(Y));
+  rw := Min(FWidth - rx, Round(W));
+  rh := Min(FHeight - ry, Round(H));
+  if (rw <= 0) or (rh <= 0) then Exit;
+
+  // 3. Compute OpenGL Y coordinate (GL origin is bottom-left)
+  glY := FHeight - (ry + rh);
+  if glY < 0 then
+  begin
+    rh := rh + glY;
+    glY := 0;
+    if rh <= 0 then Exit;
+  end;
+
+  // 4. Read pixels from OpenGL framebuffer (format GL_RGBA)
+  GetMem(rawGL, rw * rh * 4);
+  try
+    FGL.PixelStorei(GL_PACK_ALIGNMENT, 4);
+    FGL.ReadPixels(rx, glY, rw, rh, GL_RGBA, GL_UNSIGNED_BYTE, rawGL);
+
+    // 5. Flip rows vertically so row 0 is top
+    GetMem(flippedBuf, rw * rh * 4);
+    try
+      rowSize := rw * 4;
+      for rowIdx := 0 to rh - 1 do
+      begin
+        srcRow := rawGL + ((rh - 1 - rowIdx) * rowSize);
+        dstRow := flippedBuf + (rowIdx * rowSize);
+        Move(srcRow^, dstRow^, rowSize);
+      end;
+
+      // 6. Fast separable box blur
+      FloriaFastBlurRect(flippedBuf, rw, rh, 0, 0, rw, rh, BlurRadius);
+
+      // 7. Upload to dedicated blur texture
+      FGL.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+      if FBlurTexture = 0 then
+      begin
+        FGL.GenTextures(1, @FBlurTexture);
+        FGL.BindTexture(GL_TEXTURE_2D, FBlurTexture);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        FGL.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw, rh, 0, GL_RGBA, GL_UNSIGNED_BYTE, flippedBuf);
+        FBlurTextureW := rw;
+        FBlurTextureH := rh;
+      end
+      else
+      begin
+        FGL.BindTexture(GL_TEXTURE_2D, FBlurTexture);
+        if (rw > FBlurTextureW) or (rh > FBlurTextureH) then
+        begin
+          FGL.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw, rh, 0, GL_RGBA, GL_UNSIGNED_BYTE, flippedBuf);
+          FBlurTextureW := rw;
+          FBlurTextureH := rh;
+        end
+        else
+        begin
+          FGL.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, rw, rh, GL_RGBA, GL_UNSIGNED_BYTE, flippedBuf);
+        end;
+      end;
+
+      // 8. Emit textured rect with GPU SDF rounded rect clipping
+      texRect.Left := 0.0;
+      texRect.Top := 0.0;
+      texRect.Right := rw / FBlurTextureW;
+      texRect.Bottom := rh / FBlurTextureH;
+
+      if Radius > 0.5 then
+        PushClipRoundedRect(X, Y, W, H, Radius);
+
+      if Assigned(FRenderer) then
+      begin
+        FRenderer.Batch.EmitTexturedRect(
+          RectD(rx, ry, rx + rw, ry + rh),
+          texRect,
+          FBlurTexture,
+          FCurrentAlpha,
+          fbmSrcOver,
+          FRenderer.ClipChain.CurrentNode
+        );
+      end;
+
+      // Commit the textured quad with its clipping before restoring clip state
+      Flush();
+
+      if Radius > 0.5 then
+        PopClipRoundedRect();
+    finally
+      FreeMem(flippedBuf);
+    end;
+  finally
+    FreeMem(rawGL);
+  end;
 end;
 
 procedure TFloriaCanvasGL.BlurRect(X, Y, W, H: Double; BlurRadius: Double);
 begin
-  // Handled via GPU shader filter in pipeline
+  BlurRoundedRect(X, Y, W, H, 0.0, BlurRadius);
 end;
 
 procedure TFloriaCanvasGL.PushClipRect(X, Y, W, H: Integer);

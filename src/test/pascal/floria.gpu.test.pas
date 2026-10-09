@@ -49,6 +49,7 @@ type
     procedure TestGPUOffscreenContextLifecycle;
     procedure TestGPURendererWithOffscreenContext;
     procedure TestCanvasGLDirectDraw;
+    procedure TestCanvasGLBackdropBlur;
     procedure TestCanvasGLClipping;
     procedure TestCanvasGLTextRasterization;
   end;
@@ -773,6 +774,30 @@ begin
 
     Canvas.EndFrame();
     AssertFalse('Frame finished', Canvas.InFrame);
+  finally
+    Canvas.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestCanvasGLBackdropBlur;
+var
+  Canvas: TFloriaCanvasGL;
+begin
+  Canvas := TFloriaCanvasGL.Create(400, 300);
+  try
+    Canvas.BeginFrame(400, 300);
+    Canvas.Clear(0.1, 0.1, 0.1);
+    Canvas.DrawRect(10, 10, 200, 100, 0.2, 0.4, 0.8, 1.0);
+
+    // Backdrop blur operations
+    Canvas.BlurRoundedRect(20, 20, 80, 40, 6.0, 10.0);
+    Canvas.BlurRect(30, 30, 50, 20, 5.0);
+
+    // Primitive drawn on top of blurred backdrop
+    Canvas.DrawRoundedRect(20, 20, 80, 40, 6.0, 1.0, 1.0, 1.0, 0.5);
+    AssertTrue('Render batch accumulated draw calls after blur', Canvas.Renderer.Batch.DrawCallCount > 0);
+
+    Canvas.EndFrame();
   finally
     Canvas.Free();
   end;

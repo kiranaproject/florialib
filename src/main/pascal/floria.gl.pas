@@ -96,6 +96,7 @@ const
 
   // Pixel Store
   GL_UNPACK_ALIGNMENT     = $0CF5;
+  GL_PACK_ALIGNMENT       = $0D05;
   GL_UNPACK_ROW_LENGTH    = $0CF2;
   GL_UNPACK_SKIP_ROWS     = $0CF3;
   GL_UNPACK_SKIP_PIXELS   = $0CF4;
@@ -208,6 +209,7 @@ type
 
   TglDrawArrays = procedure(mode: cuint; first: cint; count: cint); cdecl;
   TglDrawElements = procedure(mode: cuint; count: cint; type_: cuint; const indices: Pointer); cdecl;
+  TglReadPixels = procedure(x, y: cint; width, height: cint; format, type_: cuint; pixels: Pointer); cdecl;
 
   TglGenFramebuffers = procedure(n: cint; framebuffers: Pcuint); cdecl;
   TglBindFramebuffer = procedure(target: cuint; framebuffer: cuint); cdecl;
@@ -296,6 +298,7 @@ type
 
     DrawArrays             : TglDrawArrays;
     DrawElements           : TglDrawElements;
+    ReadPixels             : TglReadPixels;
 
     GenFramebuffers        : TglGenFramebuffers;
     BindFramebuffer        : TglBindFramebuffer;
@@ -512,6 +515,7 @@ begin
 
   Pointer(DrawArrays)              := LoadSymbol('glDrawArrays');
   Pointer(DrawElements)            := LoadSymbol('glDrawElements');
+  Pointer(ReadPixels)              := LoadSymbol('glReadPixels');
 
   Pointer(GenFramebuffers)         := LoadSymbol('glGenFramebuffers');
   Pointer(BindFramebuffer)         := LoadSymbol('glBindFramebuffer');
