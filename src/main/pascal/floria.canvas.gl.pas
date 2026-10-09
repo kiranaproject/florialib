@@ -354,30 +354,19 @@ begin
         FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        FGL.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw, rh, 0, GL_RGBA, GL_UNSIGNED_BYTE, flippedBuf);
-        FBlurTextureW := rw;
-        FBlurTextureH := rh;
       end
       else
-      begin
         FGL.BindTexture(GL_TEXTURE_2D, FBlurTexture);
-        if (rw > FBlurTextureW) or (rh > FBlurTextureH) then
-        begin
-          FGL.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw, rh, 0, GL_RGBA, GL_UNSIGNED_BYTE, flippedBuf);
-          FBlurTextureW := rw;
-          FBlurTextureH := rh;
-        end
-        else
-        begin
-          FGL.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, rw, rh, GL_RGBA, GL_UNSIGNED_BYTE, flippedBuf);
-        end;
-      end;
+
+      FGL.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw, rh, 0, GL_RGBA, GL_UNSIGNED_BYTE, flippedBuf);
+      FBlurTextureW := rw;
+      FBlurTextureH := rh;
 
       // 8. Emit textured rect with GPU SDF rounded rect clipping
       texRect.Left := 0.0;
       texRect.Top := 0.0;
-      texRect.Right := rw / FBlurTextureW;
-      texRect.Bottom := rh / FBlurTextureH;
+      texRect.Right := 1.0;
+      texRect.Bottom := 1.0;
 
       if Radius > 0.5 then
         PushClipRoundedRect(X, Y, W, H, Radius);
@@ -563,16 +552,29 @@ begin
   else
   begin
     X := 0; Y := 0; W := FWidth; H := FHeight;
-    Result := True;
+    Result := (W > 0) and (H > 0);
   end;
 end;
 
 function TFloriaCanvasGL.IntersectsClip(X, Y, W, H: Integer): Boolean;
 var
-  cX, cY, cW, cH: Integer;
+  cr: TFtClipRect;
 begin
-  if not GetClipRect(cX, cY, cW, cH) then Exit(False);
-  Result := (X < cX + cW) and (X + W > cX) and (Y < cY + cH) and (Y + H > cY);
+  if (W <= 0) or (H <= 0) then Exit(False);
+  if FClipStackCount > 0 then
+    cr := FClipStack[FClipStackCount - 1]
+  else
+  begin
+    cr.X1 := 0;
+    cr.Y1 := 0;
+    cr.X2 := FWidth - 1;
+    cr.Y2 := FHeight - 1;
+  end;
+
+  if (cr.X2 < cr.X1) or (cr.Y2 < cr.Y1) then Exit(False);
+
+  Result := (X <= cr.X2) and (X + W > cr.X1) and
+            (Y <= cr.Y2) and (Y + H > cr.Y1);
 end;
 
 procedure TFloriaCanvasGL.PushAlpha(AAlpha: Double);
