@@ -74,6 +74,50 @@ type
   PCardinalArray = ^TCardinalArray;
   TCardinalArray = array[0..4] of Cardinal;
 
+  // Xinerama fallback bindings
+  xcb_xinerama_is_active_cookie_t = record
+    sequence: Cardinal;
+  end;
+
+  Pxcb_xinerama_is_active_reply_t = ^xcb_xinerama_is_active_reply_t;
+  xcb_xinerama_is_active_reply_t = record
+    response_type: Byte;
+    pad0: Byte;
+    sequence: Word;
+    length: Cardinal;
+    state: Cardinal;
+  end;
+
+  Pxcb_xinerama_screen_info_t = ^xcb_xinerama_screen_info_t;
+  xcb_xinerama_screen_info_t = record
+    x_org: SmallInt;
+    y_org: SmallInt;
+    width: Word;
+    height: Word;
+  end;
+
+  xcb_xinerama_query_screens_cookie_t = record
+    sequence: Cardinal;
+  end;
+
+  Pxcb_xinerama_query_screens_reply_t = ^xcb_xinerama_query_screens_reply_t;
+  xcb_xinerama_query_screens_reply_t = record
+    response_type: Byte;
+    pad0: Byte;
+    sequence: Word;
+    length: Cardinal;
+    number: Cardinal;
+    pad1: array[0..19] of Byte;
+  end;
+
+function xcb_xinerama_is_active(c: Pxcb_connection_t): xcb_xinerama_is_active_cookie_t; cdecl; external 'xcb-xinerama' name 'xcb_xinerama_is_active';
+function xcb_xinerama_is_active_reply(c: Pxcb_connection_t; cookie: xcb_xinerama_is_active_cookie_t; e: PPxcb_generic_error_t): Pxcb_xinerama_is_active_reply_t; cdecl; external 'xcb-xinerama' name 'xcb_xinerama_is_active_reply';
+function xcb_xinerama_query_screens(c: Pxcb_connection_t): xcb_xinerama_query_screens_cookie_t; cdecl; external 'xcb-xinerama' name 'xcb_xinerama_query_screens';
+function xcb_xinerama_query_screens_reply(c: Pxcb_connection_t; cookie: xcb_xinerama_query_screens_cookie_t; e: PPxcb_generic_error_t): Pxcb_xinerama_query_screens_reply_t; cdecl; external 'xcb-xinerama' name 'xcb_xinerama_query_screens_reply';
+function xcb_xinerama_query_screens_screen_info(R: Pxcb_xinerama_query_screens_reply_t): Pxcb_xinerama_screen_info_t; cdecl; external 'xcb-xinerama' name 'xcb_xinerama_query_screens_screen_info';
+function xcb_xinerama_query_screens_screen_info_length(R: Pxcb_xinerama_query_screens_reply_t): Integer; cdecl; external 'xcb-xinerama' name 'xcb_xinerama_query_screens_screen_info_length';
+
+type
   // Forward declarations
   TXCBMonitor = class;
   TXCBWMClient = class;
@@ -2115,6 +2159,13 @@ var
   AtomNameReply: Pxcb_get_atom_name_reply_t;
   AtomNameCookie: xcb_get_atom_name_cookie_t;
   Idx: Integer;
+  XinActiveCookie: xcb_xinerama_is_active_cookie_t;
+  XinActiveReply: Pxcb_xinerama_is_active_reply_t;
+  XinScreensCookie: xcb_xinerama_query_screens_cookie_t;
+  XinScreensReply: Pxcb_xinerama_query_screens_reply_t;
+  XinScreensPtr: Pxcb_xinerama_screen_info_t;
+  XinScreen: Pxcb_xinerama_screen_info_t;
+  XinScreensLen: Integer;
 begin
   Result := False;
   FMonitors.Clear();
@@ -2165,6 +2216,46 @@ begin
         xcb_randr_monitor_info_next(@MonIter);
       end;
       xcb_free(MonReply);
+    end;
+  end;
+
+  // Fallback to Xinerama if RandR returned <= 1 monitor (e.g. Xephyr multi-head or legacy Xinerama)
+  if (FMonitors.Count <= 1) and (FConn <> nil) then
+  begin
+    XinActiveCookie := xcb_xinerama_is_active(FConn);
+    XinActiveReply := xcb_xinerama_is_active_reply(FConn, XinActiveCookie, nil);
+    if XinActiveReply <> nil then
+    begin
+      if XinActiveReply^.state <> 0 then
+      begin
+        XinScreensCookie := xcb_xinerama_query_screens(FConn);
+        XinScreensReply := xcb_xinerama_query_screens_reply(FConn, XinScreensCookie, nil);
+        if XinScreensReply <> nil then
+        begin
+          XinScreensLen := xcb_xinerama_query_screens_screen_info_length(XinScreensReply);
+          if XinScreensLen > 1 then
+          begin
+            FMonitors.Clear();
+            FPrimaryMonitor := nil;
+            XinScreensPtr := xcb_xinerama_query_screens_screen_info(XinScreensReply);
+            for Idx := 0 to XinScreensLen - 1 do
+            begin
+              XinScreen := Pxcb_xinerama_screen_info_t(PByte(XinScreensPtr) + Idx * SizeOf(xcb_xinerama_screen_info_t));
+              Mon := TXCBMonitor.Create(
+                'Head-' + IntToStr(Idx + 1),
+                TXCBRect.Create(XinScreen^.x_org, XinScreen^.y_org, XinScreen^.width, XinScreen^.height),
+                Idx = 0,
+                Idx
+              );
+              FMonitors.Add(Mon);
+              if (Idx = 0) and (FPrimaryMonitor = nil) then
+                FPrimaryMonitor := Mon;
+            end;
+          end;
+          xcb_free(XinScreensReply);
+        end;
+      end;
+      xcb_free(XinActiveReply);
     end;
   end;
 
