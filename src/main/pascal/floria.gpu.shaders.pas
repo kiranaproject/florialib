@@ -208,14 +208,18 @@ const
     '  if (clipA <= 0.0) discard;'#10 +
     '  vec4 tex = texture2D(u_Texture, v_TexCoord);'#10 +
     '  if (v_Extra.y > 0.5) {'#10 +
-    '    float textAlpha = tex.a;'#10 +
-    '    float lum = dot(v_Color.rgb, vec3(0.299, 0.587, 0.114));'#10 +
-    '    if (lum > 0.45) {'#10 +
-    '      textAlpha = pow(textAlpha, 0.82);'#10 +
+    '    if (abs(tex.r - tex.g) > 0.03 || abs(tex.r - tex.b) > 0.03) {'#10 +
+    '      gl_FragColor = vec4(tex.rgb, tex.a * v_Color.a * clipA);'#10 +
+    '    } else {'#10 +
+    '      float textAlpha = tex.a;'#10 +
+    '      float lum = dot(v_Color.rgb, vec3(0.299, 0.587, 0.114));'#10 +
+    '      if (lum > 0.45) {'#10 +
+    '        textAlpha = pow(textAlpha, 0.82);'#10 +
+    '      }'#10 +
+    '      float finalA = v_Color.a * textAlpha * clipA;'#10 +
+    '      if (finalA <= 0.001) discard;'#10 +
+    '      gl_FragColor = vec4(v_Color.rgb, finalA);'#10 +
     '    }'#10 +
-    '    float finalA = v_Color.a * textAlpha * clipA;'#10 +
-    '    if (finalA <= 0.001) discard;'#10 +
-    '    gl_FragColor = vec4(v_Color.rgb, finalA);'#10 +
     '  } else {'#10 +
     '    vec4 c = tex * v_Color;'#10 +
     '    gl_FragColor = vec4(c.rgb, c.a * clipA);'#10 +

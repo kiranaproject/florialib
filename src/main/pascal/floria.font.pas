@@ -148,7 +148,9 @@ procedure FtSetFontGamma(AGamma: Double);
 implementation
 
 uses
-  Floria.Unicode.BiDi;
+  Floria.Unicode.BiDi,
+  Floria.Image.Core,
+  Floria.Text.Emoji;
 
 var
   uFontManager: TFloriaFontManager = nil;
@@ -400,6 +402,8 @@ var
   curCM, prevCM, latinCM: font_cache_manager_ptr;
   measText: string;
   depth: Integer;
+  targetH: Integer;
+  emojiImg: TFloriaImage;
 begin
   if not FLoaded or (AText = '') then
     Exit(Length(AText) * (FSize * (FDPI / 72.0)) * 0.55);
@@ -415,6 +419,9 @@ begin
   prevCM := nil;
   str_ := PChar(measText);
 
+  targetH := Round(FHeight * 0.95);
+  if targetH < 8 then targetH := 8;
+
   latinFont := DynamicLatinFont;
   if Assigned(latinFont) and latinFont.Loaded then
     latinCM := latinFont.CacheManagerPtr()
@@ -425,6 +432,18 @@ begin
   begin
     charId := UTF8CharToUnicode(str_, charLen);
     Inc(str_, charLen);
+
+    if FloriaEmojiEngine.HasEmoji(charId) then
+    begin
+      emojiImg := FloriaEmojiEngine.GetEmojiImage(charId, targetH);
+      if Assigned(emojiImg) then
+        x := x + emojiImg.Width + 2.0
+      else
+        x := x + targetH * 1.05 + 2.0;
+      first := True;
+      prevCM := nil;
+      Continue;
+    end;
 
     glyph := nil;
     curCM := @FCacheManager;

@@ -24,7 +24,7 @@ uses
   Floria.Canvas.Agg, Floria.Canvas.Blend, Floria.Canvas.Filter, Floria.ColorSpace, Floria.SVG.Rasterizer, Floria.Unicode.BiDi, 
   Floria.Path.Clipper.Core, Floria.Path.Clipper.Engine, Floria.Path.Clipper.Offset, 
   Floria.Path.Clipper.RectClip, Floria.Path.Clipper.Minkowski, Floria.Path.Clipper, Floria.Path.Ops, 
-  Floria.Text.HarfBuzz, Floria.Text.Paragraph, Floria.DisplayList, 
+  Floria.Text.HarfBuzz, Floria.Text.Paragraph, Floria.Text.Emoji, Floria.DisplayList, 
   Floria.DisplayList.Clip, Floria.DisplayList.Spatial, Floria.DisplayList.Cache, 
   Floria.EGL, Floria.GL, Floria.GPU.Atlas, Floria.GPU.Batch, Floria.GPU.Shaders, Floria.GPU.Renderer, Floria.GPU.Tessellator, Floria.GPU.Context,
   Floria.XCB.WM.Compositor;

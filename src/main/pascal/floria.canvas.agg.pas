@@ -49,6 +49,7 @@ uses
   Floria.Image.Core,
   Floria.Image.Blur,
   Floria.Unicode.BiDi,
+  Floria.Text.Emoji,
   Floria.Canvas,
   Floria.Canvas.Blend;
 
@@ -902,6 +903,9 @@ var
   fb, latinFont: TFloriaFont;
   renderText: string;
   depth: Integer;
+  targetH: Integer;
+  emojiImg: TFloriaImage;
+  emojiY: Double;
 begin
   if (AText = '') or (FCurrentAlpha <= 0.0) then Exit;
   if not Assigned(AFont) then AFont := FloriaGetSystemFont();
@@ -928,6 +932,9 @@ begin
   first := True;
   prevCM := nil;
 
+  targetH := Round(AFont.Height * 0.95);
+  if targetH < 8 then targetH := 8;
+
   latinFont := AFont.DynamicLatinFont;
   if Assigned(latinFont) and latinFont.Loaded then
     latinCM := latinFont.CacheManagerPtr()
@@ -938,6 +945,22 @@ begin
   begin
     charId := UTF8CharToUnicode(str_, charLen);
     Inc(str_, charLen);
+
+    if FloriaEmojiEngine.HasEmoji(charId) then
+    begin
+      emojiImg := FloriaEmojiEngine.GetEmojiImage(charId, targetH);
+      if Assigned(emojiImg) then
+      begin
+        emojiY := curY - AFont.Ascent + (AFont.Height - emojiImg.Height) * 0.5;
+        DrawImage(curX, emojiY, emojiImg, 1.0);
+        curX := curX + emojiImg.Width + 2.0;
+      end
+      else
+        curX := curX + targetH * 1.05 + 2.0;
+      first := True;
+      prevCM := nil;
+      Continue;
+    end;
 
     glyph := nil;
     curCM := cm;
