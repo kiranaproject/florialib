@@ -13,6 +13,7 @@ interface
 uses
   Classes, SysUtils, fpcunit, testregistry,
   Floria.XCB,
+  Floria.XCB.EWMH,
   Floria.XCB.WM;
 
 type
@@ -35,6 +36,7 @@ type
     procedure TestStrutsAndRecomputeWorkarea();
     procedure TestDynamicWorkareaReflow();
     procedure TestMinimizeAndRestoreOffline();
+    procedure TestCSDMoveResizeAndFrameExtents();
   end;
 
 implementation
@@ -739,6 +741,104 @@ begin
     AssertTrue('Cli1 minimized', wsMinimized in Cli1.State);
     Cli1.Restore();
     AssertFalse('Cli1 unminimized on Restore', wsMinimized in Cli1.State);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestCSDMoveResizeAndFrameExtents();
+var
+  Mgr: TXCBWindowManager;
+  Cli: TXCBWMClient;
+  MockEwmh: xcb_ewmh_connection_t;
+  Ev: xcb_client_message_event_t;
+  Data32: PCardinalArray;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Mgr.FrameMetrics := TXCBFrameMetrics.Create(28, 2);
+    FillChar(MockEwmh, SizeOf(MockEwmh), 0);
+    MockEwmh._NET_WM_MOVERESIZE := 1001;
+    MockEwmh._NET_MOVERESIZE_WINDOW := 1002;
+    MockEwmh._NET_REQUEST_FRAME_EXTENTS := 1003;
+    Mgr.Ewmh := MockEwmh;
+    Mgr.EwmhInitialized := True;
+
+    // Manage a CSD / borderless window
+    Cli := Mgr.ManageWindow(5555);
+    Cli.Borderless := True;
+    Cli.CurrentRect := TXCBRect.Create(200, 200, 800, 600);
+    AssertFalse('CSD window is not decorated', Cli.IsDecorated());
+
+    // 1. Test _NET_WM_MOVERESIZE with direction 8 (move)
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_CLIENT_MESSAGE;
+    Ev.window := 5555;
+    Ev.type_ := 1001;
+    Data32 := PCardinalArray(@Ev.data.raw[0]);
+    Data32^[0] := 250; // x_root
+    Data32^[1] := 210; // y_root
+    Data32^[2] := 8;   // _NET_WM_MOVERESIZE_MOVE
+    Data32^[3] := 1;   // button 1
+    Data32^[4] := 1;   // source normal application
+
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev));
+
+    AssertEquals('Drag mode set to dmMove', Integer(dmMove), Integer(Mgr.DragMode));
+    AssertSame('DragClient matches Cli', Cli, Mgr.DragClient);
+    AssertSame('ActiveClient set to Cli', Cli, Mgr.ActiveClient);
+
+    // Simulate mouse motion during drag
+    Mgr.UpdateDrag(300, 260); // +50, +50
+    AssertEquals('CSD moved X', 250, Cli.CurrentRect.X);
+    AssertEquals('CSD moved Y', 250, Cli.CurrentRect.Y);
+    AssertEquals('CSD width unchanged', 800, Cli.CurrentRect.Width);
+    AssertEquals('CSD height unchanged', 600, Cli.CurrentRect.Height);
+
+    // 2. Test _NET_WM_MOVERESIZE with direction 11 (cancel)
+    Data32^[2] := 11; // _NET_WM_MOVERESIZE_CANCEL
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev));
+    AssertEquals('DragMode is dmNone after cancel', Integer(dmNone), Integer(Mgr.DragMode));
+    AssertNull('DragClient is nil after cancel', Mgr.DragClient);
+
+    // 3. Test _NET_WM_MOVERESIZE with direction 4 (bottom-right resize)
+    Data32^[0] := 1050; // x_root
+    Data32^[1] := 850;  // y_root
+    Data32^[2] := 4;    // _NET_WM_MOVERESIZE_BOTTOMRIGHT
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev));
+    AssertEquals('Drag mode set to dmResizeBottomRight', Integer(dmResizeBottomRight), Integer(Mgr.DragMode));
+    AssertSame('DragClient matches Cli', Cli, Mgr.DragClient);
+
+    Mgr.UpdateDrag(1100, 890); // +50, +40
+    AssertEquals('CSD resized width', 850, Cli.CurrentRect.Width);
+    AssertEquals('CSD resized height', 640, Cli.CurrentRect.Height);
+    Mgr.EndDrag();
+
+    // 4. Test _NET_MOVERESIZE_WINDOW (programmatic move/resize)
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_CLIENT_MESSAGE;
+    Ev.window := 5555;
+    Ev.type_ := 1002;
+    Data32 := PCardinalArray(@Ev.data.raw[0]);
+    // gravity + flags: bits 8..11 (0x0F00: x, y, width, height)
+    Data32^[0] := (1 shl 8) or (1 shl 9) or (1 shl 10) or (1 shl 11);
+    Data32^[1] := 150;  // newX
+    Data32^[2] := 120;  // newY
+    Data32^[3] := 900;  // newW
+    Data32^[4] := 700;  // newH
+
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev));
+    AssertEquals('Programmatic moved X', 150, Cli.CurrentRect.X);
+    AssertEquals('Programmatic moved Y', 120, Cli.CurrentRect.Y);
+    AssertEquals('Programmatic resized width', 900, Cli.CurrentRect.Width);
+    AssertEquals('Programmatic resized height', 700, Cli.CurrentRect.Height);
+
+    // 5. Test _NET_REQUEST_FRAME_EXTENTS on CSD window doesn't crash offline
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_CLIENT_MESSAGE;
+    Ev.window := 5555;
+    Ev.type_ := 1003;
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev));
   finally
     Mgr.Free();
   end;

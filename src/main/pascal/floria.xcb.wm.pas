@@ -378,8 +378,8 @@ type
     property AtomNetWmStrutPartial : xcb_atom_t      read FAtomNetWmStrutPartial;
     property AtomWMChangeState     : xcb_atom_t      read FAtomWMChangeState;
     property AtomWMState           : xcb_atom_t      read FAtomWMState;
-    property Ewmh                  : xcb_ewmh_connection_t read FEwmh;
-    property EwmhInitialized       : Boolean               read FEwmhInitialized;
+    property Ewmh                  : xcb_ewmh_connection_t read FEwmh write FEwmh;
+    property EwmhInitialized       : Boolean               read FEwmhInitialized write FEwmhInitialized;
 
     property CursorNormal      : xcb_cursor_t        read FCursorNormal;
     property CursorMove        : xcb_cursor_t        read FCursorMove;
@@ -1436,7 +1436,7 @@ end;
 procedure TXCBWindowManager.InitEWMH();
 var
   Cookies: Pxcb_intern_atom_cookie_t;
-  SuppAtoms: array[0..36] of xcb_atom_t;
+  SuppAtoms: array[0..39] of xcb_atom_t;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -1539,6 +1539,9 @@ begin
   SuppAtoms[34] := FEwmh._NET_WM_WINDOW_TYPE_COMBO;
   SuppAtoms[35] := FEwmh._NET_WM_WINDOW_TYPE_UTILITY;
   SuppAtoms[36] := FEwmh._NET_WM_WINDOW_TYPE_SPLASH;
+  SuppAtoms[37] := FEwmh._NET_MOVERESIZE_WINDOW;
+  SuppAtoms[38] := FEwmh._NET_FRAME_EXTENTS;
+  SuppAtoms[39] := FEwmh._NET_REQUEST_FRAME_EXTENTS;
 
   xcb_change_property(
     FConn,
@@ -1547,7 +1550,7 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    37,
+    40,
     @SuppAtoms[0]
   );
 
@@ -2235,6 +2238,25 @@ begin
                          XCB_CONFIG_WINDOW_SIBLING or XCB_CONFIG_WINDOW_STACK_MODE,
                          @Values[0]);
   end;
+
+  if FEwmhInitialized then
+  begin
+    Values[0] := FFrameMetrics.Insets.Left;
+    Values[1] := FFrameMetrics.Insets.Right;
+    Values[2] := FFrameMetrics.Insets.Top;
+    Values[3] := FFrameMetrics.Insets.Bottom;
+    xcb_change_property(
+      FConn,
+      XCB_PROP_MODE_REPLACE,
+      AClient.ClientWindow,
+      FEwmh._NET_FRAME_EXTENTS,
+      XCB_ATOM_CARDINAL,
+      32,
+      4,
+      @Values[0]
+    );
+  end;
+
   xcb_flush(FConn);
 
   // Send synthetic ConfigureNotify per ICCCM 4.1.4
@@ -2305,6 +2327,7 @@ function TXCBWindowManager.ManageWindow(const AWindow: xcb_window_t): TXCBWMClie
 var
   Cli: TXCBWMClient;
   EventMask: Cardinal;
+  Extents: array[0..3] of Cardinal;
 begin
   Result := FindClient(AWindow);
   if Result <> nil then Exit;
@@ -2326,7 +2349,26 @@ begin
     begin
       Cli.IsReparented := False;
       if FConn <> nil then
+      begin
+        if FEwmhInitialized then
+        begin
+          Extents[0] := 0;
+          Extents[1] := 0;
+          Extents[2] := 0;
+          Extents[3] := 0;
+          xcb_change_property(
+            FConn,
+            XCB_PROP_MODE_REPLACE,
+            Cli.ClientWindow,
+            FEwmh._NET_FRAME_EXTENTS,
+            XCB_ATOM_CARDINAL,
+            32,
+            4,
+            @Extents[0]
+          );
+        end;
         xcb_map_window(FConn, Cli.ClientWindow);
+      end;
     end
     else
     begin
@@ -2344,6 +2386,20 @@ begin
     begin
       EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE;
       xcb_change_window_attributes(FConn, Cli.ClientWindow, XCB_CW_EVENT_MASK, @EventMask);
+
+      // Passive grab on Alt + Button1 (move) and Alt + Button3 (resize)
+      xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
+                      XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
+                      XCB_BUTTON_INDEX_1, XCB_MOD_MASK_1);
+      xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
+                      XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
+                      XCB_BUTTON_INDEX_1, XCB_MOD_MASK_1 or XCB_MOD_MASK_2);
+      xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
+                      XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
+                      XCB_BUTTON_INDEX_3, XCB_MOD_MASK_1);
+      xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
+                      XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
+                      XCB_BUTTON_INDEX_3, XCB_MOD_MASK_1 or XCB_MOD_MASK_2);
     end;
 
     Cli.RestoredRect := Cli.CurrentRect;
@@ -2535,6 +2591,9 @@ var
   newX, newY, newW, newH: Integer;
   valIdx: Integer;
   I: Integer;
+  reqDragMode: TXCBDragMode;
+  Dir: Cardinal;
+  FrameExtentsData: array[0..3] of Cardinal;
 begin
   Result := False;
   if AEvent = nil then Exit;
@@ -2807,6 +2866,94 @@ begin
             @MsgData32^[0]
           );
           xcb_flush(FConn);
+        end
+        else if MsgEv^.type_ = FEwmh._NET_WM_MOVERESIZE then
+        begin
+          Cli := FindClientByClientWindow(MsgEv^.window);
+          if Cli = nil then
+            Cli := FindClient(MsgEv^.window);
+          if Cli <> nil then
+          begin
+            Dir := MsgData32^[2];
+            if Dir = 11 then // _NET_WM_MOVERESIZE_CANCEL
+            begin
+              if FDragClient = Cli then
+                EndDrag();
+            end
+            else
+            begin
+              case Dir of
+                0: reqDragMode := dmResizeTopLeft;
+                1: reqDragMode := dmResizeTop;
+                2: reqDragMode := dmResizeTopRight;
+                3: reqDragMode := dmResizeRight;
+                4: reqDragMode := dmResizeBottomRight;
+                5: reqDragMode := dmResizeBottom;
+                6: reqDragMode := dmResizeBottomLeft;
+                7: reqDragMode := dmResizeLeft;
+                8, 10: reqDragMode := dmMove;
+                9: reqDragMode := dmResizeBottomRight;
+              else
+                reqDragMode := dmNone;
+              end;
+
+              if reqDragMode <> dmNone then
+              begin
+                Cli.Activate();
+                BeginDrag(Cli, reqDragMode, Integer(MsgData32^[0]), Integer(MsgData32^[1]));
+              end;
+            end;
+          end;
+        end
+        else if MsgEv^.type_ = FEwmh._NET_MOVERESIZE_WINDOW then
+        begin
+          Cli := FindClientByClientWindow(MsgEv^.window);
+          if Cli = nil then
+            Cli := FindClient(MsgEv^.window);
+          if Cli <> nil then
+          begin
+            newX := Cli.CurrentRect.X;
+            newY := Cli.CurrentRect.Y;
+            newW := Cli.CurrentRect.Width;
+            newH := Cli.CurrentRect.Height;
+            if (MsgData32^[0] and (1 shl 8)) <> 0 then newX := Integer(MsgData32^[1]);
+            if (MsgData32^[0] and (1 shl 9)) <> 0 then newY := Integer(MsgData32^[2]);
+            if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
+            if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
+            Cli.SetGeometry(newX, newY, newW, newH);
+          end;
+        end
+        else if MsgEv^.type_ = FEwmh._NET_REQUEST_FRAME_EXTENTS then
+        begin
+          Cli := FindClientByClientWindow(MsgEv^.window);
+          if (Cli <> nil) and (not Cli.IsDecorated()) then
+          begin
+            FrameExtentsData[0] := 0;
+            FrameExtentsData[1] := 0;
+            FrameExtentsData[2] := 0;
+            FrameExtentsData[3] := 0;
+          end
+          else
+          begin
+            FrameExtentsData[0] := FFrameMetrics.Insets.Left;
+            FrameExtentsData[1] := FFrameMetrics.Insets.Right;
+            FrameExtentsData[2] := FFrameMetrics.Insets.Top;
+            FrameExtentsData[3] := FFrameMetrics.Insets.Bottom;
+          end;
+          if FConn <> nil then
+          begin
+            xcb_change_property(
+              FConn,
+              XCB_PROP_MODE_REPLACE,
+              MsgEv^.window,
+              FEwmh._NET_FRAME_EXTENTS,
+              XCB_ATOM_CARDINAL,
+              32,
+              4,
+              @FrameExtentsData[0]
+            );
+            xcb_flush(FConn);
+          end;
         end;
       end;
 
@@ -2972,6 +3119,7 @@ begin
     Reply := xcb_grab_pointer_reply(FConn, Cookie, nil);
     if Reply <> nil then
       xcb_free(Reply);
+    xcb_flush(FConn);
   end;
 end;
 
