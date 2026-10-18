@@ -37,6 +37,8 @@ type
     procedure TestDynamicWorkareaReflow();
     procedure TestMinimizeAndRestoreOffline();
     procedure TestCSDMoveResizeAndFrameExtents();
+    procedure TestMultiMonitorTopologyAndWorkareas();
+    procedure TestMultiMonitorNavigationAndMigration();
   end;
 
 implementation
@@ -839,6 +841,142 @@ begin
     Ev.window := 5555;
     Ev.type_ := 1003;
     Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev));
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestMultiMonitorTopologyAndWorkareas();
+var
+  Mgr: TXCBWindowManager;
+  Mon1, Mon2: TXCBMonitor;
+  Dock: TXCBWMClient;
+  S: TXCBStrutPartial;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    // Initial monitor in offline mode
+    AssertEquals('Initial monitor count', 1, Mgr.MonitorCount);
+    AssertNotNull('Initial primary monitor', Mgr.PrimaryMonitor);
+    AssertEquals('Initial primary name', 'Default', Mgr.PrimaryMonitor.Name);
+
+    // Setup simulated dual head topology:
+    // Mon1 (DP-1): 1920x1080 at (0, 0), Primary
+    // Mon2 (HDMI-1): 1920x1080 at (1920, 0), Secondary
+    Mgr.Monitors.Clear();
+    Mon1 := TXCBMonitor.Create('DP-1', TXCBRect.Create(0, 0, 1920, 1080), True, 0);
+    Mon2 := TXCBMonitor.Create('HDMI-1', TXCBRect.Create(1920, 0, 1920, 1080), False, 1);
+    Mgr.Monitors.Add(Mon1);
+    Mgr.Monitors.Add(Mon2);
+    Mgr.RecomputeWorkareas();
+
+    AssertEquals('Dual monitor count', 2, Mgr.MonitorCount);
+    AssertSame('Primary monitor is Mon1', Mon1, Mgr.PrimaryMonitor);
+
+    // Point and Rect containment
+    AssertSame('Point (100, 100) is Mon1', Mon1, Mgr.MonitorForPoint(100, 100));
+    AssertSame('Point (2000, 100) is Mon2', Mon2, Mgr.MonitorForPoint(2000, 100));
+    AssertSame('Rect inside Mon1', Mon1, Mgr.MonitorForRect(TXCBRect.Create(200, 200, 400, 300)));
+    AssertSame('Rect inside Mon2', Mon2, Mgr.MonitorForRect(TXCBRect.Create(2100, 200, 400, 300)));
+
+    // Adjacency navigation
+    AssertSame('Mon1 right is Mon2', Mon2, Mgr.AdjacentMonitor(Mon1, dirRight));
+    AssertSame('Mon2 left is Mon1', Mon1, Mgr.AdjacentMonitor(Mon2, dirLeft));
+    AssertSame('Mon1 left has no neighbor', Mon1, Mgr.AdjacentMonitor(Mon1, dirLeft));
+    AssertSame('Mon2 right has no neighbor', Mon2, Mgr.AdjacentMonitor(Mon2, dirRight));
+
+    // Per-monitor strut isolation
+    // Add top dock of 48px only on Mon1 (spans 0..1919)
+    Dock := Mgr.ManageWindow(901);
+    Dock.WindowType := wtDock;
+    S := TXCBStrutPartial.Create();
+    S.Top := 48;
+    S.TopStartX := 0;
+    S.TopEndX := 1919;
+    Dock.Strut := S;
+
+    Mgr.RecomputeWorkareas();
+
+    // Mon1 workarea shrinks by 48px from top
+    AssertEquals('Mon1 workarea Y', 48, Mon1.Workarea.Y);
+    AssertEquals('Mon1 workarea Height', 1032, Mon1.Workarea.Height);
+
+    // Mon2 workarea remains completely full-height and unmolested!
+    AssertEquals('Mon2 workarea Y untouched', 0, Mon2.Workarea.Y);
+    AssertEquals('Mon2 workarea Height untouched', 1080, Mon2.Workarea.Height);
+
+    // Primary manager workarea reflects Mon1 (primary)
+    AssertEquals('Manager workarea matches primary Y', 48, Mgr.Workarea.Y);
+    AssertEquals('Manager workarea matches primary Height', 1032, Mgr.Workarea.Height);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestMultiMonitorNavigationAndMigration();
+var
+  Mgr: TXCBWindowManager;
+  Mon1, Mon2: TXCBMonitor;
+  Cli: TXCBWMClient;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Mgr.Monitors.Clear();
+    Mon1 := TXCBMonitor.Create('DP-1', TXCBRect.Create(0, 0, 1920, 1080), True, 0);
+    Mon2 := TXCBMonitor.Create('HDMI-1', TXCBRect.Create(1920, 0, 1920, 1080), False, 1);
+    Mgr.Monitors.Add(Mon1);
+    Mgr.Monitors.Add(Mon2);
+    Mgr.RecomputeWorkareas();
+
+    // 1. Create client on Mon1
+    Cli := Mgr.ManageWindow(8888);
+    Cli.CurrentRect := TXCBRect.Create(100, 150, 600, 400);
+    AssertSame('Client initially on Mon1', Mon1, Cli.CurrentMonitor());
+
+    // 2. Maximize on Mon1
+    Cli.Maximize();
+    AssertEquals('Maximized Mon1 X', Mon1.Workarea.X, Cli.CurrentRect.X);
+    AssertEquals('Maximized Mon1 Y', Mon1.Workarea.Y, Cli.CurrentRect.Y);
+    AssertEquals('Maximized Mon1 W', Mon1.Workarea.Width, Cli.CurrentRect.Width);
+    AssertEquals('Maximized Mon1 H', Mon1.Workarea.Height, Cli.CurrentRect.Height);
+
+    // 3. Move maximized client across monitors (Mon1 -> Mon2)
+    Mgr.MoveClientToMonitor(Cli, Mon2);
+    AssertSame('Client now on Mon2', Mon2, Cli.CurrentMonitor());
+    AssertEquals('Maximized Mon2 X', Mon2.Workarea.X, Cli.CurrentRect.X);
+    AssertEquals('Maximized Mon2 Y', Mon2.Workarea.Y, Cli.CurrentRect.Y);
+    AssertEquals('Maximized Mon2 W', Mon2.Workarea.Width, Cli.CurrentRect.Width);
+    AssertEquals('Maximized Mon2 H', Mon2.Workarea.Height, Cli.CurrentRect.Height);
+
+    // 4. Tile Right on Mon2
+    Cli.TileRight();
+    AssertTrue('State has wsTiledRight', wsTiledRight in Cli.State);
+    AssertEquals('TiledRight Mon2 X', Mon2.Workarea.X + (Mon2.Workarea.Width div 2), Cli.CurrentRect.X);
+    AssertEquals('TiledRight Mon2 W', Mon2.Workarea.Width - (Mon2.Workarea.Width div 2), Cli.CurrentRect.Width);
+
+    // 5. Move tiled window back to Mon1
+    Mgr.MoveClientToMonitor(Cli, Mon1);
+    AssertSame('Client back on Mon1', Mon1, Cli.CurrentMonitor());
+    AssertEquals('TiledRight Mon1 X', Mon1.Workarea.X + (Mon1.Workarea.Width div 2), Cli.CurrentRect.X);
+    AssertEquals('TiledRight Mon1 W', Mon1.Workarea.Width - (Mon1.Workarea.Width div 2), Cli.CurrentRect.Width);
+
+    // 6. Restore to floating and test relative position preservation
+    Cli.Restore();
+    Cli.CurrentRect := TXCBRect.Create(50, 60, 500, 400); // 50px offset from Mon1.X
+    Mgr.MoveClientToMonitor(Cli, Mon2);
+    AssertEquals('Relative X preserved on Mon2', 1920 + 50, Cli.CurrentRect.X);
+    AssertEquals('Relative Y preserved on Mon2', 60, Cli.CurrentRect.Y);
+
+    // 7. Hotplug disconnect simulation:
+    // Window is currently on Mon2 (X = 1970). Mon2 is disconnected!
+    Mgr.Monitors.Remove(Mon2);
+    AssertEquals('Only Mon1 remaining', 1, Mgr.MonitorCount);
+    // Trigger monitor change notification
+    Mgr.DoOnMonitorsChanged();
+    // Window must be auto-migrated to Mon1 and clamped inside Mon1 workarea
+    AssertSame('Client migrated back to Mon1', Mon1, Cli.CurrentMonitor());
+    AssertTrue('Client within Mon1 X bounds', Cli.CurrentRect.X >= Mon1.Workarea.X);
+    AssertTrue('Client fits within Mon1 width', Cli.CurrentRect.Right() <= Mon1.Workarea.Right());
   finally
     Mgr.Free();
   end;

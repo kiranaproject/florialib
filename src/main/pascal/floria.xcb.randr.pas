@@ -1138,8 +1138,8 @@ function xcb_randr_query_version_reply(c: Pxcb_connection_t; cookie: xcb_randr_q
 { xcb_randr_set_screen_config: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
 { xcb_randr_set_screen_config_unchecked: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
 function xcb_randr_set_screen_config_reply(c: Pxcb_connection_t; cookie: xcb_randr_set_screen_config_cookie_t; e: PPxcb_generic_error_t): Pxcb_randr_set_screen_config_reply_t; cdecl; external 'xcb-randr' name 'xcb_randr_set_screen_config_reply';
-{ xcb_randr_select_input_checked: skipped — return type 'xcb_void_cookie_t' comes from a filtered-out header }
-{ xcb_randr_select_input: skipped — return type 'xcb_void_cookie_t' comes from a filtered-out header }
+function xcb_randr_select_input_checked(c: Pxcb_connection_t; window: xcb_window_t; enable: Word): xcb_void_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_select_input_checked';
+function xcb_randr_select_input(c: Pxcb_connection_t; window: xcb_window_t; enable: Word): xcb_void_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_select_input';
 function xcb_randr_get_screen_info_sizeof(_buffer: Pointer): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_get_screen_info_sizeof';
 { xcb_randr_get_screen_info: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
 { xcb_randr_get_screen_info_unchecked: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
@@ -1234,8 +1234,8 @@ function xcb_randr_create_mode_reply(c: Pxcb_connection_t; cookie: xcb_randr_cre
 { xcb_randr_delete_output_mode_checked: skipped — return type 'xcb_void_cookie_t' comes from a filtered-out header }
 { xcb_randr_delete_output_mode: skipped — return type 'xcb_void_cookie_t' comes from a filtered-out header }
 function xcb_randr_get_crtc_info_sizeof(_buffer: Pointer): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_get_crtc_info_sizeof';
-{ xcb_randr_get_crtc_info: skipped — parameter type 'xcb_timestamp_t' comes from a filtered-out header }
-{ xcb_randr_get_crtc_info_unchecked: skipped — parameter type 'xcb_timestamp_t' comes from a filtered-out header }
+function xcb_randr_get_crtc_info(c: Pxcb_connection_t; crtc: xcb_randr_crtc_t; config_timestamp: xcb_timestamp_t): xcb_randr_get_crtc_info_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_crtc_info';
+function xcb_randr_get_crtc_info_unchecked(c: Pxcb_connection_t; crtc: xcb_randr_crtc_t; config_timestamp: xcb_timestamp_t): xcb_randr_get_crtc_info_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_crtc_info_unchecked';
 function xcb_randr_get_crtc_info_outputs(R: Pxcb_randr_get_crtc_info_reply_t): Pxcb_randr_output_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_crtc_info_outputs';
 function xcb_randr_get_crtc_info_outputs_length(R: Pxcb_randr_get_crtc_info_reply_t): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_get_crtc_info_outputs_length';
 { xcb_randr_get_crtc_info_outputs_end: skipped — return type 'xcb_generic_iterator_t' comes from a filtered-out header }
@@ -1276,8 +1276,8 @@ function xcb_randr_set_crtc_gamma_blue(R: Pxcb_randr_set_crtc_gamma_request_t): 
 function xcb_randr_set_crtc_gamma_blue_length(R: Pxcb_randr_set_crtc_gamma_request_t): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_set_crtc_gamma_blue_length';
 { xcb_randr_set_crtc_gamma_blue_end: skipped — return type 'xcb_generic_iterator_t' comes from a filtered-out header }
 function xcb_randr_get_screen_resources_current_sizeof(_buffer: Pointer): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_get_screen_resources_current_sizeof';
-{ xcb_randr_get_screen_resources_current: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
-{ xcb_randr_get_screen_resources_current_unchecked: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
+function xcb_randr_get_screen_resources_current(c: Pxcb_connection_t; window: xcb_window_t): xcb_randr_get_screen_resources_current_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_screen_resources_current';
+function xcb_randr_get_screen_resources_current_unchecked(c: Pxcb_connection_t; window: xcb_window_t): xcb_randr_get_screen_resources_current_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_screen_resources_current_unchecked';
 function xcb_randr_get_screen_resources_current_crtcs(R: Pxcb_randr_get_screen_resources_current_reply_t): Pxcb_randr_crtc_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_screen_resources_current_crtcs';
 function xcb_randr_get_screen_resources_current_crtcs_length(R: Pxcb_randr_get_screen_resources_current_reply_t): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_get_screen_resources_current_crtcs_length';
 { xcb_randr_get_screen_resources_current_crtcs_end: skipped — return type 'xcb_generic_iterator_t' comes from a filtered-out header }
@@ -1411,8 +1411,8 @@ function xcb_randr_monitor_info_outputs_length(R: Pxcb_randr_monitor_info_t): In
 procedure xcb_randr_monitor_info_next(i: Pxcb_randr_monitor_info_iterator_t); cdecl; external 'xcb-randr' name 'xcb_randr_monitor_info_next';
 { xcb_randr_monitor_info_end: skipped — return type 'xcb_generic_iterator_t' comes from a filtered-out header }
 function xcb_randr_get_monitors_sizeof(_buffer: Pointer): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_get_monitors_sizeof';
-{ xcb_randr_get_monitors: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
-{ xcb_randr_get_monitors_unchecked: skipped — parameter type 'xcb_window_t' comes from a filtered-out header }
+function xcb_randr_get_monitors(c: Pxcb_connection_t; window: xcb_window_t; get_active: Byte): xcb_randr_get_monitors_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_monitors';
+function xcb_randr_get_monitors_unchecked(c: Pxcb_connection_t; window: xcb_window_t; get_active: Byte): xcb_randr_get_monitors_cookie_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_monitors_unchecked';
 function xcb_randr_get_monitors_monitors_length(R: Pxcb_randr_get_monitors_reply_t): Integer; cdecl; external 'xcb-randr' name 'xcb_randr_get_monitors_monitors_length';
 function xcb_randr_get_monitors_monitors_iterator(R: Pxcb_randr_get_monitors_reply_t): xcb_randr_monitor_info_iterator_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_monitors_monitors_iterator';
 function xcb_randr_get_monitors_reply(c: Pxcb_connection_t; cookie: xcb_randr_get_monitors_cookie_t; e: PPxcb_generic_error_t): Pxcb_randr_get_monitors_reply_t; cdecl; external 'xcb-randr' name 'xcb_randr_get_monitors_reply';
@@ -1431,8 +1431,8 @@ function xcb_randr_create_lease_reply_fds(c: Pxcb_connection_t; reply: Pxcb_rand
 { xcb_randr_free_lease: skipped — return type 'xcb_void_cookie_t' comes from a filtered-out header }
 procedure xcb_randr_lease_notify_next(i: Pxcb_randr_lease_notify_iterator_t); cdecl; external 'xcb-randr' name 'xcb_randr_lease_notify_next';
 { xcb_randr_lease_notify_end: skipped — return type 'xcb_generic_iterator_t' comes from a filtered-out header }
-procedure xcb_randr_notify_data_next(i: Pxcb_randr_notify_data_iterator_t); cdecl; external 'xcb-randr' name 'xcb_randr_notify_data_next';
-{ xcb_randr_notify_data_end: skipped — return type 'xcb_generic_iterator_t' comes from a filtered-out header }
+var
+  xcb_randr_id: xcb_extension_t; cvar; external;
 
 implementation
 

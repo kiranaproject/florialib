@@ -15,11 +15,12 @@ unit Floria.XCB.WM;
 interface
 
 uses
-  Classes, SysUtils, Contnrs,
+  Classes, SysUtils, Contnrs, Math,
   Floria.XCB,
   Floria.XCB.Cursor,
   Floria.XCB.EWMH,
-  Floria.XCB.ICCCM;
+  Floria.XCB.ICCCM,
+  Floria.XCB.RandR;
 
 const
   XCB_ALL_DESKTOPS = Cardinal($FFFFFFFF);
@@ -74,6 +75,7 @@ type
   TCardinalArray = array[0..4] of Cardinal;
 
   // Forward declarations
+  TXCBMonitor = class;
   TXCBWMClient = class;
   TXCBWindowManager = class;
 
@@ -169,6 +171,42 @@ type
   // Frame painting delegate
   TXCBFramePaintEvent = procedure(ASender: TObject; AClient: TXCBWMClient; const ARect: TXCBRect) of object;
 
+  // Compass navigation direction for multi-monitor shifts
+  TXCBDirection = (
+    dirLeft,
+    dirRight,
+    dirUp,
+    dirDown
+  );
+
+  // TXCBMonitor
+  // Represents a physical or logical display output
+  TXCBMonitor = class
+  private
+    FName       : AnsiString;
+    FRect       : TXCBRect;
+    FWorkarea   : TXCBRect;
+    FIsPrimary  : Boolean;
+    FIndex      : Integer;
+    FStrut      : TXCBStrutPartial;
+  public
+    constructor Create(const AName: AnsiString; const ARect: TXCBRect; const AIsPrimary: Boolean = False; const AIndex: Integer = 0);
+    destructor Destroy(); override;
+
+    function Contains(const AX, AY: Integer): Boolean;
+    function Contains(const APt: TXCBPoint): Boolean;
+    function IntersectionArea(const ARect: TXCBRect): Integer;
+    procedure ResetWorkarea();
+    procedure ApplyStrut(const AStrut: TXCBStrutPartial; const AScreenWidth, AScreenHeight: Integer);
+
+    property Name       : AnsiString       read FName write FName;
+    property Rect       : TXCBRect         read FRect write FRect;
+    property Workarea   : TXCBRect         read FWorkarea write FWorkarea;
+    property IsPrimary  : Boolean          read FIsPrimary write FIsPrimary;
+    property Index      : Integer          read FIndex write FIndex;
+    property Strut      : TXCBStrutPartial read FStrut write FStrut;
+  end;
+
   // TXCBWMClient
   // Managed top-level client application window
   TXCBWMClient = class
@@ -221,6 +259,7 @@ type
     function TitlebarRect(): TXCBRect;
     function IsMenu(): Boolean;
     function IsDecorated(): Boolean;
+    function CurrentMonitor(): TXCBMonitor;
 
     property ClientWindow        : xcb_window_t      read FClientWindow;
     property FrameWindow         : xcb_window_t      read FFrameWindow write FFrameWindow;
@@ -266,6 +305,11 @@ type
     FDesktopNames      : TStringList;
     FIsRunning         : Boolean;
     FWorkarea          : TXCBRect;
+    FMonitors          : TObjectList;
+    FPrimaryMonitor    : TXCBMonitor;
+    FRandRAvailable    : Boolean;
+    FRandREventBase    : Byte;
+    FRandRErrorBase    : Byte;
     
     // Atoms
     FAtomWMDeleteWindow    : xcb_atom_t;
@@ -304,6 +348,7 @@ type
     procedure RefreshEWMHActiveWindow();
     procedure RefreshEWMHDesktop();
     procedure RefreshEWMHWorkarea();
+    procedure SetWorkarea(const AWorkarea: TXCBRect);
     procedure ReadClientProperties(const AClient: TXCBWMClient);
     function CreateFrameWindow(const AClient: TXCBWMClient; const ARect: TXCBRect): xcb_window_t;
   protected
@@ -337,7 +382,19 @@ type
     procedure SwitchDesktop(const ANewDesktop: Integer);
     procedure SetDesktopCount(const ACount: Integer);
     procedure SetActiveClient(const AClient: TXCBWMClient);
+    procedure RecomputeWorkareas();
     procedure RecomputeWorkarea();
+
+    // Multi-Monitor management
+    function RefreshMonitors(): Boolean;
+    procedure DoOnMonitorsChanged(); virtual;
+    function GetMonitorCount(): Integer;
+    function GetMonitor(const AIndex: Integer): TXCBMonitor;
+    function MonitorForPoint(const AX, AY: Integer): TXCBMonitor;
+    function MonitorForRect(const ARect: TXCBRect): TXCBMonitor;
+    function MonitorForClient(const AClient: TXCBWMClient): TXCBMonitor;
+    function AdjacentMonitor(const ACurrent: TXCBMonitor; const ADirection: TXCBDirection): TXCBMonitor;
+    procedure MoveClientToMonitor(const AClient: TXCBWMClient; const ATargetMonitor: TXCBMonitor);
 
     // Reparenting and framing
     function CreateResizeWindow(const AClient: TXCBWMClient; const ARect: TXCBRect): xcb_window_t;
@@ -367,7 +424,7 @@ type
     property DesktopCount      : Integer             read FDesktopCount write SetDesktopCount;
     property CurrentDesktop    : Integer             read FCurrentDesktop;
     property DesktopNames      : TStringList         read FDesktopNames;
-    property Workarea          : TXCBRect            read FWorkarea write FWorkarea;
+    property Workarea          : TXCBRect            read FWorkarea write SetWorkarea;
     property IsRunning         : Boolean             read FIsRunning;
     property DragMode          : TXCBDragMode        read FDragMode;
     property DragClient        : TXCBWMClient        read FDragClient;
@@ -380,6 +437,10 @@ type
     property AtomWMState           : xcb_atom_t      read FAtomWMState;
     property Ewmh                  : xcb_ewmh_connection_t read FEwmh write FEwmh;
     property EwmhInitialized       : Boolean               read FEwmhInitialized write FEwmhInitialized;
+    property Monitors              : TObjectList           read FMonitors;
+    property PrimaryMonitor        : TXCBMonitor           read FPrimaryMonitor;
+    property MonitorCount          : Integer               read GetMonitorCount;
+    property RandRAvailable        : Boolean               read FRandRAvailable;
 
     property CursorNormal      : xcb_cursor_t        read FCursorNormal;
     property CursorMove        : xcb_cursor_t        read FCursorMove;
@@ -526,6 +587,151 @@ begin
   if Result.Width < 1 then Result.Width := 1;
   Result.Height := AFrameRect.Height - (Insets.Top + Insets.Bottom);
   if Result.Height < 1 then Result.Height := 1;
+end;
+
+// ============================================================================
+// TXCBMonitor
+// ============================================================================
+
+constructor TXCBMonitor.Create(const AName: AnsiString; const ARect: TXCBRect; const AIsPrimary: Boolean = False; const AIndex: Integer = 0);
+begin
+  inherited Create();
+  FName := AName;
+  FRect := ARect;
+  FWorkarea := ARect;
+  FIsPrimary := AIsPrimary;
+  FIndex := AIndex;
+  FillChar(FStrut, SizeOf(FStrut), 0);
+end;
+
+destructor TXCBMonitor.Destroy();
+begin
+  inherited Destroy();
+end;
+
+function TXCBMonitor.Contains(const AX, AY: Integer): Boolean;
+begin
+  Result := (AX >= FRect.X) and (AX < FRect.Right()) and (AY >= FRect.Y) and (AY < FRect.Bottom());
+end;
+
+function TXCBMonitor.Contains(const APt: TXCBPoint): Boolean;
+begin
+  Result := Contains(APt.X, APt.Y);
+end;
+
+function TXCBMonitor.IntersectionArea(const ARect: TXCBRect): Integer;
+var
+  ix1, iy1, ix2, iy2: Integer;
+begin
+  ix1 := Max(FRect.X, ARect.X);
+  iy1 := Max(FRect.Y, ARect.Y);
+  ix2 := Min(FRect.Right(), ARect.Right());
+  iy2 := Min(FRect.Bottom(), ARect.Bottom());
+  if (ix2 > ix1) and (iy2 > iy1) then
+    Result := (ix2 - ix1) * (iy2 - iy1)
+  else
+    Result := 0;
+end;
+
+procedure TXCBMonitor.ResetWorkarea();
+begin
+  FWorkarea := FRect;
+  FillChar(FStrut, SizeOf(FStrut), 0);
+end;
+
+procedure TXCBMonitor.ApplyStrut(const AStrut: TXCBStrutPartial; const AScreenWidth, AScreenHeight: Integer);
+var
+  MonRight, MonBottom: Integer;
+  StrutTopH, StrutBottomH, StrutLeftW, StrutRightW: Integer;
+  EffTopStartX, EffTopEndX: Cardinal;
+  EffBottomStartX, EffBottomEndX: Cardinal;
+  EffLeftStartY, EffLeftEndY: Cardinal;
+  EffRightStartY, EffRightEndY: Cardinal;
+begin
+  MonRight := FRect.Right();
+  MonBottom := FRect.Bottom();
+
+  // 1. Top Strut
+  if AStrut.Top > 0 then
+  begin
+    EffTopStartX := AStrut.TopStartX;
+    EffTopEndX := AStrut.TopEndX;
+    if (EffTopStartX = 0) and (EffTopEndX = 0) then
+      EffTopEndX := AScreenWidth - 1;
+
+    if (Integer(EffTopStartX) < MonRight) and (Integer(EffTopEndX) >= FRect.X) then
+    begin
+      if Integer(AStrut.Top) > FRect.Y then
+      begin
+        StrutTopH := Min(Integer(AStrut.Top) - FRect.Y, FRect.Height);
+        if StrutTopH > Integer(FStrut.Top) then
+          FStrut.Top := StrutTopH;
+      end;
+    end;
+  end;
+
+  // 2. Bottom Strut
+  if AStrut.Bottom > 0 then
+  begin
+    EffBottomStartX := AStrut.BottomStartX;
+    EffBottomEndX := AStrut.BottomEndX;
+    if (EffBottomStartX = 0) and (EffBottomEndX = 0) then
+      EffBottomEndX := AScreenWidth - 1;
+
+    if (Integer(EffBottomStartX) < MonRight) and (Integer(EffBottomEndX) >= FRect.X) then
+    begin
+      if (AScreenHeight - Integer(AStrut.Bottom)) < MonBottom then
+      begin
+        StrutBottomH := Min(MonBottom - Max(FRect.Y, AScreenHeight - Integer(AStrut.Bottom)), FRect.Height);
+        if StrutBottomH > Integer(FStrut.Bottom) then
+          FStrut.Bottom := StrutBottomH;
+      end;
+    end;
+  end;
+
+  // 3. Left Strut
+  if AStrut.Left > 0 then
+  begin
+    EffLeftStartY := AStrut.LeftStartY;
+    EffLeftEndY := AStrut.LeftEndY;
+    if (EffLeftStartY = 0) and (EffLeftEndY = 0) then
+      EffLeftEndY := AScreenHeight - 1;
+
+    if (Integer(EffLeftStartY) < MonBottom) and (Integer(EffLeftEndY) >= FRect.Y) then
+    begin
+      if Integer(AStrut.Left) > FRect.X then
+      begin
+        StrutLeftW := Min(Integer(AStrut.Left) - FRect.X, FRect.Width);
+        if StrutLeftW > Integer(FStrut.Left) then
+          FStrut.Left := StrutLeftW;
+      end;
+    end;
+  end;
+
+  // 4. Right Strut
+  if AStrut.Right > 0 then
+  begin
+    EffRightStartY := AStrut.RightStartY;
+    EffRightEndY := AStrut.RightEndY;
+    if (EffRightStartY = 0) and (EffRightEndY = 0) then
+      EffRightEndY := AScreenHeight - 1;
+
+    if (Integer(EffRightStartY) < MonBottom) and (Integer(EffRightEndY) >= FRect.Y) then
+    begin
+      if (AScreenWidth - Integer(AStrut.Right)) < MonRight then
+      begin
+        StrutRightW := Min(MonRight - Max(FRect.X, AScreenWidth - Integer(AStrut.Right)), FRect.Width);
+        if StrutRightW > Integer(FStrut.Right) then
+          FStrut.Right := StrutRightW;
+      end;
+    end;
+  end;
+
+  // Recompute workarea from accumulated monitor struts
+  FWorkarea.X := FRect.X + FStrut.Left;
+  FWorkarea.Y := FRect.Y + FStrut.Top;
+  FWorkarea.Width := Max(100, FRect.Width - Integer(FStrut.Left + FStrut.Right));
+  FWorkarea.Height := Max(100, FRect.Height - Integer(FStrut.Top + FStrut.Bottom));
 end;
 
 // ============================================================================
@@ -759,6 +965,7 @@ end;
 procedure TXCBWMClient.Maximize();
 var
   TargetRect: TXCBRect;
+  TargetMon: TXCBMonitor;
 begin
   if (wsMaximizedHorz in FState) and (wsMaximizedVert in FState) then Exit;
 
@@ -775,7 +982,12 @@ begin
 
   if FManager <> nil then
   begin
-    TargetRect := FManager.Workarea;
+    TargetMon := CurrentMonitor();
+    if (TargetMon <> nil) and (TargetMon.Workarea.Width > 0) and (TargetMon.Workarea.Height > 0) then
+      TargetRect := TargetMon.Workarea
+    else
+      TargetRect := FManager.Workarea;
+
     if (TargetRect.Width <= 0) or (TargetRect.Height <= 0) then
     begin
       if FManager.Screen <> nil then
@@ -797,6 +1009,7 @@ end;
 procedure TXCBWMClient.TileLeft();
 var
   TargetRect: TXCBRect;
+  TargetMon: TXCBMonitor;
   sw, sh: Integer;
 begin
   if (wsTiledLeft in FState) then Exit;
@@ -815,7 +1028,12 @@ begin
 
   if FManager <> nil then
   begin
-    TargetRect := FManager.Workarea;
+    TargetMon := CurrentMonitor();
+    if (TargetMon <> nil) and (TargetMon.Workarea.Width > 0) and (TargetMon.Workarea.Height > 0) then
+      TargetRect := TargetMon.Workarea
+    else
+      TargetRect := FManager.Workarea;
+
     if (TargetRect.Width > 0) and (TargetRect.Height > 0) then
     begin
       sw := TargetRect.Width;
@@ -844,6 +1062,7 @@ end;
 procedure TXCBWMClient.TileRight();
 var
   TargetRect: TXCBRect;
+  TargetMon: TXCBMonitor;
   sw, sh: Integer;
 begin
   if (wsTiledRight in FState) then Exit;
@@ -862,7 +1081,12 @@ begin
 
   if FManager <> nil then
   begin
-    TargetRect := FManager.Workarea;
+    TargetMon := CurrentMonitor();
+    if (TargetMon <> nil) and (TargetMon.Workarea.Width > 0) and (TargetMon.Workarea.Height > 0) then
+      TargetRect := TargetMon.Workarea
+    else
+      TargetRect := FManager.Workarea;
+
     if (TargetRect.Width > 0) and (TargetRect.Height > 0) then
     begin
       sw := TargetRect.Width;
@@ -1001,7 +1225,8 @@ end;
 
 procedure TXCBWMClient.SetFullscreen(const AFullscreen: Boolean);
 var
-  W, H: Integer;
+  TargetMon: TXCBMonitor;
+  X, Y, W, H: Integer;
 begin
   if AFullscreen = (wsFullscreen in FState) then Exit;
 
@@ -1015,17 +1240,29 @@ begin
     Include(FState, wsFullscreen);
     if FManager <> nil then
     begin
-      if FManager.Screen <> nil then
+      TargetMon := CurrentMonitor();
+      if TargetMon <> nil then
       begin
+        X := TargetMon.Rect.X;
+        Y := TargetMon.Rect.Y;
+        W := TargetMon.Rect.Width;
+        H := TargetMon.Rect.Height;
+      end
+      else if FManager.Screen <> nil then
+      begin
+        X := 0;
+        Y := 0;
         W := FManager.Screen^.width_in_pixels;
         H := FManager.Screen^.height_in_pixels;
       end
       else
       begin
+        X := 0;
+        Y := 0;
         W := 1920;
         H := 1080;
       end;
-      SetGeometry(0, 0, W, H);
+      SetGeometry(X, Y, W, H);
       if (FManager.Connection <> nil) and (FResizeWindow <> 0) then
       begin
         xcb_unmap_window(FManager.Connection, FResizeWindow);
@@ -1229,6 +1466,14 @@ begin
   Result := FIsReparented and not FBorderless and (FWindowType in [wtNormal, wtDialog]);
 end;
 
+function TXCBWMClient.CurrentMonitor(): TXCBMonitor;
+begin
+  if FManager <> nil then
+    Result := FManager.MonitorForClient(Self)
+  else
+    Result := nil;
+end;
+
 // ============================================================================
 // TXCBWindowManager
 // ============================================================================
@@ -1285,6 +1530,12 @@ begin
   FCursorResizeBottomRight := 0;
   FCurrentRootCursor := 0;
 
+  FMonitors := TObjectList.Create(True);
+  FPrimaryMonitor := nil;
+  FRandRAvailable := False;
+  FRandREventBase := 0;
+  FRandRErrorBase := 0;
+
   if FConn <> nil then
   begin
     Setup := xcb_get_setup(FConn);
@@ -1313,6 +1564,8 @@ begin
     FAtomWMState := InternAtom(FConn, 'WM_STATE');
     InitCursors();
   end;
+
+  RefreshMonitors();
 end;
 
 destructor TXCBWindowManager.Destroy();
@@ -1324,6 +1577,7 @@ begin
   end;
   FClients.Free();
   FDesktopNames.Free();
+  FMonitors.Free();
   inherited Destroy();
 end;
 
@@ -1398,6 +1652,7 @@ var
   Values: array[0..0] of Cardinal;
   Cookie: xcb_void_cookie_t;
   Err: Pxcb_generic_error_t;
+  extReply: Pxcb_query_extension_reply_t;
 begin
   Result := False;
   if (FConn = nil) or (FRootWindow = 0) then Exit;
@@ -1429,6 +1684,25 @@ begin
     SetWindowCursor(FRootWindow, FCursorNormal);
     FCurrentRootCursor := FCursorNormal;
   end;
+
+  // RandR extension initialization
+  extReply := xcb_get_extension_data(FConn, @xcb_randr_id);
+  if (extReply <> nil) and (extReply^.present <> 0) then
+  begin
+    FRandRAvailable := True;
+    FRandREventBase := extReply^.first_event;
+    FRandRErrorBase := extReply^.first_error;
+
+    xcb_randr_select_input(
+      FConn,
+      FRootWindow,
+      XCB_RANDR_NOTIFY_MASK_SCREEN_CHANGE or
+      XCB_RANDR_NOTIFY_MASK_CRTC_CHANGE or
+      XCB_RANDR_NOTIFY_MASK_OUTPUT_CHANGE
+    );
+  end;
+
+  RefreshMonitors();
 
   Result := True;
 end;
@@ -1704,13 +1978,22 @@ begin
   xcb_flush(FConn);
 end;
 
-procedure TXCBWindowManager.RecomputeWorkarea();
+procedure TXCBWindowManager.SetWorkarea(const AWorkarea: TXCBRect);
+begin
+  FWorkarea := AWorkarea;
+  if FPrimaryMonitor <> nil then
+    FPrimaryMonitor.Workarea := AWorkarea;
+end;
+
+procedure TXCBWindowManager.RecomputeWorkareas();
 var
-  MaxLeft, MaxRight, MaxTop, MaxBottom: Cardinal;
   ScreenWidth, ScreenHeight: Integer;
   NewWorkarea, OldWorkarea: TXCBRect;
   Cli: TXCBWMClient;
-  I: Integer;
+  Mon: TXCBMonitor;
+  I, M: Integer;
+  AnyWorkareaChanged: Boolean;
+  PrevMonWorkareas: array of TXCBRect;
 begin
   if FScreen <> nil then
   begin
@@ -1723,36 +2006,55 @@ begin
     ScreenHeight := 1080;
   end;
 
-  MaxLeft := 0;
-  MaxRight := 0;
-  MaxTop := 0;
-  MaxBottom := 0;
+  AnyWorkareaChanged := False;
+  SetLength(PrevMonWorkareas, FMonitors.Count);
 
+  // Reset workareas to full physical rects
+  for M := 0 to FMonitors.Count - 1 do
+  begin
+    Mon := TXCBMonitor(FMonitors[M]);
+    PrevMonWorkareas[M] := Mon.Workarea;
+    Mon.ResetWorkarea();
+  end;
+
+  // Apply all client struts against each monitor
   for I := 0 to FClients.Count - 1 do
   begin
     Cli := TXCBWMClient(FClients[I]);
     if Cli.Strut.HasStrut() then
     begin
-      if Cli.Strut.Left > MaxLeft then MaxLeft := Cli.Strut.Left;
-      if Cli.Strut.Right > MaxRight then MaxRight := Cli.Strut.Right;
-      if Cli.Strut.Top > MaxTop then MaxTop := Cli.Strut.Top;
-      if Cli.Strut.Bottom > MaxBottom then MaxBottom := Cli.Strut.Bottom;
+      for M := 0 to FMonitors.Count - 1 do
+      begin
+        Mon := TXCBMonitor(FMonitors[M]);
+        Mon.ApplyStrut(Cli.Strut, ScreenWidth, ScreenHeight);
+      end;
     end;
   end;
 
-  NewWorkarea := TXCBRect.Create(
-    MaxLeft,
-    MaxTop,
-    ScreenWidth - Integer(MaxLeft + MaxRight),
-    ScreenHeight - Integer(MaxTop + MaxBottom)
-  );
-  if NewWorkarea.Width < 100 then NewWorkarea.Width := 100;
-  if NewWorkarea.Height < 100 then NewWorkarea.Height := 100;
+  // Check if any monitor workarea changed
+  for M := 0 to FMonitors.Count - 1 do
+  begin
+    Mon := TXCBMonitor(FMonitors[M]);
+    if (Mon.Workarea.X <> PrevMonWorkareas[M].X) or
+       (Mon.Workarea.Y <> PrevMonWorkareas[M].Y) or
+       (Mon.Workarea.Width <> PrevMonWorkareas[M].Width) or
+       (Mon.Workarea.Height <> PrevMonWorkareas[M].Height) then
+      AnyWorkareaChanged := True;
+  end;
+
+  // Global EWMH workarea corresponds to Primary monitor's workarea
+  if FPrimaryMonitor <> nil then
+    NewWorkarea := FPrimaryMonitor.Workarea
+  else if FMonitors.Count > 0 then
+    NewWorkarea := TXCBMonitor(FMonitors[0]).Workarea
+  else
+    NewWorkarea := TXCBRect.Create(0, 0, ScreenWidth, ScreenHeight);
 
   if (NewWorkarea.X <> FWorkarea.X) or
      (NewWorkarea.Y <> FWorkarea.Y) or
      (NewWorkarea.Width <> FWorkarea.Width) or
-     (NewWorkarea.Height <> FWorkarea.Height) then
+     (NewWorkarea.Height <> FWorkarea.Height) or
+     AnyWorkareaChanged then
   begin
     OldWorkarea := FWorkarea;
     FWorkarea := NewWorkarea;
@@ -1761,10 +2063,17 @@ begin
   end;
 end;
 
+procedure TXCBWindowManager.RecomputeWorkarea();
+begin
+  RecomputeWorkareas();
+end;
+
 procedure TXCBWindowManager.DoOnWorkareaChanged(const AOldWorkarea, ANewWorkarea: TXCBRect);
 var
   I: Integer;
   Cli: TXCBWMClient;
+  TargetMon: TXCBMonitor;
+  MonWorkarea: TXCBRect;
   HalfW: Integer;
 begin
   for I := 0 to FClients.Count - 1 do
@@ -1773,19 +2082,387 @@ begin
     if (wsFullscreen in Cli.State) then
       Continue;
 
+    TargetMon := MonitorForClient(Cli);
+    if (TargetMon <> nil) and (TargetMon.Workarea.Width > 0) and (TargetMon.Workarea.Height > 0) then
+      MonWorkarea := TargetMon.Workarea
+    else
+      MonWorkarea := ANewWorkarea;
+
     if (wsMaximizedHorz in Cli.State) and (wsMaximizedVert in Cli.State) then
     begin
-      Cli.SetGeometry(ANewWorkarea.X, ANewWorkarea.Y, ANewWorkarea.Width, ANewWorkarea.Height);
+      Cli.SetGeometry(MonWorkarea.X, MonWorkarea.Y, MonWorkarea.Width, MonWorkarea.Height);
     end
     else if (wsTiledLeft in Cli.State) then
     begin
-      HalfW := ANewWorkarea.Width div 2;
-      Cli.SetGeometry(ANewWorkarea.X, ANewWorkarea.Y, HalfW, ANewWorkarea.Height);
+      HalfW := MonWorkarea.Width div 2;
+      Cli.SetGeometry(MonWorkarea.X, MonWorkarea.Y, HalfW, MonWorkarea.Height);
     end
     else if (wsTiledRight in Cli.State) then
     begin
-      HalfW := ANewWorkarea.Width div 2;
-      Cli.SetGeometry(ANewWorkarea.X + HalfW, ANewWorkarea.Y, ANewWorkarea.Width - HalfW, ANewWorkarea.Height);
+      HalfW := MonWorkarea.Width div 2;
+      Cli.SetGeometry(MonWorkarea.X + HalfW, MonWorkarea.Y, MonWorkarea.Width - HalfW, MonWorkarea.Height);
+    end;
+  end;
+end;
+
+function TXCBWindowManager.RefreshMonitors(): Boolean;
+var
+  MonReply: Pxcb_randr_get_monitors_reply_t;
+  MonIter: xcb_randr_monitor_info_iterator_t;
+  MonInfo: Pxcb_randr_monitor_info_t;
+  Mon: TXCBMonitor;
+  MonName: AnsiString;
+  AtomNameReply: Pxcb_get_atom_name_reply_t;
+  AtomNameCookie: xcb_get_atom_name_cookie_t;
+  Idx: Integer;
+begin
+  Result := False;
+  FMonitors.Clear();
+  FPrimaryMonitor := nil;
+
+  if (FConn <> nil) and (FRootWindow <> 0) and FRandRAvailable then
+  begin
+    MonReply := xcb_randr_get_monitors_reply(
+      FConn,
+      xcb_randr_get_monitors(FConn, FRootWindow, 1),
+      nil
+    );
+    if MonReply <> nil then
+    begin
+      MonIter := xcb_randr_get_monitors_monitors_iterator(MonReply);
+      Idx := 0;
+      while MonIter.rem > 0 do
+      begin
+        MonInfo := MonIter.data;
+        if MonInfo <> nil then
+        begin
+          MonName := '';
+          if MonInfo^.name <> 0 then
+          begin
+            AtomNameCookie := xcb_get_atom_name(FConn, MonInfo^.name);
+            AtomNameReply := xcb_get_atom_name_reply(FConn, AtomNameCookie, nil);
+            if AtomNameReply <> nil then
+            begin
+              SetString(MonName, PAnsiChar(xcb_get_atom_name_name(AtomNameReply)), xcb_get_atom_name_name_length(AtomNameReply));
+              xcb_free(AtomNameReply);
+            end;
+          end;
+          if MonName = '' then
+            MonName := 'Monitor-' + IntToStr(Idx + 1);
+
+          Mon := TXCBMonitor.Create(
+            MonName,
+            TXCBRect.Create(MonInfo^.x, MonInfo^.y, MonInfo^.width, MonInfo^.height),
+            MonInfo^.primary <> 0,
+            Idx
+          );
+          FMonitors.Add(Mon);
+          if (MonInfo^.primary <> 0) and (FPrimaryMonitor = nil) then
+            FPrimaryMonitor := Mon;
+
+          Inc(Idx);
+        end;
+        xcb_randr_monitor_info_next(@MonIter);
+      end;
+      xcb_free(MonReply);
+    end;
+  end;
+
+  // Fallback if no RandR or no monitors returned
+  if FMonitors.Count = 0 then
+  begin
+    if FScreen <> nil then
+      Mon := TXCBMonitor.Create(
+        'Default',
+        TXCBRect.Create(0, 0, FScreen^.width_in_pixels, FScreen^.height_in_pixels),
+        True,
+        0
+      )
+    else
+      Mon := TXCBMonitor.Create(
+        'Default',
+        TXCBRect.Create(0, 0, 1920, 1080),
+        True,
+        0
+      );
+    FMonitors.Add(Mon);
+    FPrimaryMonitor := Mon;
+  end
+  else if FPrimaryMonitor = nil then
+  begin
+    FPrimaryMonitor := TXCBMonitor(FMonitors[0]);
+    FPrimaryMonitor.IsPrimary := True;
+  end;
+
+  RecomputeWorkareas();
+  Result := True;
+end;
+
+function TXCBWindowManager.GetMonitorCount(): Integer;
+begin
+  if FMonitors <> nil then
+    Result := FMonitors.Count
+  else
+    Result := 0;
+end;
+
+function TXCBWindowManager.GetMonitor(const AIndex: Integer): TXCBMonitor;
+begin
+  if (FMonitors <> nil) and (AIndex >= 0) and (AIndex < FMonitors.Count) then
+    Result := TXCBMonitor(FMonitors[AIndex])
+  else
+    Result := nil;
+end;
+
+function TXCBWindowManager.MonitorForPoint(const AX, AY: Integer): TXCBMonitor;
+var
+  I: Integer;
+  Mon: TXCBMonitor;
+begin
+  Result := nil;
+  if FMonitors = nil then Exit;
+  for I := 0 to FMonitors.Count - 1 do
+  begin
+    Mon := TXCBMonitor(FMonitors[I]);
+    if Mon.Contains(AX, AY) then
+    begin
+      Result := Mon;
+      Exit;
+    end;
+  end;
+  if FPrimaryMonitor <> nil then
+    Result := FPrimaryMonitor
+  else if FMonitors.Count > 0 then
+    Result := TXCBMonitor(FMonitors[0]);
+end;
+
+function TXCBWindowManager.MonitorForRect(const ARect: TXCBRect): TXCBMonitor;
+var
+  I, MaxArea, Area: Integer;
+  Mon, BestMon: TXCBMonitor;
+  CenterX, CenterY: Integer;
+begin
+  Result := nil;
+  if (FMonitors = nil) or (FMonitors.Count = 0) then Exit;
+
+  MaxArea := 0;
+  BestMon := nil;
+
+  for I := 0 to FMonitors.Count - 1 do
+  begin
+    Mon := TXCBMonitor(FMonitors[I]);
+    Area := Mon.IntersectionArea(ARect);
+    if Area > MaxArea then
+    begin
+      MaxArea := Area;
+      BestMon := Mon;
+    end;
+  end;
+
+  if (BestMon <> nil) and (MaxArea > 0) then
+  begin
+    Result := BestMon;
+    Exit;
+  end;
+
+  CenterX := ARect.X + (ARect.Width div 2);
+  CenterY := ARect.Y + (ARect.Height div 2);
+  Result := MonitorForPoint(CenterX, CenterY);
+end;
+
+function TXCBWindowManager.MonitorForClient(const AClient: TXCBWMClient): TXCBMonitor;
+begin
+  Result := nil;
+  if AClient = nil then Exit;
+  Result := MonitorForRect(AClient.CurrentRect);
+end;
+
+function TXCBWindowManager.AdjacentMonitor(const ACurrent: TXCBMonitor; const ADirection: TXCBDirection): TXCBMonitor;
+var
+  I: Integer;
+  Mon, BestMon: TXCBMonitor;
+  CurCenterX, CurCenterY: Integer;
+  CandCenterX, CandCenterY: Integer;
+  Dist, BestDist, DeltaPrimary, DeltaSecondary: Integer;
+begin
+  Result := ACurrent;
+  if (FMonitors = nil) or (FMonitors.Count <= 1) or (ACurrent = nil) then Exit;
+
+  CurCenterX := ACurrent.Rect.X + (ACurrent.Rect.Width div 2);
+  CurCenterY := ACurrent.Rect.Y + (ACurrent.Rect.Height div 2);
+
+  BestMon := nil;
+  BestDist := High(Integer);
+
+  for I := 0 to FMonitors.Count - 1 do
+  begin
+    Mon := TXCBMonitor(FMonitors[I]);
+    if Mon = ACurrent then Continue;
+
+    CandCenterX := Mon.Rect.X + (Mon.Rect.Width div 2);
+    CandCenterY := Mon.Rect.Y + (Mon.Rect.Height div 2);
+
+    case ADirection of
+      dirLeft:
+      begin
+        if CandCenterX < CurCenterX then
+        begin
+          DeltaPrimary := CurCenterX - CandCenterX;
+          DeltaSecondary := Abs(CandCenterY - CurCenterY);
+          Dist := DeltaPrimary + (DeltaSecondary * 2);
+          if Dist < BestDist then
+          begin
+            BestDist := Dist;
+            BestMon := Mon;
+          end;
+        end;
+      end;
+      dirRight:
+      begin
+        if CandCenterX > CurCenterX then
+        begin
+          DeltaPrimary := CandCenterX - CurCenterX;
+          DeltaSecondary := Abs(CandCenterY - CurCenterY);
+          Dist := DeltaPrimary + (DeltaSecondary * 2);
+          if Dist < BestDist then
+          begin
+            BestDist := Dist;
+            BestMon := Mon;
+          end;
+        end;
+      end;
+      dirUp:
+      begin
+        if CandCenterY < CurCenterY then
+        begin
+          DeltaPrimary := CurCenterY - CandCenterY;
+          DeltaSecondary := Abs(CandCenterX - CurCenterX);
+          Dist := DeltaPrimary + (DeltaSecondary * 2);
+          if Dist < BestDist then
+          begin
+            BestDist := Dist;
+            BestMon := Mon;
+          end;
+        end;
+      end;
+      dirDown:
+      begin
+        if CandCenterY > CurCenterY then
+        begin
+          DeltaPrimary := CandCenterY - CurCenterY;
+          DeltaSecondary := Abs(CandCenterX - CurCenterX);
+          Dist := DeltaPrimary + (DeltaSecondary * 2);
+          if Dist < BestDist then
+          begin
+            BestDist := Dist;
+            BestMon := Mon;
+          end;
+        end;
+      end;
+    end;
+  end;
+
+  if BestMon <> nil then
+    Result := BestMon;
+end;
+
+procedure TXCBWindowManager.MoveClientToMonitor(const AClient: TXCBWMClient; const ATargetMonitor: TXCBMonitor);
+var
+  SrcMon: TXCBMonitor;
+  RelX, RelY: Integer;
+  NewX, NewY: Integer;
+  HalfW: Integer;
+begin
+  if (AClient = nil) or (ATargetMonitor = nil) then Exit;
+
+  if (wsMaximizedHorz in AClient.State) and (wsMaximizedVert in AClient.State) then
+  begin
+    AClient.SetGeometry(
+      ATargetMonitor.Workarea.X,
+      ATargetMonitor.Workarea.Y,
+      ATargetMonitor.Workarea.Width,
+      ATargetMonitor.Workarea.Height
+    );
+  end
+  else if (wsTiledLeft in AClient.State) then
+  begin
+    HalfW := ATargetMonitor.Workarea.Width div 2;
+    AClient.SetGeometry(
+      ATargetMonitor.Workarea.X,
+      ATargetMonitor.Workarea.Y,
+      HalfW,
+      ATargetMonitor.Workarea.Height
+    );
+  end
+  else if (wsTiledRight in AClient.State) then
+  begin
+    HalfW := ATargetMonitor.Workarea.Width div 2;
+    AClient.SetGeometry(
+      ATargetMonitor.Workarea.X + HalfW,
+      ATargetMonitor.Workarea.Y,
+      ATargetMonitor.Workarea.Width - HalfW,
+      ATargetMonitor.Workarea.Height
+    );
+  end
+  else
+  begin
+    SrcMon := MonitorForClient(AClient);
+    if SrcMon <> nil then
+    begin
+      RelX := AClient.CurrentRect.X - SrcMon.Rect.X;
+      RelY := AClient.CurrentRect.Y - SrcMon.Rect.Y;
+    end
+    else
+    begin
+      RelX := 0;
+      RelY := 0;
+    end;
+
+    NewX := ATargetMonitor.Rect.X + RelX;
+    NewY := ATargetMonitor.Rect.Y + RelY;
+
+    if NewX + AClient.CurrentRect.Width > ATargetMonitor.Rect.Right() then
+      NewX := Max(ATargetMonitor.Rect.X, ATargetMonitor.Rect.Right() - AClient.CurrentRect.Width);
+    if NewY + AClient.CurrentRect.Height > ATargetMonitor.Rect.Bottom() then
+      NewY := Max(ATargetMonitor.Rect.Y, ATargetMonitor.Rect.Bottom() - AClient.CurrentRect.Height);
+    if NewX < ATargetMonitor.Rect.X then NewX := ATargetMonitor.Rect.X;
+    if NewY < ATargetMonitor.Rect.Y then NewY := ATargetMonitor.Rect.Y;
+
+    AClient.Move(NewX, NewY);
+    AClient.RestoredRect := AClient.CurrentRect;
+  end;
+end;
+
+procedure TXCBWindowManager.DoOnMonitorsChanged();
+var
+  I: Integer;
+  Cli: TXCBWMClient;
+  Mon, TargetMon: TXCBMonitor;
+begin
+  if (FMonitors = nil) or (FMonitors.Count = 0) then Exit;
+  TargetMon := FPrimaryMonitor;
+  if TargetMon = nil then
+    TargetMon := TXCBMonitor(FMonitors[0]);
+
+  for I := 0 to FClients.Count - 1 do
+  begin
+    Cli := TXCBWMClient(FClients[I]);
+    Mon := MonitorForRect(Cli.CurrentRect);
+    if (Mon = nil) or (Mon.IntersectionArea(Cli.CurrentRect) = 0) then
+    begin
+      MoveClientToMonitor(Cli, TargetMon);
+    end
+    else if (wsMaximizedHorz in Cli.State) and (wsMaximizedVert in Cli.State) then
+    begin
+      Cli.SetGeometry(Mon.Workarea.X, Mon.Workarea.Y, Mon.Workarea.Width, Mon.Workarea.Height);
+    end
+    else if (wsTiledLeft in Cli.State) then
+    begin
+      Cli.SetGeometry(Mon.Workarea.X, Mon.Workarea.Y, Mon.Workarea.Width div 2, Mon.Workarea.Height);
+    end
+    else if (wsTiledRight in Cli.State) then
+    begin
+      Cli.SetGeometry(Mon.Workarea.X + (Mon.Workarea.Width div 2), Mon.Workarea.Y, Mon.Workarea.Width - (Mon.Workarea.Width div 2), Mon.Workarea.Height);
     end;
   end;
 end;
@@ -2171,6 +2848,10 @@ var
   FrameRect, ClientInnerRect: TXCBRect;
   FrameWin: xcb_window_t;
   Values: array[0..3] of Cardinal;
+  PtrCookie: xcb_query_pointer_cookie_t;
+  PtrReply: Pxcb_query_pointer_reply_t;
+  TargetMon: TXCBMonitor;
+  PlaceX, PlaceY: Integer;
 begin
   if (AClient = nil) or AClient.IsReparented or (FConn = nil) then Exit;
 
@@ -2179,6 +2860,60 @@ begin
     AClient.CurrentRect := TXCBRect.Create(AClient.CurrentRect.X, AClient.CurrentRect.Y, 600, AClient.CurrentRect.Height);
   if AClient.CurrentRect.Height <= 1 then
     AClient.CurrentRect := TXCBRect.Create(AClient.CurrentRect.X, AClient.CurrentRect.Y, AClient.CurrentRect.Width, 400);
+
+  // New window placement: follow pointer for regular windows, center dialogs over parent/workarea
+  if (AClient.CurrentRect.X = 0) and (AClient.CurrentRect.Y = 0) then
+  begin
+    PtrCookie := xcb_query_pointer(FConn, FRootWindow);
+    PtrReply := xcb_query_pointer_reply(FConn, PtrCookie, nil);
+    if PtrReply <> nil then
+    begin
+      TargetMon := MonitorForPoint(PtrReply^.root_x, PtrReply^.root_y);
+      if TargetMon = nil then TargetMon := FPrimaryMonitor;
+
+      if AClient.WindowType = wtDialog then
+      begin
+        if (FActiveClient <> nil) and (FActiveClient <> AClient) and (MonitorForClient(FActiveClient) = TargetMon) then
+        begin
+          PlaceX := FActiveClient.CurrentRect.X + ((FActiveClient.CurrentRect.Width - AClient.CurrentRect.Width) div 2);
+          PlaceY := FActiveClient.CurrentRect.Y + ((FActiveClient.CurrentRect.Height - AClient.CurrentRect.Height) div 2);
+        end
+        else if TargetMon <> nil then
+        begin
+          PlaceX := TargetMon.Workarea.X + ((TargetMon.Workarea.Width - AClient.CurrentRect.Width) div 2);
+          PlaceY := TargetMon.Workarea.Y + ((TargetMon.Workarea.Height - AClient.CurrentRect.Height) div 2);
+        end
+        else
+        begin
+          PlaceX := PtrReply^.root_x;
+          PlaceY := PtrReply^.root_y;
+        end;
+      end
+      else if TargetMon <> nil then
+      begin
+        PlaceX := PtrReply^.root_x - 30;
+        PlaceY := PtrReply^.root_y - 20;
+      end
+      else
+      begin
+        PlaceX := PtrReply^.root_x;
+        PlaceY := PtrReply^.root_y;
+      end;
+
+      if TargetMon <> nil then
+      begin
+        if PlaceX + AClient.CurrentRect.Width > TargetMon.Workarea.Right() then
+          PlaceX := Max(TargetMon.Workarea.X, TargetMon.Workarea.Right() - AClient.CurrentRect.Width);
+        if PlaceY + AClient.CurrentRect.Height > TargetMon.Workarea.Bottom() then
+          PlaceY := Max(TargetMon.Workarea.Y, TargetMon.Workarea.Bottom() - AClient.CurrentRect.Height);
+        if PlaceX < TargetMon.Workarea.X then PlaceX := TargetMon.Workarea.X;
+        if PlaceY < TargetMon.Workarea.Y then PlaceY := TargetMon.Workarea.Y;
+      end;
+
+      AClient.CurrentRect := TXCBRect.Create(PlaceX, PlaceY, AClient.CurrentRect.Width, AClient.CurrentRect.Height);
+      xcb_free(PtrReply);
+    end;
+  end;
 
   FrameRect := FFrameMetrics.ClientToFrameRect(AClient.CurrentRect);
   // Ensure the frame window is not placed off-screen above the top
@@ -2599,6 +3334,19 @@ begin
   if AEvent = nil then Exit;
 
   EvType := AEvent^.response_type and $7F;
+
+  if FRandRAvailable and (FRandREventBase > 0) then
+  begin
+    if (EvType = FRandREventBase + XCB_RANDR_SCREEN_CHANGE_NOTIFY) or
+       (EvType = FRandREventBase + XCB_RANDR_NOTIFY) then
+    begin
+      RefreshMonitors();
+      DoOnMonitorsChanged();
+      Result := True;
+      Exit;
+    end;
+  end;
+
   case EvType of
     XCB_MAP_REQUEST:
     begin
