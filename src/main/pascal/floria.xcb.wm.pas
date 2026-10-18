@@ -23,10 +23,21 @@ uses
 
 const
   XCB_ALL_DESKTOPS = Cardinal($FFFFFFFF);
+  XCB_MWM_HINTS_DECORATIONS = 1 shl 1;
 
 procedure xcb_free(p: Pointer); cdecl; external 'c' name 'free';
 
 type
+  // Motif WM hints record
+  TXCBMwmHints = record
+    flags       : Cardinal;
+    functions   : Cardinal;
+    decorations : Cardinal;
+    input_mode  : Integer;
+    status      : Cardinal;
+  end;
+  PXCBMwmHints = ^TXCBMwmHints;
+
   // Event pointer aliases
   Pxcb_map_request_event_t = ^xcb_map_request_event_t;
   Pxcb_configure_request_event_t = ^xcb_configure_request_event_t;
@@ -157,6 +168,7 @@ type
     FSupportsTakeFocus   : Boolean;
     FIsReparented        : Boolean;
     FOverrideRedirect    : Boolean;
+    FBorderless          : Boolean;
   public
     constructor Create(const AClientWin: xcb_window_t; const AManager: TXCBWindowManager);
     destructor Destroy(); override;
@@ -199,6 +211,7 @@ type
     property SupportsTakeFocus   : Boolean           read FSupportsTakeFocus write FSupportsTakeFocus;
     property IsReparented        : Boolean           read FIsReparented write FIsReparented;
     property OverrideRedirect    : Boolean           read FOverrideRedirect write FOverrideRedirect;
+    property Borderless          : Boolean           read FBorderless write FBorderless;
   end;
 
   // TXCBWindowManager
@@ -225,6 +238,7 @@ type
     // Atoms
     FAtomWMDeleteWindow: xcb_atom_t;
     FAtomWMTakeFocus   : xcb_atom_t;
+    FAtomMotifWmHints  : xcb_atom_t;
 
     // Interactive Dragging
     FDragClient        : TXCBWMClient;
@@ -318,6 +332,7 @@ type
     property DragClient        : TXCBWMClient        read FDragClient;
     property AtomWMDeleteWindow: xcb_atom_t          read FAtomWMDeleteWindow;
     property AtomWMTakeFocus   : xcb_atom_t          read FAtomWMTakeFocus;
+    property AtomMotifWmHints  : xcb_atom_t          read FAtomMotifWmHints;
 
     property CursorNormal      : xcb_cursor_t        read FCursorNormal;
     property CursorMove        : xcb_cursor_t        read FCursorMove;
@@ -479,6 +494,7 @@ begin
   FSupportsTakeFocus := False;
   FIsReparented := False;
   FOverrideRedirect := False;
+  FBorderless := False;
 end;
 
 destructor TXCBWMClient.Destroy();
@@ -1007,6 +1023,7 @@ begin
   FWorkarea := TXCBRect.Create(0, 0, 1920, 1080);
   FAtomWMDeleteWindow := 0;
   FAtomWMTakeFocus := 0;
+  FAtomMotifWmHints := 0;
   FDragClient := nil;
   FDragMode := dmNone;
   FDragStartPointer := TXCBPoint.Create(0, 0);
@@ -1047,6 +1064,7 @@ begin
 
     FAtomWMDeleteWindow := InternAtom(FConn, 'WM_DELETE_WINDOW');
     FAtomWMTakeFocus := InternAtom(FConn, 'WM_TAKE_FOCUS');
+    FAtomMotifWmHints := InternAtom(FConn, '_MOTIF_WM_HINTS');
     InitCursors();
   end;
 end;
@@ -1414,6 +1432,7 @@ var
   I: Integer;
   ClassStr: AnsiString;
   P1, P2: PAnsiChar;
+  MwmHintsPtr: PXCBMwmHints;
 begin
   if (FConn = nil) or (AClient = nil) then Exit;
 
@@ -1554,6 +1573,29 @@ begin
             AClient.SupportsDeleteWindow := True;
           if (FAtomWMTakeFocus <> 0) and (AtomsPtr[I] = FAtomWMTakeFocus) then
             AClient.SupportsTakeFocus := True;
+        end;
+      finally
+        xcb_free(PropReply);
+      end;
+    end;
+  end;
+
+  // 8. _MOTIF_WM_HINTS
+  if (FConn <> nil) and (FAtomMotifWmHints <> 0) then
+  begin
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FAtomMotifWmHints, XCB_ATOM_ANY, 0, 5);
+    PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+    if PropReply <> nil then
+    begin
+      try
+        if xcb_get_property_value_length(PropReply) >= (3 * SizeOf(Cardinal)) then
+        begin
+          MwmHintsPtr := PXCBMwmHints(xcb_get_property_value(PropReply));
+          if (MwmHintsPtr^.flags and XCB_MWM_HINTS_DECORATIONS) <> 0 then
+          begin
+            if MwmHintsPtr^.decorations = 0 then
+              AClient.Borderless := True;
+          end;
         end;
       finally
         xcb_free(PropReply);
@@ -1811,8 +1853,8 @@ begin
       Exit(nil);
     end;
 
-    // Bypass docks and desktops from framing
-    if (Cli.WindowType = wtDock) or (Cli.WindowType = wtDesktop) then
+    // Bypass docks, desktops, splashes, menus, and borderless windows from framing
+    if (Cli.WindowType in [wtDock, wtDesktop, wtSplash, wtMenu]) or Cli.Borderless then
     begin
       Cli.IsReparented := False;
       if FConn <> nil then
@@ -2015,17 +2057,18 @@ begin
       Cli := FindClient(CfgEv^.window);
       if Cli <> nil then
       begin
-        newX := Cli.CurrentRect.X;
-        newY := Cli.CurrentRect.Y;
-        newW := Cli.CurrentRect.Width;
-        newH := Cli.CurrentRect.Height;
-        if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_X) <> 0 then newX := CfgEv^.x;
-        if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_Y) <> 0 then newY := CfgEv^.y;
-        if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_WIDTH) <> 0 then newW := CfgEv^.width;
-        if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_HEIGHT) <> 0 then newH := CfgEv^.height;
-
         if (CfgEv^.window = Cli.ClientWindow) and Cli.IsReparented then
         begin
+          newX := Cli.CurrentRect.X + FFrameMetrics.Insets.Left;
+          newY := Cli.CurrentRect.Y + FFrameMetrics.Insets.Top;
+          newW := Cli.CurrentRect.Width - FFrameMetrics.Insets.Left - FFrameMetrics.Insets.Right;
+          newH := Cli.CurrentRect.Height - FFrameMetrics.Insets.Top - FFrameMetrics.Insets.Bottom;
+
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_X) <> 0 then newX := CfgEv^.x;
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_Y) <> 0 then newY := CfgEv^.y;
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_WIDTH) <> 0 then newW := CfgEv^.width;
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_HEIGHT) <> 0 then newH := CfgEv^.height;
+
           FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
           if FrameRect.Y < 0 then
             FrameRect.Y := 0;
@@ -2033,7 +2076,19 @@ begin
           SendSyntheticConfigureNotify(Cli);
         end
         else
+        begin
+          newX := Cli.CurrentRect.X;
+          newY := Cli.CurrentRect.Y;
+          newW := Cli.CurrentRect.Width;
+          newH := Cli.CurrentRect.Height;
+
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_X) <> 0 then newX := CfgEv^.x;
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_Y) <> 0 then newY := CfgEv^.y;
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_WIDTH) <> 0 then newW := CfgEv^.width;
+          if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_HEIGHT) <> 0 then newH := CfgEv^.height;
+
           Cli.SetGeometry(newX, newY, newW, newH);
+        end;
       end
       else
       begin

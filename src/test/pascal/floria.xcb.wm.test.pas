@@ -30,6 +30,7 @@ type
     procedure TestWindowFilteringTypes();
     procedure TestTitlebarRect();
     procedure TestInteractiveDrag();
+    procedure TestConfigureRequestGeometry();
     procedure TestLiveConnectionIfAvailable();
   end;
 
@@ -334,7 +335,7 @@ end;
 procedure TXCBWMTest.TestWindowFilteringTypes();
 var
   Mgr: TXCBWindowManager;
-  DockClient, DeskClient: TXCBWMClient;
+  DockClient, DeskClient, SplashClient, MenuClient, BorderlessClient: TXCBWMClient;
 begin
   Mgr := TXCBWindowManager.Create(nil, 0);
   try
@@ -349,6 +350,24 @@ begin
     DeskClient.WindowType := wtDesktop;
     Mgr.Clients.Add(DeskClient);
     AssertFalse('Desktop window is not reparented', DeskClient.IsReparented);
+
+    // Splash window bypasses framing
+    SplashClient := TXCBWMClient.Create(503, Mgr);
+    SplashClient.WindowType := wtSplash;
+    Mgr.Clients.Add(SplashClient);
+    AssertFalse('Splash is not reparented', SplashClient.IsReparented);
+
+    // Menu window bypasses framing
+    MenuClient := TXCBWMClient.Create(504, Mgr);
+    MenuClient.WindowType := wtMenu;
+    Mgr.Clients.Add(MenuClient);
+    AssertFalse('Menu is not reparented', MenuClient.IsReparented);
+
+    // Borderless client bypasses framing
+    BorderlessClient := TXCBWMClient.Create(505, Mgr);
+    BorderlessClient.Borderless := True;
+    Mgr.Clients.Add(BorderlessClient);
+    AssertFalse('Borderless client is not reparented', BorderlessClient.IsReparented);
   finally
     Mgr.Free();
   end;
@@ -478,6 +497,41 @@ begin
     AssertEquals('Tiled Left Height locked to 1080', 1080, Client.CurrentRect.Height);
     AssertEquals('Tiled Left Y locked to 0', 0, Client.CurrentRect.Y);
     Mgr.EndDrag();
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestConfigureRequestGeometry();
+var
+  Mgr: TXCBWindowManager;
+  Client: TXCBWMClient;
+  CfgEv: xcb_configure_request_event_t;
+  InitialFrameH: Integer;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Mgr.FrameMetrics := TXCBFrameMetrics.Create(24, 2);
+    // Manage normal reparented window in offline mode
+    Client := Mgr.ManageWindow(999);
+    Client.CurrentRect := TXCBRect.Create(100, 100, 400, 300);
+    Client.IsReparented := True;
+    // Frame rect is (98, 74, 404, 328)
+    Client.CurrentRect := Mgr.FrameMetrics.ClientToFrameRect(Client.CurrentRect);
+    InitialFrameH := Client.CurrentRect.Height;
+
+    // Simulate configure request with only X and Y (like SetPosition)
+    FillChar(CfgEv, SizeOf(CfgEv), 0);
+    CfgEv.response_type := XCB_CONFIGURE_REQUEST;
+    CfgEv.window := 999;
+    CfgEv.value_mask := XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y;
+    CfgEv.x := 150;
+    CfgEv.y := 150;
+
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@CfgEv));
+
+    // Height must NOT have grown
+    AssertEquals('Frame height must stay constant after position change', InitialFrameH, Client.CurrentRect.Height);
   finally
     Mgr.Free();
   end;
