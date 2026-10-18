@@ -34,6 +34,7 @@ type
     procedure TestLiveConnectionIfAvailable();
     procedure TestStrutsAndRecomputeWorkarea();
     procedure TestDynamicWorkareaReflow();
+    procedure TestMinimizeAndRestoreOffline();
   end;
 
 implementation
@@ -683,6 +684,51 @@ begin
     // Window reflows back to full width
     AssertEquals('Maximized window restored to full width', 1920, CliMax.CurrentRect.Width);
     AssertEquals('Tiled window restored to half width', 960, CliTile.CurrentRect.Width);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestMinimizeAndRestoreOffline();
+var
+  Mgr: TXCBWindowManager;
+  Cli1, Cli2: TXCBWMClient;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Cli1 := Mgr.ManageWindow(8001);
+    Cli2 := Mgr.ManageWindow(8002);
+
+    Cli1.Activate();
+    AssertSame('Cli1 is active', Cli1, Mgr.ActiveClient);
+    AssertTrue('Cli1 has focus', wsFocused in Cli1.State);
+    AssertFalse('Cli1 not minimized', wsMinimized in Cli1.State);
+
+    // 1. Direct Minimize
+    Cli1.Minimize();
+    AssertTrue('Cli1 is now minimized', wsMinimized in Cli1.State);
+    AssertFalse('Cli1 lost focus', wsFocused in Cli1.State);
+    // Next eligible window automatically activated
+    AssertSame('Cli2 automatically activated', Cli2, Mgr.ActiveClient);
+
+    // 2. Direct Unminimize
+    Cli1.Unminimize();
+    AssertFalse('Cli1 is no longer minimized', wsMinimized in Cli1.State);
+    AssertTrue('Cli1 regained focus', wsFocused in Cli1.State);
+    AssertSame('Cli1 is active again', Cli1, Mgr.ActiveClient);
+
+    // 3. Activate on minimized window automatically unminimizes it
+    Cli1.Minimize();
+    AssertTrue('Cli1 minimized again', wsMinimized in Cli1.State);
+    Cli1.Activate();
+    AssertFalse('Cli1 unminimized on Activate', wsMinimized in Cli1.State);
+    AssertSame('Cli1 active', Cli1, Mgr.ActiveClient);
+
+    // 4. Restore on minimized window unminimizes it
+    Cli1.Minimize();
+    AssertTrue('Cli1 minimized', wsMinimized in Cli1.State);
+    Cli1.Restore();
+    AssertFalse('Cli1 unminimized on Restore', wsMinimized in Cli1.State);
   finally
     Mgr.Free();
   end;

@@ -201,12 +201,14 @@ type
     procedure TileLeft();
     procedure TileRight();
     procedure Minimize();
+    procedure Unminimize();
     procedure SetFullscreen(const AFullscreen: Boolean);
     procedure Move(const AX, AY: Integer);
     procedure Resize(const AWidth, AHeight: Integer);
     procedure SetGeometry(const AX, AY, AWidth, AHeight: Integer);
     procedure SetDesktop(const ADesktopIndex: Integer);
     procedure SetSticky(const ASticky: Boolean);
+    procedure UpdateEWMHState();
 
     function ConstrainSize(const AWidth, AHeight: Integer): TXCBPoint;
     function ShouldBeVisibleOnDesktop(const ACurrentDesktop: Integer): Boolean;
@@ -263,6 +265,8 @@ type
     FAtomMotifWmHints      : xcb_atom_t;
     FAtomNetWmStrut        : xcb_atom_t;
     FAtomNetWmStrutPartial : xcb_atom_t;
+    FAtomWMChangeState     : xcb_atom_t;
+    FAtomWMState           : xcb_atom_t;
 
     // Interactive Dragging
     FDragClient        : TXCBWMClient;
@@ -299,6 +303,8 @@ type
     procedure DoOnClientUnmapped(const AClient: TXCBWMClient); virtual;
     procedure DoOnClientActivated(const AClient: TXCBWMClient); virtual;
     procedure DoOnClientConfigure(const AClient: TXCBWMClient); virtual;
+    procedure DoOnClientMinimized(const AClient: TXCBWMClient); virtual;
+    procedure DoOnClientRestored(const AClient: TXCBWMClient); virtual;
     procedure DoOnDesktopChanged(const AOldDesktop, ANewDesktop: Integer); virtual;
     procedure DoOnWorkareaChanged(const AOldWorkarea, ANewWorkarea: TXCBRect); virtual;
     procedure DoOnFramePaint(const AClient: TXCBWMClient; const ARect: TXCBRect); virtual;
@@ -362,6 +368,8 @@ type
     property AtomMotifWmHints      : xcb_atom_t      read FAtomMotifWmHints;
     property AtomNetWmStrut        : xcb_atom_t      read FAtomNetWmStrut;
     property AtomNetWmStrutPartial : xcb_atom_t      read FAtomNetWmStrutPartial;
+    property AtomWMChangeState     : xcb_atom_t      read FAtomWMChangeState;
+    property AtomWMState           : xcb_atom_t      read FAtomWMState;
 
     property CursorNormal      : xcb_cursor_t        read FCursorNormal;
     property CursorMove        : xcb_cursor_t        read FCursorMove;
@@ -551,6 +559,86 @@ begin
   inherited Destroy();
 end;
 
+procedure TXCBWMClient.UpdateEWMHState();
+var
+  NetStates: array[0..7] of xcb_atom_t;
+  Count: Integer;
+  WmStateData: array[0..1] of Cardinal;
+begin
+  if (FManager = nil) or (FManager.Connection = nil) or (FClientWindow = 0) then Exit;
+
+  // 1. ICCCM WM_STATE (NormalState = 1, IconicState = 3)
+  if FManager.AtomWMState <> 0 then
+  begin
+    if wsMinimized in FState then
+      WmStateData[0] := 3 // IconicState
+    else
+      WmStateData[0] := 1; // NormalState
+    WmStateData[1] := 0; // None
+
+    xcb_change_property(
+      FManager.Connection,
+      XCB_PROP_MODE_REPLACE,
+      FClientWindow,
+      FManager.AtomWMState,
+      FManager.AtomWMState,
+      32,
+      2,
+      @WmStateData[0]
+    );
+  end;
+
+  // 2. EWMH _NET_WM_STATE
+  if FManager.FEwmhInitialized then
+  begin
+    Count := 0;
+    if wsMaximizedHorz in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_MAXIMIZED_HORZ;
+      Inc(Count);
+    end;
+    if wsMaximizedVert in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_MAXIMIZED_VERT;
+      Inc(Count);
+    end;
+    if wsFullscreen in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_FULLSCREEN;
+      Inc(Count);
+    end;
+    if wsMinimized in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_HIDDEN;
+      Inc(Count);
+    end;
+    if wsAbove in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_ABOVE;
+      Inc(Count);
+    end;
+
+    if Count > 0 then
+      xcb_change_property(
+        FManager.Connection,
+        XCB_PROP_MODE_REPLACE,
+        FClientWindow,
+        FManager.FEwmh._NET_WM_STATE,
+        XCB_ATOM_ATOM,
+        32,
+        Count,
+        @NetStates[0]
+      )
+    else
+      xcb_delete_property(
+        FManager.Connection,
+        FClientWindow,
+        FManager.FEwmh._NET_WM_STATE
+      );
+  end;
+  xcb_flush(FManager.Connection);
+end;
+
 procedure TXCBWMClient.Activate();
 var
   WinToRaise: xcb_window_t;
@@ -558,7 +646,25 @@ var
   Ev: xcb_client_message_event_t;
   Data32: PCardinalArray;
   OldCli: TXCBWMClient;
+  WasMinimized: Boolean;
 begin
+  WasMinimized := wsMinimized in FState;
+  if WasMinimized then
+  begin
+    Exclude(FState, wsMinimized);
+    if (FManager <> nil) and (FManager.Connection <> nil) then
+    begin
+      if FIsReparented and (FFrameWindow <> 0) then
+        xcb_map_window(FManager.Connection, FFrameWindow);
+      xcb_map_window(FManager.Connection, FClientWindow);
+      if (FResizeWindow <> 0) and not ((wsMaximizedHorz in FState) or (wsFullscreen in FState)) then
+        xcb_map_window(FManager.Connection, FResizeWindow);
+    end;
+    UpdateEWMHState();
+    if FManager <> nil then
+      FManager.DoOnClientRestored(Self);
+  end;
+
   Include(FState, wsFocused);
   if FManager = nil then Exit;
 
@@ -578,7 +684,7 @@ begin
     Values[0] := XCB_STACK_MODE_ABOVE;
     xcb_configure_window(FManager.Connection, WinToRaise, XCB_CONFIG_WINDOW_STACK_MODE, @Values[0]);
 
-    if (FResizeWindow <> 0) and (WinToRaise = FFrameWindow) then
+    if (FResizeWindow <> 0) and (WinToRaise = FFrameWindow) and not ((wsMaximizedHorz in FState) or (wsFullscreen in FState)) then
     begin
       Values[0] := WinToRaise;
       Values[1] := XCB_STACK_MODE_BELOW;
@@ -674,6 +780,8 @@ begin
       xcb_flush(FManager.Connection);
     end;
   end;
+
+  UpdateEWMHState();
 end;
 
 procedure TXCBWMClient.TileLeft();
@@ -703,6 +811,7 @@ begin
       sw := TargetRect.Width;
       sh := TargetRect.Height;
       SetGeometry(TargetRect.X, TargetRect.Y, sw div 2, sh);
+      UpdateEWMHState();
       Exit;
     end;
 
@@ -718,6 +827,8 @@ begin
     end;
     SetGeometry(0, 0, sw div 2, sh);
   end;
+
+  UpdateEWMHState();
 end;
 
 procedure TXCBWMClient.TileRight();
@@ -747,6 +858,7 @@ begin
       sw := TargetRect.Width;
       sh := TargetRect.Height;
       SetGeometry(TargetRect.X + (sw div 2), TargetRect.Y, sw - (sw div 2), sh);
+      UpdateEWMHState();
       Exit;
     end;
 
@@ -762,12 +874,32 @@ begin
     end;
     SetGeometry(sw div 2, 0, sw - (sw div 2), sh);
   end;
+
+  UpdateEWMHState();
 end;
 
 procedure TXCBWMClient.Restore();
 var
   Values: array[0..1] of Cardinal;
+  WasMinimized: Boolean;
 begin
+  WasMinimized := wsMinimized in FState;
+  if WasMinimized then
+  begin
+    Exclude(FState, wsMinimized);
+    if (FManager <> nil) and (FManager.Connection <> nil) then
+    begin
+      if FIsReparented and (FFrameWindow <> 0) then
+        xcb_map_window(FManager.Connection, FFrameWindow);
+      xcb_map_window(FManager.Connection, FClientWindow);
+      if (FResizeWindow <> 0) and not ((wsMaximizedHorz in FState) or (wsFullscreen in FState)) then
+        xcb_map_window(FManager.Connection, FResizeWindow);
+    end;
+    UpdateEWMHState();
+    if FManager <> nil then
+      FManager.DoOnClientRestored(Self);
+  end;
+
   if (wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or (wsFullscreen in FState) or
      (wsTiledLeft in FState) or (wsTiledRight in FState) then
   begin
@@ -793,16 +925,34 @@ begin
       end;
       xcb_flush(FManager.Connection);
     end;
+    UpdateEWMHState();
+  end
+  else if WasMinimized and (FManager <> nil) and (FManager.Connection <> nil) and (FResizeWindow <> 0) then
+  begin
+    xcb_map_window(FManager.Connection, FResizeWindow);
+    if FFrameWindow <> 0 then
+    begin
+      Values[0] := FFrameWindow;
+      Values[1] := XCB_STACK_MODE_BELOW;
+      xcb_configure_window(FManager.Connection, FResizeWindow,
+                           XCB_CONFIG_WINDOW_SIBLING or XCB_CONFIG_WINDOW_STACK_MODE,
+                           @Values[0]);
+    end;
+    xcb_flush(FManager.Connection);
   end;
 end;
 
 procedure TXCBWMClient.Minimize();
+var
+  I: Integer;
+  OtherCli: TXCBWMClient;
 begin
+  if wsMinimized in FState then Exit;
+
   Include(FState, wsMinimized);
   Exclude(FState, wsFocused);
-  if FManager = nil then Exit;
 
-  if FManager.Connection <> nil then
+  if (FManager <> nil) and (FManager.Connection <> nil) then
   begin
     if FIsReparented and (FFrameWindow <> 0) then
       xcb_unmap_window(FManager.Connection, FFrameWindow);
@@ -812,8 +962,31 @@ begin
     xcb_flush(FManager.Connection);
   end;
 
-  if FManager.ActiveClient = Self then
-    FManager.ActiveClient := nil;
+  UpdateEWMHState();
+
+  if FManager <> nil then
+  begin
+    if FManager.ActiveClient = Self then
+    begin
+      FManager.ActiveClient := nil;
+      for I := FManager.Clients.Count - 1 downto 0 do
+      begin
+        OtherCli := TXCBWMClient(FManager.Clients[I]);
+        if (OtherCli <> Self) and not (wsMinimized in OtherCli.State) and OtherCli.IsReparented then
+        begin
+          OtherCli.Activate();
+          Break;
+        end;
+      end;
+    end;
+    FManager.DoOnClientMinimized(Self);
+  end;
+end;
+
+procedure TXCBWMClient.Unminimize();
+begin
+  if not (wsMinimized in FState) then Exit;
+  Activate();
 end;
 
 procedure TXCBWMClient.SetFullscreen(const AFullscreen: Boolean);
@@ -849,6 +1022,7 @@ begin
         xcb_flush(FManager.Connection);
       end;
     end;
+    UpdateEWMHState();
   end
   else
     Restore();
@@ -1070,6 +1244,8 @@ begin
   FAtomMotifWmHints := 0;
   FAtomNetWmStrut := 0;
   FAtomNetWmStrutPartial := 0;
+  FAtomWMChangeState := 0;
+  FAtomWMState := 0;
   FDragClient := nil;
   FDragMode := dmNone;
   FDragStartPointer := TXCBPoint.Create(0, 0);
@@ -1113,6 +1289,8 @@ begin
     FAtomMotifWmHints := InternAtom(FConn, '_MOTIF_WM_HINTS');
     FAtomNetWmStrut := InternAtom(FConn, '_NET_WM_STRUT');
     FAtomNetWmStrutPartial := InternAtom(FConn, '_NET_WM_STRUT_PARTIAL');
+    FAtomWMChangeState := InternAtom(FConn, 'WM_CHANGE_STATE');
+    FAtomWMState := InternAtom(FConn, 'WM_STATE');
     InitCursors();
   end;
 end;
@@ -1238,7 +1416,7 @@ end;
 procedure TXCBWindowManager.InitEWMH();
 var
   Cookies: Pxcb_intern_atom_cookie_t;
-  SuppAtoms: array[0..17] of xcb_atom_t;
+  SuppAtoms: array[0..23] of xcb_atom_t;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -1322,6 +1500,12 @@ begin
   SuppAtoms[15] := FEwmh._NET_WM_DESKTOP;
   SuppAtoms[16] := FEwmh._NET_WM_STRUT;
   SuppAtoms[17] := FEwmh._NET_WM_STRUT_PARTIAL;
+  SuppAtoms[18] := FEwmh._NET_WM_STATE_MAXIMIZED_HORZ;
+  SuppAtoms[19] := FEwmh._NET_WM_STATE_MAXIMIZED_VERT;
+  SuppAtoms[20] := FEwmh._NET_WM_STATE_FULLSCREEN;
+  SuppAtoms[21] := FEwmh._NET_WM_STATE_HIDDEN;
+  SuppAtoms[22] := FEwmh._NET_WM_STATE_ABOVE;
+  SuppAtoms[23] := FEwmh._NET_SHOWING_DESKTOP;
 
   xcb_change_property(
     FConn,
@@ -1330,7 +1514,7 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    18,
+    24,
     @SuppAtoms[0]
   );
 
@@ -2075,6 +2259,7 @@ begin
     FClients.Add(Cli);
     if Cli.Strut.HasStrut() then
       RecomputeWorkarea();
+    Cli.UpdateEWMHState();
     Result := Cli;
 
     RefreshEWMHClientList();
@@ -2092,10 +2277,23 @@ procedure TXCBWindowManager.UnmanageWindow(const AClient: TXCBWMClient);
 var
   Idx: Integer;
   HadStrut: Boolean;
+  WmStateData: array[0..1] of Cardinal;
 begin
   if AClient = nil then Exit;
 
   HadStrut := AClient.Strut.HasStrut();
+
+  if FConn <> nil then
+  begin
+    if FAtomWMState <> 0 then
+    begin
+      WmStateData[0] := 0; // WithdrawnState
+      WmStateData[1] := 0;
+      xcb_change_property(FConn, XCB_PROP_MODE_REPLACE, AClient.ClientWindow, FAtomWMState, FAtomWMState, 32, 2, @WmStateData[0]);
+    end;
+    if FEwmhInitialized then
+      xcb_delete_property(FConn, AClient.ClientWindow, FEwmh._NET_WM_STATE);
+  end;
 
   if FActiveClient = AClient then
     FActiveClient := nil;
@@ -2245,6 +2443,7 @@ var
   CfgMask: Cardinal;
   newX, newY, newW, newH: Integer;
   valIdx: Integer;
+  I: Integer;
 begin
   Result := False;
   if AEvent = nil then Exit;
@@ -2463,9 +2662,68 @@ begin
                 1: Cli.SetFullscreen(True);
                 2: Cli.SetFullscreen(not (wsFullscreen in Cli.State));
               end;
+            end
+            else if (MsgData32^[1] = FEwmh._NET_WM_STATE_HIDDEN) or
+                    (MsgData32^[2] = FEwmh._NET_WM_STATE_HIDDEN) then
+            begin
+              case MsgData32^[0] of
+                0: Cli.Unminimize();
+                1: Cli.Minimize();
+                2: if (wsMinimized in Cli.State) then Cli.Unminimize() else Cli.Minimize();
+              end;
+            end
+            else if (MsgData32^[1] = FEwmh._NET_WM_STATE_ABOVE) or
+                    (MsgData32^[2] = FEwmh._NET_WM_STATE_ABOVE) then
+            begin
+              case MsgData32^[0] of
+                0: Exclude(Cli.FState, wsAbove);
+                1: Include(Cli.FState, wsAbove);
+                2: if (wsAbove in Cli.State) then Exclude(Cli.FState, wsAbove) else Include(Cli.FState, wsAbove);
+              end;
+              Cli.UpdateEWMHState();
             end;
           end;
+        end
+        else if MsgEv^.type_ = FEwmh._NET_SHOWING_DESKTOP then
+        begin
+          if MsgData32^[0] <> 0 then
+          begin
+            for I := 0 to FClients.Count - 1 do
+            begin
+              Cli := TXCBWMClient(FClients[I]);
+              if not (wsMinimized in Cli.State) and Cli.IsReparented and
+                 Cli.ShouldBeVisibleOnDesktop(FCurrentDesktop) then
+                Cli.Minimize();
+            end;
+          end
+          else
+          begin
+            for I := 0 to FClients.Count - 1 do
+            begin
+              Cli := TXCBWMClient(FClients[I]);
+              if (wsMinimized in Cli.State) and Cli.ShouldBeVisibleOnDesktop(FCurrentDesktop) then
+                Cli.Unminimize();
+            end;
+          end;
+          xcb_change_property(
+            FConn,
+            XCB_PROP_MODE_REPLACE,
+            FRootWindow,
+            FEwmh._NET_SHOWING_DESKTOP,
+            XCB_ATOM_CARDINAL,
+            32,
+            1,
+            @MsgData32^[0]
+          );
+          xcb_flush(FConn);
         end;
+      end;
+
+      if (FAtomWMChangeState <> 0) and (MsgEv^.type_ = FAtomWMChangeState) then
+      begin
+        Cli := FindClient(MsgEv^.window);
+        if (Cli <> nil) and (MsgData32^[0] = 3 { IconicState }) then
+          Cli.Minimize();
       end;
       Result := True;
     end;
@@ -2780,6 +3038,16 @@ begin
 end;
 
 procedure TXCBWindowManager.DoOnClientConfigure(const AClient: TXCBWMClient);
+begin
+  // Subclasses override
+end;
+
+procedure TXCBWindowManager.DoOnClientMinimized(const AClient: TXCBWMClient);
+begin
+  // Subclasses override
+end;
+
+procedure TXCBWindowManager.DoOnClientRestored(const AClient: TXCBWMClient);
 begin
   // Subclasses override
 end;
