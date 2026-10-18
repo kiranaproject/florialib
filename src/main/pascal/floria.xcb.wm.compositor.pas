@@ -141,6 +141,7 @@ type
     function HandleGenericEvent(const AEvent: Pxcb_generic_event_t): Boolean;
     procedure CompositeScene();
     procedure PresentToScreen(const ATargetDrawable: xcb_drawable_t = 0);
+    procedure Resize(const AWidth, AHeight: Integer);
 
     procedure SetWallpaper(const AImage: TFloriaImage);
     procedure SetBackgroundColor(const R, G, B: Byte; const A: Byte = 255);
@@ -785,6 +786,33 @@ begin
                 FScreenWidth, FScreenHeight, 0, 0, 0, 24,
                 dataLen, PByte(FSceneImage.Data));
   xcb_flush(FConn);
+end;
+
+procedure TXCBCompositor.Resize(const AWidth, AHeight: Integer);
+var
+  newW, newH: Integer;
+begin
+  newW := Max(1, AWidth);
+  newH := Max(1, AHeight);
+  if (FScreenWidth = newW) and (FScreenHeight = newH) then Exit;
+
+  FScreenWidth := newW;
+  FScreenHeight := newH;
+
+  if FSceneCanvas <> nil then
+  begin
+    FSceneCanvas.Free();
+    FSceneCanvas := nil;
+  end;
+  if FSceneImage <> nil then
+  begin
+    FSceneImage.Free();
+    FSceneImage := nil;
+  end;
+
+  FSceneImage := TFloriaImage.Create(FScreenWidth, FScreenHeight);
+  FSceneImage.Clear(FBgR, FBgG, FBgB, FBgA);
+  FSceneCanvas := TFloriaCanvasAgg.Create(FSceneImage);
 end;
 
 end.
