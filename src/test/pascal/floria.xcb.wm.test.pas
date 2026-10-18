@@ -371,6 +371,16 @@ begin
     BorderlessClient.Borderless := True;
     Mgr.Clients.Add(BorderlessClient);
     AssertFalse('Borderless client is not reparented', BorderlessClient.IsReparented);
+
+    // Verify IsMenu and IsDecorated semantics
+    AssertFalse('Splash is not decorated', SplashClient.IsDecorated());
+    AssertFalse('Splash is not menu', SplashClient.IsMenu());
+    AssertFalse('Dock is not decorated', DockClient.IsDecorated());
+    AssertFalse('Dock is not menu', DockClient.IsMenu());
+    AssertFalse('Borderless is not decorated', BorderlessClient.IsDecorated());
+    AssertFalse('Borderless is not menu', BorderlessClient.IsMenu());
+    AssertTrue('Menu is menu', MenuClient.IsMenu());
+    AssertFalse('Menu is not decorated', MenuClient.IsDecorated());
   finally
     Mgr.Free();
   end;

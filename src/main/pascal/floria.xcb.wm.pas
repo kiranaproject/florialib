@@ -141,6 +141,12 @@ type
     wtDesktop,
     wtToolbar,
     wtMenu,
+    wtDropdownMenu,
+    wtPopupMenu,
+    wtTooltip,
+    wtNotification,
+    wtCombo,
+    wtDnd,
     wtUtility,
     wtSplash
   );
@@ -213,6 +219,8 @@ type
     function ConstrainSize(const AWidth, AHeight: Integer): TXCBPoint;
     function ShouldBeVisibleOnDesktop(const ACurrentDesktop: Integer): Boolean;
     function TitlebarRect(): TXCBRect;
+    function IsMenu(): Boolean;
+    function IsDecorated(): Boolean;
 
     property ClientWindow        : xcb_window_t      read FClientWindow;
     property FrameWindow         : xcb_window_t      read FFrameWindow write FFrameWindow;
@@ -370,6 +378,8 @@ type
     property AtomNetWmStrutPartial : xcb_atom_t      read FAtomNetWmStrutPartial;
     property AtomWMChangeState     : xcb_atom_t      read FAtomWMChangeState;
     property AtomWMState           : xcb_atom_t      read FAtomWMState;
+    property Ewmh                  : xcb_ewmh_connection_t read FEwmh;
+    property EwmhInitialized       : Boolean               read FEwmhInitialized;
 
     property CursorNormal      : xcb_cursor_t        read FCursorNormal;
     property CursorMove        : xcb_cursor_t        read FCursorMove;
@@ -1209,6 +1219,16 @@ begin
   Result.Height := FManager.FrameMetrics.TitlebarHeight + FManager.FrameMetrics.BorderWidth;
 end;
 
+function TXCBWMClient.IsMenu(): Boolean;
+begin
+  Result := FWindowType in [wtMenu, wtDropdownMenu, wtPopupMenu, wtCombo];
+end;
+
+function TXCBWMClient.IsDecorated(): Boolean;
+begin
+  Result := FIsReparented and not FBorderless and (FWindowType in [wtNormal, wtDialog]);
+end;
+
 // ============================================================================
 // TXCBWindowManager
 // ============================================================================
@@ -1416,7 +1436,7 @@ end;
 procedure TXCBWindowManager.InitEWMH();
 var
   Cookies: Pxcb_intern_atom_cookie_t;
-  SuppAtoms: array[0..23] of xcb_atom_t;
+  SuppAtoms: array[0..36] of xcb_atom_t;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -1506,6 +1526,19 @@ begin
   SuppAtoms[21] := FEwmh._NET_WM_STATE_HIDDEN;
   SuppAtoms[22] := FEwmh._NET_WM_STATE_ABOVE;
   SuppAtoms[23] := FEwmh._NET_SHOWING_DESKTOP;
+  SuppAtoms[24] := FEwmh._NET_WM_WINDOW_TYPE_NORMAL;
+  SuppAtoms[25] := FEwmh._NET_WM_WINDOW_TYPE_DIALOG;
+  SuppAtoms[26] := FEwmh._NET_WM_WINDOW_TYPE_DOCK;
+  SuppAtoms[27] := FEwmh._NET_WM_WINDOW_TYPE_DESKTOP;
+  SuppAtoms[28] := FEwmh._NET_WM_WINDOW_TYPE_TOOLBAR;
+  SuppAtoms[29] := FEwmh._NET_WM_WINDOW_TYPE_MENU;
+  SuppAtoms[30] := FEwmh._NET_WM_WINDOW_TYPE_POPUP_MENU;
+  SuppAtoms[31] := FEwmh._NET_WM_WINDOW_TYPE_DROPDOWN_MENU;
+  SuppAtoms[32] := FEwmh._NET_WM_WINDOW_TYPE_TOOLTIP;
+  SuppAtoms[33] := FEwmh._NET_WM_WINDOW_TYPE_NOTIFICATION;
+  SuppAtoms[34] := FEwmh._NET_WM_WINDOW_TYPE_COMBO;
+  SuppAtoms[35] := FEwmh._NET_WM_WINDOW_TYPE_UTILITY;
+  SuppAtoms[36] := FEwmh._NET_WM_WINDOW_TYPE_SPLASH;
 
   xcb_change_property(
     FConn,
@@ -1514,7 +1547,7 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    24,
+    37,
     @SuppAtoms[0]
   );
 
@@ -1798,30 +1831,88 @@ begin
   // 3. _NET_WM_WINDOW_TYPE
   if FEwmhInitialized then
   begin
-    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FEwmh._NET_WM_WINDOW_TYPE, XCB_ATOM_ATOM, 0, 1);
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FEwmh._NET_WM_WINDOW_TYPE, XCB_ATOM_ATOM, 0, 8);
     PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
     if PropReply <> nil then
     begin
       try
-        if xcb_get_property_value_length(PropReply) >= SizeOf(xcb_atom_t) then
+        DataLen := xcb_get_property_value_length(PropReply) div SizeOf(xcb_atom_t);
+        if DataLen > 0 then
         begin
           AtomsPtr := Pxcb_atom_t(xcb_get_property_value(PropReply));
-          if AtomsPtr^ = FEwmh._NET_WM_WINDOW_TYPE_DOCK then
-            AClient.WindowType := wtDock
-          else if AtomsPtr^ = FEwmh._NET_WM_WINDOW_TYPE_DESKTOP then
-            AClient.WindowType := wtDesktop
-          else if AtomsPtr^ = FEwmh._NET_WM_WINDOW_TYPE_DIALOG then
-            AClient.WindowType := wtDialog
-          else if AtomsPtr^ = FEwmh._NET_WM_WINDOW_TYPE_TOOLBAR then
-            AClient.WindowType := wtToolbar
-          else if AtomsPtr^ = FEwmh._NET_WM_WINDOW_TYPE_MENU then
-            AClient.WindowType := wtMenu
-          else if AtomsPtr^ = FEwmh._NET_WM_WINDOW_TYPE_UTILITY then
-            AClient.WindowType := wtUtility
-          else if AtomsPtr^ = FEwmh._NET_WM_WINDOW_TYPE_SPLASH then
-            AClient.WindowType := wtSplash
-          else
-            AClient.WindowType := wtNormal;
+          for I := 0 to DataLen - 1 do
+          begin
+            if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_DOCK then
+            begin
+              AClient.WindowType := wtDock;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_DESKTOP then
+            begin
+              AClient.WindowType := wtDesktop;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_SPLASH then
+            begin
+              AClient.WindowType := wtSplash;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_POPUP_MENU then
+            begin
+              AClient.WindowType := wtPopupMenu;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_DROPDOWN_MENU then
+            begin
+              AClient.WindowType := wtDropdownMenu;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_MENU then
+            begin
+              AClient.WindowType := wtMenu;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_COMBO then
+            begin
+              AClient.WindowType := wtCombo;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_TOOLTIP then
+            begin
+              AClient.WindowType := wtTooltip;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_NOTIFICATION then
+            begin
+              AClient.WindowType := wtNotification;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_DIALOG then
+            begin
+              AClient.WindowType := wtDialog;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_TOOLBAR then
+            begin
+              AClient.WindowType := wtToolbar;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_UTILITY then
+            begin
+              AClient.WindowType := wtUtility;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_DND then
+            begin
+              AClient.WindowType := wtDnd;
+              Break;
+            end
+            else if AtomsPtr[I] = FEwmh._NET_WM_WINDOW_TYPE_NORMAL then
+            begin
+              AClient.WindowType := wtNormal;
+              Break;
+            end;
+          end;
         end;
       finally
         xcb_free(PropReply);
@@ -2230,8 +2321,8 @@ begin
       Exit(nil);
     end;
 
-    // Bypass docks, desktops, splashes, menus, and borderless windows from framing
-    if (Cli.WindowType in [wtDock, wtDesktop, wtSplash, wtMenu]) or Cli.Borderless then
+    // Bypass docks, desktops, splashes, menus, tooltips, notifications, and borderless windows from framing
+    if (Cli.WindowType in [wtDock, wtDesktop, wtSplash, wtMenu, wtDropdownMenu, wtPopupMenu, wtTooltip, wtNotification, wtCombo, wtDnd]) or Cli.Borderless then
     begin
       Cli.IsReparented := False;
       if FConn <> nil then
