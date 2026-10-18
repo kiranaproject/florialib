@@ -32,6 +32,8 @@ type
     procedure TestInteractiveDrag();
     procedure TestConfigureRequestGeometry();
     procedure TestLiveConnectionIfAvailable();
+    procedure TestStrutsAndRecomputeWorkarea();
+    procedure TestDynamicWorkareaReflow();
   end;
 
 implementation
@@ -563,6 +565,126 @@ begin
     end;
   finally
     xcb_disconnect(Conn);
+  end;
+end;
+
+procedure TXCBWMTest.TestStrutsAndRecomputeWorkarea();
+var
+  Mgr: TXCBWindowManager;
+  Dock1, Dock2, Dock3: TXCBWMClient;
+  S: TXCBStrutPartial;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    // Initial workarea in offline mode (screen is nil -> defaults to 1920x1080)
+    AssertEquals('Initial Workarea X', 0, Mgr.Workarea.X);
+    AssertEquals('Initial Workarea Y', 0, Mgr.Workarea.Y);
+    AssertEquals('Initial Workarea Width', 1920, Mgr.Workarea.Width);
+    AssertEquals('Initial Workarea Height', 1080, Mgr.Workarea.Height);
+
+    // Add Top Dock with 38px strut
+    Dock1 := Mgr.ManageWindow(101);
+    Dock1.WindowType := wtDock;
+    S := TXCBStrutPartial.Create();
+    S.Top := 38;
+    Dock1.Strut := S;
+    Mgr.RecomputeWorkarea();
+
+    AssertEquals('Workarea Y with top dock', 38, Mgr.Workarea.Y);
+    AssertEquals('Workarea Height with top dock', 1042, Mgr.Workarea.Height);
+
+    // Add Bottom Dock with 40px strut
+    Dock2 := Mgr.ManageWindow(102);
+    Dock2.WindowType := wtDock;
+    S := TXCBStrutPartial.Create();
+    S.Bottom := 40;
+    Dock2.Strut := S;
+    Mgr.RecomputeWorkarea();
+
+    AssertEquals('Workarea Y with top+bottom dock', 38, Mgr.Workarea.Y);
+    AssertEquals('Workarea Height with top+bottom dock', 1002, Mgr.Workarea.Height);
+
+    // Add Left Dock with 60px strut
+    Dock3 := Mgr.ManageWindow(103);
+    Dock3.WindowType := wtDock;
+    S := TXCBStrutPartial.Create();
+    S.Left := 60;
+    Dock3.Strut := S;
+    Mgr.RecomputeWorkarea();
+
+    AssertEquals('Workarea X with left dock', 60, Mgr.Workarea.X);
+    AssertEquals('Workarea Width with left dock', 1860, Mgr.Workarea.Width);
+
+    // Remove left dock
+    Mgr.UnmanageWindow(Dock3);
+    // UnmanageWindow calls RecomputeWorkarea when HadStrut is true
+    AssertEquals('Workarea X after unmanaging left dock', 0, Mgr.Workarea.X);
+    AssertEquals('Workarea Width after unmanaging left dock', 1920, Mgr.Workarea.Width);
+    AssertEquals('Workarea Y preserved', 38, Mgr.Workarea.Y);
+    AssertEquals('Workarea Height preserved', 1002, Mgr.Workarea.Height);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestDynamicWorkareaReflow();
+var
+  Mgr: TXCBWindowManager;
+  CliMax, CliTile: TXCBWMClient;
+  DockTop, DockLeft: TXCBWMClient;
+  S: TXCBStrutPartial;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    CliMax := Mgr.ManageWindow(201);
+    CliMax.Maximize();
+    AssertEquals('Maximized window initial Y', 0, CliMax.CurrentRect.Y);
+    AssertEquals('Maximized window initial Height', 1080, CliMax.CurrentRect.Height);
+
+    CliTile := Mgr.ManageWindow(202);
+    CliTile.TileLeft();
+    AssertEquals('Tiled window initial X', 0, CliTile.CurrentRect.X);
+    AssertEquals('Tiled window initial Width', 960, CliTile.CurrentRect.Width);
+    AssertEquals('Tiled window initial Height', 1080, CliTile.CurrentRect.Height);
+
+    // Add top dock with 48px strut
+    DockTop := Mgr.ManageWindow(301);
+    DockTop.WindowType := wtDock;
+    S := TXCBStrutPartial.Create();
+    S.Top := 48;
+    DockTop.Strut := S;
+    Mgr.RecomputeWorkarea();
+
+    // Verify dynamic reflow of both windows
+    AssertEquals('Maximized window reflowed Y', 48, CliMax.CurrentRect.Y);
+    AssertEquals('Maximized window reflowed Height', 1032, CliMax.CurrentRect.Height);
+
+    AssertEquals('Tiled window reflowed Y', 48, CliTile.CurrentRect.Y);
+    AssertEquals('Tiled window reflowed Height', 1032, CliTile.CurrentRect.Height);
+
+    // Add left dock with 70px strut
+    DockLeft := Mgr.ManageWindow(302);
+    DockLeft.WindowType := wtDock;
+    S := TXCBStrutPartial.Create();
+    S.Left := 70;
+    DockLeft.Strut := S;
+    Mgr.RecomputeWorkarea();
+
+    // Workarea is now (70, 48, 1850, 1032)
+    AssertEquals('Maximized window reflowed X', 70, CliMax.CurrentRect.X);
+    AssertEquals('Maximized window reflowed Width', 1850, CliMax.CurrentRect.Width);
+
+    AssertEquals('Tiled window reflowed X', 70, CliTile.CurrentRect.X);
+    AssertEquals('Tiled window reflowed Width', 925, CliTile.CurrentRect.Width); // 1850 div 2
+
+    // Unmanage left dock
+    Mgr.UnmanageWindow(DockLeft);
+
+    // Window reflows back to full width
+    AssertEquals('Maximized window restored to full width', 1920, CliMax.CurrentRect.Width);
+    AssertEquals('Tiled window restored to half width', 960, CliTile.CurrentRect.Width);
+  finally
+    Mgr.Free();
   end;
 end;
 

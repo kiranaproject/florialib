@@ -38,6 +38,25 @@ type
   end;
   PXCBMwmHints = ^TXCBMwmHints;
 
+  // EWMH 12-cardinal partial strut record
+  TXCBStrutPartial = record
+    Left         : Cardinal;
+    Right        : Cardinal;
+    Top          : Cardinal;
+    Bottom       : Cardinal;
+    LeftStartY   : Cardinal;
+    LeftEndY     : Cardinal;
+    RightStartY  : Cardinal;
+    RightEndY    : Cardinal;
+    TopStartX    : Cardinal;
+    TopEndX      : Cardinal;
+    BottomStartX : Cardinal;
+    BottomEndX   : Cardinal;
+    class function Create(): TXCBStrutPartial; static;
+    function HasStrut(): Boolean;
+  end;
+  PXCBStrutPartial = ^TXCBStrutPartial;
+
   // Event pointer aliases
   Pxcb_map_request_event_t = ^xcb_map_request_event_t;
   Pxcb_configure_request_event_t = ^xcb_configure_request_event_t;
@@ -48,6 +67,7 @@ type
   Pxcb_motion_notify_event_t = ^xcb_motion_notify_event_t;
   Pxcb_expose_event_t = ^xcb_expose_event_t;
   Pxcb_client_message_event_t = ^xcb_client_message_event_t;
+  Pxcb_property_notify_event_t = ^xcb_property_notify_event_t;
 
   // Cardinal array overlay for xcb_client_message_data_t (data32 format)
   PCardinalArray = ^TCardinalArray;
@@ -169,6 +189,7 @@ type
     FIsReparented        : Boolean;
     FOverrideRedirect    : Boolean;
     FBorderless          : Boolean;
+    FStrut               : TXCBStrutPartial;
   public
     constructor Create(const AClientWin: xcb_window_t; const AManager: TXCBWindowManager);
     destructor Destroy(); override;
@@ -212,6 +233,7 @@ type
     property IsReparented        : Boolean           read FIsReparented write FIsReparented;
     property OverrideRedirect    : Boolean           read FOverrideRedirect write FOverrideRedirect;
     property Borderless          : Boolean           read FBorderless write FBorderless;
+    property Strut               : TXCBStrutPartial  read FStrut write FStrut;
   end;
 
   // TXCBWindowManager
@@ -236,9 +258,11 @@ type
     FWorkarea          : TXCBRect;
     
     // Atoms
-    FAtomWMDeleteWindow: xcb_atom_t;
-    FAtomWMTakeFocus   : xcb_atom_t;
-    FAtomMotifWmHints  : xcb_atom_t;
+    FAtomWMDeleteWindow    : xcb_atom_t;
+    FAtomWMTakeFocus       : xcb_atom_t;
+    FAtomMotifWmHints      : xcb_atom_t;
+    FAtomNetWmStrut        : xcb_atom_t;
+    FAtomNetWmStrutPartial : xcb_atom_t;
 
     // Interactive Dragging
     FDragClient        : TXCBWMClient;
@@ -267,6 +291,7 @@ type
     procedure RefreshEWMHClientList();
     procedure RefreshEWMHActiveWindow();
     procedure RefreshEWMHDesktop();
+    procedure RefreshEWMHWorkarea();
     procedure ReadClientProperties(const AClient: TXCBWMClient);
     function CreateFrameWindow(const AClient: TXCBWMClient; const ARect: TXCBRect): xcb_window_t;
   protected
@@ -275,6 +300,7 @@ type
     procedure DoOnClientActivated(const AClient: TXCBWMClient); virtual;
     procedure DoOnClientConfigure(const AClient: TXCBWMClient); virtual;
     procedure DoOnDesktopChanged(const AOldDesktop, ANewDesktop: Integer); virtual;
+    procedure DoOnWorkareaChanged(const AOldWorkarea, ANewWorkarea: TXCBRect); virtual;
     procedure DoOnFramePaint(const AClient: TXCBWMClient; const ARect: TXCBRect); virtual;
   public
     constructor Create(AConn: Pxcb_connection_t = nil; const AScreenNum: Integer = 0);
@@ -297,6 +323,7 @@ type
     procedure SwitchDesktop(const ANewDesktop: Integer);
     procedure SetDesktopCount(const ACount: Integer);
     procedure SetActiveClient(const AClient: TXCBWMClient);
+    procedure RecomputeWorkarea();
 
     // Reparenting and framing
     function CreateResizeWindow(const AClient: TXCBWMClient; const ARect: TXCBRect): xcb_window_t;
@@ -330,9 +357,11 @@ type
     property IsRunning         : Boolean             read FIsRunning;
     property DragMode          : TXCBDragMode        read FDragMode;
     property DragClient        : TXCBWMClient        read FDragClient;
-    property AtomWMDeleteWindow: xcb_atom_t          read FAtomWMDeleteWindow;
-    property AtomWMTakeFocus   : xcb_atom_t          read FAtomWMTakeFocus;
-    property AtomMotifWmHints  : xcb_atom_t          read FAtomMotifWmHints;
+    property AtomWMDeleteWindow    : xcb_atom_t      read FAtomWMDeleteWindow;
+    property AtomWMTakeFocus       : xcb_atom_t      read FAtomWMTakeFocus;
+    property AtomMotifWmHints      : xcb_atom_t      read FAtomMotifWmHints;
+    property AtomNetWmStrut        : xcb_atom_t      read FAtomNetWmStrut;
+    property AtomNetWmStrutPartial : xcb_atom_t      read FAtomNetWmStrutPartial;
 
     property CursorNormal      : xcb_cursor_t        read FCursorNormal;
     property CursorMove        : xcb_cursor_t        read FCursorMove;
@@ -367,6 +396,20 @@ begin
     Result := Reply^.atom;
     xcb_free(Reply);
   end;
+end;
+
+// ============================================================================
+// TXCBStrutPartial
+// ============================================================================
+
+class function TXCBStrutPartial.Create(): TXCBStrutPartial;
+begin
+  FillChar(Result, SizeOf(Result), 0);
+end;
+
+function TXCBStrutPartial.HasStrut(): Boolean;
+begin
+  Result := (Left > 0) or (Right > 0) or (Top > 0) or (Bottom > 0);
 end;
 
 // ============================================================================
@@ -495,6 +538,7 @@ begin
   FIsReparented := False;
   FOverrideRedirect := False;
   FBorderless := False;
+  FStrut := TXCBStrutPartial.Create();
 end;
 
 destructor TXCBWMClient.Destroy();
@@ -1024,6 +1068,8 @@ begin
   FAtomWMDeleteWindow := 0;
   FAtomWMTakeFocus := 0;
   FAtomMotifWmHints := 0;
+  FAtomNetWmStrut := 0;
+  FAtomNetWmStrutPartial := 0;
   FDragClient := nil;
   FDragMode := dmNone;
   FDragStartPointer := TXCBPoint.Create(0, 0);
@@ -1065,6 +1111,8 @@ begin
     FAtomWMDeleteWindow := InternAtom(FConn, 'WM_DELETE_WINDOW');
     FAtomWMTakeFocus := InternAtom(FConn, 'WM_TAKE_FOCUS');
     FAtomMotifWmHints := InternAtom(FConn, '_MOTIF_WM_HINTS');
+    FAtomNetWmStrut := InternAtom(FConn, '_NET_WM_STRUT');
+    FAtomNetWmStrutPartial := InternAtom(FConn, '_NET_WM_STRUT_PARTIAL');
     InitCursors();
   end;
 end;
@@ -1190,7 +1238,7 @@ end;
 procedure TXCBWindowManager.InitEWMH();
 var
   Cookies: Pxcb_intern_atom_cookie_t;
-  SuppAtoms: array[0..15] of xcb_atom_t;
+  SuppAtoms: array[0..17] of xcb_atom_t;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -1272,6 +1320,8 @@ begin
   SuppAtoms[13] := FEwmh._NET_WM_MOVERESIZE;
   SuppAtoms[14] := FEwmh._NET_WM_PID;
   SuppAtoms[15] := FEwmh._NET_WM_DESKTOP;
+  SuppAtoms[16] := FEwmh._NET_WM_STRUT;
+  SuppAtoms[17] := FEwmh._NET_WM_STRUT_PARTIAL;
 
   xcb_change_property(
     FConn,
@@ -1280,7 +1330,7 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    16,
+    18,
     @SuppAtoms[0]
   );
 
@@ -1401,11 +1451,26 @@ begin
       PAnsiChar(NamesData)
     );
 
-  // _NET_WORKAREA
-  Geom[0] := FWorkarea.X;
-  Geom[1] := FWorkarea.Y;
-  Geom[2] := FWorkarea.Width;
-  Geom[3] := FWorkarea.Height;
+  RefreshEWMHWorkarea();
+end;
+
+procedure TXCBWindowManager.RefreshEWMHWorkarea();
+var
+  WorkareaData: array of Cardinal;
+  I: Integer;
+begin
+  if (FConn = nil) or (FRootWindow = 0) or (not FEwmhInitialized) then Exit;
+  if FDesktopCount <= 0 then Exit;
+
+  SetLength(WorkareaData, FDesktopCount * 4);
+  for I := 0 to FDesktopCount - 1 do
+  begin
+    WorkareaData[I * 4 + 0] := Cardinal(FWorkarea.X);
+    WorkareaData[I * 4 + 1] := Cardinal(FWorkarea.Y);
+    WorkareaData[I * 4 + 2] := Cardinal(FWorkarea.Width);
+    WorkareaData[I * 4 + 3] := Cardinal(FWorkarea.Height);
+  end;
+
   xcb_change_property(
     FConn,
     XCB_PROP_MODE_REPLACE,
@@ -1413,9 +1478,96 @@ begin
     FEwmh._NET_WORKAREA,
     XCB_ATOM_CARDINAL,
     32,
-    4,
-    @Geom[0]
+    FDesktopCount * 4,
+    @WorkareaData[0]
   );
+  xcb_flush(FConn);
+end;
+
+procedure TXCBWindowManager.RecomputeWorkarea();
+var
+  MaxLeft, MaxRight, MaxTop, MaxBottom: Cardinal;
+  ScreenWidth, ScreenHeight: Integer;
+  NewWorkarea, OldWorkarea: TXCBRect;
+  Cli: TXCBWMClient;
+  I: Integer;
+begin
+  if FScreen <> nil then
+  begin
+    ScreenWidth := FScreen^.width_in_pixels;
+    ScreenHeight := FScreen^.height_in_pixels;
+  end
+  else
+  begin
+    ScreenWidth := 1920;
+    ScreenHeight := 1080;
+  end;
+
+  MaxLeft := 0;
+  MaxRight := 0;
+  MaxTop := 0;
+  MaxBottom := 0;
+
+  for I := 0 to FClients.Count - 1 do
+  begin
+    Cli := TXCBWMClient(FClients[I]);
+    if Cli.Strut.HasStrut() then
+    begin
+      if Cli.Strut.Left > MaxLeft then MaxLeft := Cli.Strut.Left;
+      if Cli.Strut.Right > MaxRight then MaxRight := Cli.Strut.Right;
+      if Cli.Strut.Top > MaxTop then MaxTop := Cli.Strut.Top;
+      if Cli.Strut.Bottom > MaxBottom then MaxBottom := Cli.Strut.Bottom;
+    end;
+  end;
+
+  NewWorkarea := TXCBRect.Create(
+    MaxLeft,
+    MaxTop,
+    ScreenWidth - Integer(MaxLeft + MaxRight),
+    ScreenHeight - Integer(MaxTop + MaxBottom)
+  );
+  if NewWorkarea.Width < 100 then NewWorkarea.Width := 100;
+  if NewWorkarea.Height < 100 then NewWorkarea.Height := 100;
+
+  if (NewWorkarea.X <> FWorkarea.X) or
+     (NewWorkarea.Y <> FWorkarea.Y) or
+     (NewWorkarea.Width <> FWorkarea.Width) or
+     (NewWorkarea.Height <> FWorkarea.Height) then
+  begin
+    OldWorkarea := FWorkarea;
+    FWorkarea := NewWorkarea;
+    RefreshEWMHWorkarea();
+    DoOnWorkareaChanged(OldWorkarea, NewWorkarea);
+  end;
+end;
+
+procedure TXCBWindowManager.DoOnWorkareaChanged(const AOldWorkarea, ANewWorkarea: TXCBRect);
+var
+  I: Integer;
+  Cli: TXCBWMClient;
+  HalfW: Integer;
+begin
+  for I := 0 to FClients.Count - 1 do
+  begin
+    Cli := TXCBWMClient(FClients[I]);
+    if (wsFullscreen in Cli.State) then
+      Continue;
+
+    if (wsMaximizedHorz in Cli.State) and (wsMaximizedVert in Cli.State) then
+    begin
+      Cli.SetGeometry(ANewWorkarea.X, ANewWorkarea.Y, ANewWorkarea.Width, ANewWorkarea.Height);
+    end
+    else if (wsTiledLeft in Cli.State) then
+    begin
+      HalfW := ANewWorkarea.Width div 2;
+      Cli.SetGeometry(ANewWorkarea.X, ANewWorkarea.Y, HalfW, ANewWorkarea.Height);
+    end
+    else if (wsTiledRight in Cli.State) then
+    begin
+      HalfW := ANewWorkarea.Width div 2;
+      Cli.SetGeometry(ANewWorkarea.X + HalfW, ANewWorkarea.Y, ANewWorkarea.Width - HalfW, ANewWorkarea.Height);
+    end;
+  end;
 end;
 
 procedure TXCBWindowManager.ReadClientProperties(const AClient: TXCBWMClient);
@@ -1596,6 +1748,46 @@ begin
             if MwmHintsPtr^.decorations = 0 then
               AClient.Borderless := True;
           end;
+        end;
+      finally
+        xcb_free(PropReply);
+      end;
+    end;
+  end;
+
+  // 9. _NET_WM_STRUT_PARTIAL / _NET_WM_STRUT
+  AClient.FStrut := TXCBStrutPartial.Create();
+  if (FConn <> nil) and (FAtomNetWmStrutPartial <> 0) then
+  begin
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FAtomNetWmStrutPartial, XCB_ATOM_CARDINAL, 0, 12);
+    PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+    if PropReply <> nil then
+    begin
+      try
+        if xcb_get_property_value_length(PropReply) >= (12 * SizeOf(Cardinal)) then
+        begin
+          Move(xcb_get_property_value(PropReply)^, AClient.FStrut, 12 * SizeOf(Cardinal));
+        end;
+      finally
+        xcb_free(PropReply);
+      end;
+    end;
+  end;
+
+  if (not AClient.Strut.HasStrut()) and (FConn <> nil) and (FAtomNetWmStrut <> 0) then
+  begin
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FAtomNetWmStrut, XCB_ATOM_CARDINAL, 0, 4);
+    PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+    if PropReply <> nil then
+    begin
+      try
+        if xcb_get_property_value_length(PropReply) >= (4 * SizeOf(Cardinal)) then
+        begin
+          AtomsPtr := Pxcb_atom_t(xcb_get_property_value(PropReply));
+          AClient.FStrut.Left := AtomsPtr[0];
+          AClient.FStrut.Right := AtomsPtr[1];
+          AClient.FStrut.Top := AtomsPtr[2];
+          AClient.FStrut.Bottom := AtomsPtr[3];
         end;
       finally
         xcb_free(PropReply);
@@ -1837,6 +2029,7 @@ end;
 function TXCBWindowManager.ManageWindow(const AWindow: xcb_window_t): TXCBWMClient;
 var
   Cli: TXCBWMClient;
+  EventMask: Cardinal;
 begin
   Result := FindClient(AWindow);
   if Result <> nil then Exit;
@@ -1872,8 +2065,16 @@ begin
       end;
     end;
 
+    if FConn <> nil then
+    begin
+      EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE;
+      xcb_change_window_attributes(FConn, Cli.ClientWindow, XCB_CW_EVENT_MASK, @EventMask);
+    end;
+
     Cli.RestoredRect := Cli.CurrentRect;
     FClients.Add(Cli);
+    if Cli.Strut.HasStrut() then
+      RecomputeWorkarea();
     Result := Cli;
 
     RefreshEWMHClientList();
@@ -1890,8 +2091,11 @@ end;
 procedure TXCBWindowManager.UnmanageWindow(const AClient: TXCBWMClient);
 var
   Idx: Integer;
+  HadStrut: Boolean;
 begin
   if AClient = nil then Exit;
+
+  HadStrut := AClient.Strut.HasStrut();
 
   if FActiveClient = AClient then
     FActiveClient := nil;
@@ -1907,6 +2111,9 @@ begin
   Idx := FClients.IndexOf(AClient);
   if Idx >= 0 then
     FClients.Delete(Idx);
+
+  if HadStrut then
+    RecomputeWorkarea();
 
   RefreshEWMHClientList();
   RefreshEWMHActiveWindow();
@@ -2016,6 +2223,7 @@ begin
   finally
     xcb_free(Reply);
   end;
+  RecomputeWorkarea();
 end;
 
 function TXCBWindowManager.ProcessEvent(const AEvent: Pxcb_generic_event_t): Boolean;
@@ -2029,6 +2237,7 @@ var
   MotionEv: Pxcb_motion_notify_event_t;
   ExposeEv: Pxcb_expose_event_t;
   MsgEv: Pxcb_client_message_event_t;
+  PropEv: Pxcb_property_notify_event_t;
   MsgData32: PCardinalArray;
   Cli: TXCBWMClient;
   FrameRect: TXCBRect;
@@ -2257,6 +2466,23 @@ begin
             end;
           end;
         end;
+      end;
+      Result := True;
+    end;
+
+    XCB_PROPERTY_NOTIFY:
+    begin
+      PropEv := Pxcb_property_notify_event_t(AEvent);
+      Cli := FindClient(PropEv^.window);
+      if Cli <> nil then
+      begin
+        if (PropEv^.atom = FAtomNetWmStrut) or (PropEv^.atom = FAtomNetWmStrutPartial) then
+        begin
+          ReadClientProperties(Cli);
+          RecomputeWorkarea();
+        end
+        else if FEwmhInitialized and ((PropEv^.atom = FEwmh._NET_WM_NAME) or (PropEv^.atom = XCB_ATOM_WM_NAME)) then
+          ReadClientProperties(Cli);
       end;
       Result := True;
     end;
