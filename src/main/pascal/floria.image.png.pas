@@ -101,6 +101,10 @@ var
   IDATStream: TMemoryStream;
   Palette: array of TRgbaPixel;
   HasPalette: Boolean;
+  HasTrnsKey: Boolean;
+  TrnsGray: Word;
+  TrnsR, TrnsG, TrnsB: Word;
+  NumAlpha: Integer;
   Uncompressed: TBytes;
   Bpp: Integer;
   RowBytes: Integer;
@@ -120,6 +124,9 @@ begin
   W := 0; H := 0;
   BitDepth := 8; ColorType := 6; CompMethod := 0; FilterMethod := 0; Interlace := 0;
   HasPalette := False;
+  HasTrnsKey := False;
+  TrnsGray := 0;
+  TrnsR := 0; TrnsG := 0; TrnsB := 0;
   IDATStream := TMemoryStream.Create();
 
   try
@@ -151,6 +158,51 @@ begin
           AStream.ReadBuffer(Palette[X].B, 1);
           Palette[X].A := 255;
         end;
+      end
+      else if ChunkType = 'tRNS' then
+      begin
+        if ColorType = 3 then
+        begin
+          // For indexed palette, tRNS contains alpha bytes for each palette entry
+          NumAlpha := ChunkLen;
+          if NumAlpha > Length(Palette) then
+            NumAlpha := Length(Palette);
+          for X := 0 to NumAlpha - 1 do
+            AStream.ReadBuffer(Palette[X].A, 1);
+          if ChunkLen > Cardinal(NumAlpha) then
+            AStream.Seek(ChunkLen - Cardinal(NumAlpha), soFromCurrent);
+        end
+        else if ColorType = 0 then
+        begin
+          // Grayscale: 2 bytes gray key
+          if ChunkLen >= 2 then
+          begin
+            HasTrnsKey := True;
+            AStream.ReadBuffer(TrnsGray, 2);
+            TrnsGray := BEtoN(TrnsGray);
+            if ChunkLen > 2 then
+              AStream.Seek(ChunkLen - 2, soFromCurrent);
+          end
+          else
+            AStream.Seek(ChunkLen, soFromCurrent);
+        end
+        else if ColorType = 2 then
+        begin
+          // Truecolor RGB: 6 bytes (R, G, B key)
+          if ChunkLen >= 6 then
+          begin
+            HasTrnsKey := True;
+            AStream.ReadBuffer(TrnsR, 2); TrnsR := BEtoN(TrnsR);
+            AStream.ReadBuffer(TrnsG, 2); TrnsG := BEtoN(TrnsG);
+            AStream.ReadBuffer(TrnsB, 2); TrnsB := BEtoN(TrnsB);
+            if ChunkLen > 6 then
+              AStream.Seek(ChunkLen - 6, soFromCurrent);
+          end
+          else
+            AStream.Seek(ChunkLen, soFromCurrent);
+        end
+        else
+          AStream.Seek(ChunkLen, soFromCurrent);
       end
       else if ChunkType = 'IDAT' then
       begin
@@ -237,14 +289,22 @@ begin
               DstPixel^.B := CurrentRow[X];
               DstPixel^.G := CurrentRow[X];
               DstPixel^.R := CurrentRow[X];
-              DstPixel^.A := 255;
+              if HasTrnsKey and (CurrentRow[X] = Byte(TrnsGray)) then
+                DstPixel^.A := 0
+              else
+                DstPixel^.A := 255;
             end;
           2: // RGB
             begin
               DstPixel^.R := CurrentRow[X * 3 + 0];
               DstPixel^.G := CurrentRow[X * 3 + 1];
               DstPixel^.B := CurrentRow[X * 3 + 2];
-              DstPixel^.A := 255;
+              if HasTrnsKey and (DstPixel^.R = Byte(TrnsR)) and
+                                (DstPixel^.G = Byte(TrnsG)) and
+                                (DstPixel^.B = Byte(TrnsB)) then
+                DstPixel^.A := 0
+              else
+                DstPixel^.A := 255;
             end;
           3: // Indexed Palette
             begin

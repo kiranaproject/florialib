@@ -27,6 +27,7 @@ type
     procedure TestImageScaling();
     procedure TestBMPRoundTrip();
     procedure TestPNGRoundTrip();
+    procedure TestPNGPalettedTransparency();
     procedure TestFormatAutoDetection();
     procedure TestJPEGMarkerDetection();
     procedure TestInvalidStreamHandling();
@@ -319,6 +320,29 @@ begin
     OrigImg.Free();
     LoadedImg.Free();
     MS.Free();
+  end;
+end;
+
+procedure TFloriaImageTest.TestPNGPalettedTransparency();
+var
+  Img: TFloriaImage;
+  Pix: TBgraPixel;
+  TestFile: string;
+begin
+  TestFile := '/usr/share/icons/Yaru/24x24/apps/atril.png';
+  if not FileExists(TestFile) then Exit;
+
+  Img := TFloriaImage.Create();
+  try
+    Img.LoadFromFile(TestFile);
+    AssertEquals('Atril width', 24, Img.Width);
+    AssertEquals('Atril height', 24, Img.Height);
+
+    // Top-left pixel (0, 0) in atril.png must be transparent (Alpha = 0)
+    Pix := Img.Pixels[0, 0];
+    AssertEquals('Paletted PNG transparent background Alpha', 0, Pix.A);
+  finally
+    Img.Free();
   end;
 end;
 
