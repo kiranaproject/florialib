@@ -528,21 +528,14 @@ end;
 
 class function TSVGParser.ParseFile(const AFileName: string): TSVGDocument;
 var
-  XMLDoc: TXMLDocument;
-  Parser: TSVGParser;
+  FS: TFileStream;
 begin
-  XMLDoc := TXMLParser.ParseFile(AFileName);
-  if not Assigned(XMLDoc) then Exit(nil);
-
+  if not FileExists(AFileName) then Exit(nil);
+  FS := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
   try
-    Parser := TSVGParser.Create();
-    try
-      Result := Parser.ParseDocument(XMLDoc);
-    finally
-      Parser.Free();
-    end;
+    Result := ParseStream(FS);
   finally
-    XMLDoc.Free();
+    FS.Free();
   end;
 end;
 

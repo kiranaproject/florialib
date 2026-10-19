@@ -15,6 +15,7 @@ interface
 uses
   Classes, SysUtils, Contnrs, fpcunit, testregistry, Math,
   Floria.CSS.Types, Floria.CSS.Values, Floria.CSS.Properties,
+  Floria.Compression.Gzip,
   Floria.SVG.Types, Floria.SVG.Path, Floria.SVG.DOM, Floria.SVG.Parser;
 
 type
@@ -69,6 +70,7 @@ type
     procedure TestParseGradients();
     procedure TestCSSCascadeIntegration();
     procedure TestRealWorldSVGIcon();
+    procedure TestParseSVGZStreamAndFile();
   end;
 
 implementation
@@ -786,6 +788,47 @@ begin
     AssertEquals(2.0, CheckPath.ComputedStyle.StrokeWidth, 1e-6);
   finally
     Doc.Free();
+  end;
+end;
+
+procedure TSVGParserTest.TestParseSVGZStreamAndFile();
+var
+  SvgXml: string;
+  RawBytes, GzBytes: TBytes;
+  TempFile: string;
+  FS: TFileStream;
+  Doc: TSVGDocument;
+begin
+  SvgXml := '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+            '  <circle id="c1" cx="32" cy="32" r="16" fill="#123456"/>' +
+            '</svg>';
+  SetLength(RawBytes, Length(SvgXml));
+  if Length(SvgXml) > 0 then
+    Move(SvgXml[1], RawBytes[0], Length(SvgXml));
+  GzBytes := GzipCompress(Pointer(RawBytes), Length(RawBytes));
+
+  TempFile := GetTempDir() + 'floria_test_svgz_' + IntToStr(GetProcessID()) + '.svgz';
+  FS := TFileStream.Create(TempFile, fmCreate);
+  try
+    if Length(GzBytes) > 0 then
+      FS.WriteBuffer(GzBytes[0], Length(GzBytes));
+  finally
+    FS.Free();
+  end;
+
+  try
+    Doc := TSVGParser.ParseFile(TempFile);
+    try
+      AssertNotNull('Doc from svgz file', Doc);
+      AssertEquals(64.0, SVGLengthToPixels(Doc.Root.Width), 1e-6);
+      AssertEquals(64.0, SVGLengthToPixels(Doc.Root.Height), 1e-6);
+      AssertNotNull('Circle found in svgz doc', Doc.FindElementById('c1'));
+    finally
+      Doc.Free();
+    end;
+  finally
+    if FileExists(TempFile) then
+      DeleteFile(TempFile);
   end;
 end;
 
