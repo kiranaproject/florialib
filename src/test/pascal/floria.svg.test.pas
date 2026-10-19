@@ -57,6 +57,7 @@ type
     procedure TestOpacityComposition();
     procedure TestFindById();
     procedure TestUseElement();
+    procedure TestViewBoxSynthesis();
   end;
 
   { TSVGParserTest }
@@ -572,6 +573,34 @@ begin
 
     Doc.ResolveReferences();
     AssertSame('Referenced element linked', CircleElem, UseElem.ReferencedElement);
+  finally
+    Doc.Free();
+  end;
+end;
+
+procedure TSVGDOMTest.TestViewBoxSynthesis();
+var
+  SvgXml: string;
+  Doc: TSVGDocument;
+  P: TSVGPoint;
+begin
+  // SVG with width="128" height="128" but NO viewBox (like gufw.svg)
+  SvgXml := '<svg width="128" height="128">' +
+            '  <rect x="0" y="0" width="128" height="128" fill="#ff0000"/>' +
+            '</svg>';
+  Doc := TSVGParser.ParseString(SvgXml);
+  try
+    AssertFalse('ViewBox not explicitly set', Doc.Root.ViewBox.HasValue);
+    AssertEquals('Intrinsic width', 128.0, Doc.GetIntrinsicWidth(), 1e-6);
+    AssertEquals('Intrinsic height', 128.0, Doc.GetIntrinsicHeight(), 1e-6);
+
+    // Compute styles for target viewport 20x20
+    Doc.ComputeStyles(20.0, 20.0);
+
+    // ViewBoxTransform should scale by 20/128 = 0.15625
+    P := SVGMatrixTransformPoint(Doc.Root.ViewBoxTransform, SVGPoint(128.0, 128.0));
+    AssertEquals('Scaled width', 20.0, P.X, 1e-4);
+    AssertEquals('Scaled height', 20.0, P.Y, 1e-4);
   finally
     Doc.Free();
   end;

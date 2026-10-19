@@ -432,8 +432,9 @@ var
   PCol: TBgraPixel;
   stepX_fp, stepY_fp: Int64;
   curSrcY_fp, curSrcX_fp: Int64;
-  dx, dy, sx, sy: Integer;
+  dx, dy, sx0, sx1, sy0, sy1: Integer;
   fx, fy, invFx, invFy: Integer;
+  maxSrcX_fp, maxSrcY_fp: Int64;
   srcStride, dstStride: Integer;
   srcPixels, dstPixels, dstRow: PByte;
   p00, p10, p01, p11: PByte;
@@ -458,31 +459,41 @@ begin
     for dy := 0 to NewH - 1 do
     begin
       curSrcY_fp := Int64(dy) * stepY_fp;
-      sy := curSrcY_fp shr 16;
+      sy0 := curSrcY_fp shr 16;
       fy := (curSrcY_fp shr 8) and $FF;
-      invFy := 255 - fy;
-
-      if sy < 0 then sy := 0;
-      if sy >= FHeight - 1 then sy := FHeight - 2;
-      if sy < 0 then sy := 0;
+      invFy := 256 - fy;
+      sy1 := sy0 + 1;
+      if sy1 >= FHeight then
+      begin
+        sy1 := FHeight - 1;
+        fy := 0;
+        invFy := 256;
+      end;
+      if sy0 < 0 then sy0 := 0;
+      if sy0 >= FHeight then sy0 := FHeight - 1;
 
       dstRow := dstPixels + dy * dstStride;
 
       for dx := 0 to NewW - 1 do
       begin
         curSrcX_fp := Int64(dx) * stepX_fp;
-        sx := curSrcX_fp shr 16;
+        sx0 := curSrcX_fp shr 16;
         fx := (curSrcX_fp shr 8) and $FF;
-        invFx := 255 - fx;
+        invFx := 256 - fx;
+        sx1 := sx0 + 1;
+        if sx1 >= FWidth then
+        begin
+          sx1 := FWidth - 1;
+          fx := 0;
+          invFx := 256;
+        end;
+        if sx0 < 0 then sx0 := 0;
+        if sx0 >= FWidth then sx0 := FWidth - 1;
 
-        if sx < 0 then sx := 0;
-        if sx >= FWidth - 1 then sx := FWidth - 2;
-        if sx < 0 then sx := 0;
-
-        p00 := srcPixels + sy * srcStride + sx * 4;
-        p10 := p00 + 4;
-        p01 := p00 + srcStride;
-        p11 := p01 + 4;
+        p00 := srcPixels + sy0 * srcStride + sx0 * 4;
+        p10 := srcPixels + sy0 * srcStride + sx1 * 4;
+        p01 := srcPixels + sy1 * srcStride + sx0 * 4;
+        p11 := srcPixels + sy1 * srcStride + sx1 * 4;
 
         b := (p00[0] * invFx * invFy + p10[0] * fx * invFy + p01[0] * invFx * fy + p11[0] * fx * fy) shr 16;
         g := (p00[1] * invFx * invFy + p10[1] * fx * invFy + p01[1] * invFx * fy + p11[1] * fx * fy) shr 16;

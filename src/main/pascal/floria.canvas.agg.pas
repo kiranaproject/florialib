@@ -1298,7 +1298,7 @@ var
   minX, maxX, minY, maxY: Integer;
   dx, dy: Integer;
   curSrcY_fp, curSrcX_fp: Int64;
-  sx, sy: Integer;
+  sx0, sx1, sy0, sy1: Integer;
   fx, fy, invFx, invFy: Integer;
   srcStride, dstStride: Integer;
   srcPixels, dstPixels, dstRow: PByte;
@@ -1306,7 +1306,7 @@ var
   b, g, r, a: Integer;
   invA, dstB, dstG, dstR, dstA, finalA: Integer;
   globalAlpha: Integer;
-  srcX0_fp, srcY0_fp: Int64;
+  srcX0_fp, srcY0_fp, srcXMax_fp, srcYMax_fp: Int64;
   effOpacity: Double;
   nb, ng, nr: Integer;
   srcPix: TBlendPixel;
@@ -1349,6 +1349,8 @@ begin
 
   srcX0_fp := Int64(SrcX) shl 16;
   srcY0_fp := Int64(SrcY) shl 16;
+  srcXMax_fp := Int64(SrcX + SrcW - 1) shl 16;
+  srcYMax_fp := Int64(SrcY + SrcH - 1) shl 16;
 
   srcStride := AImage.Stride;
   dstStride := FWidth * 4;
@@ -1359,23 +1361,26 @@ begin
   begin
     curSrcY_fp := srcY0_fp + (((Int64(dy - dstY) * 2 + 1) * Int64(SrcH) shl 15) div dstH) - (1 shl 15);
     if curSrcY_fp < srcY0_fp then curSrcY_fp := srcY0_fp;
-    sy := curSrcY_fp shr 16;
+    if curSrcY_fp > srcYMax_fp then curSrcY_fp := srcYMax_fp;
+    sy0 := curSrcY_fp shr 16;
     fy := (curSrcY_fp shr 8) and $FF;
     invFy := 256 - fy;
 
-    if sy >= SrcY + SrcH - 1 then
+    sy1 := sy0 + 1;
+    if sy1 >= SrcY + SrcH then
     begin
-      sy := SrcY + SrcH - 2;
-      fy := 255;
-      invFy := 1;
+      sy1 := SrcY + SrcH - 1;
+      fy := 0;
+      invFy := 256;
     end;
-    if sy >= AImage.Height - 1 then
+    if sy1 >= AImage.Height then
     begin
-      sy := AImage.Height - 2;
-      fy := 255;
-      invFy := 1;
+      sy1 := AImage.Height - 1;
+      fy := 0;
+      invFy := 256;
     end;
-    if sy < 0 then sy := 0;
+    if sy0 < 0 then sy0 := 0;
+    if sy1 < 0 then sy1 := 0;
 
     dstRow := dstPixels + dy * dstStride + minX * 4;
 
@@ -1383,28 +1388,31 @@ begin
     begin
       curSrcX_fp := srcX0_fp + (((Int64(dx - dstX) * 2 + 1) * Int64(SrcW) shl 15) div dstW) - (1 shl 15);
       if curSrcX_fp < srcX0_fp then curSrcX_fp := srcX0_fp;
-      sx := curSrcX_fp shr 16;
+      if curSrcX_fp > srcXMax_fp then curSrcX_fp := srcXMax_fp;
+      sx0 := curSrcX_fp shr 16;
       fx := (curSrcX_fp shr 8) and $FF;
       invFx := 256 - fx;
 
-      if sx >= SrcX + SrcW - 1 then
+      sx1 := sx0 + 1;
+      if sx1 >= SrcX + SrcW then
       begin
-        sx := SrcX + SrcW - 2;
-        fx := 255;
-        invFx := 1;
+        sx1 := SrcX + SrcW - 1;
+        fx := 0;
+        invFx := 256;
       end;
-      if sx >= AImage.Width - 1 then
+      if sx1 >= AImage.Width then
       begin
-        sx := AImage.Width - 2;
-        fx := 255;
-        invFx := 1;
+        sx1 := AImage.Width - 1;
+        fx := 0;
+        invFx := 256;
       end;
-      if sx < 0 then sx := 0;
+      if sx0 < 0 then sx0 := 0;
+      if sx1 < 0 then sx1 := 0;
 
-      p00 := srcPixels + sy * srcStride + sx * 4;
-      p10 := p00 + 4;
-      p01 := p00 + srcStride;
-      p11 := p01 + 4;
+      p00 := srcPixels + sy0 * srcStride + sx0 * 4;
+      p10 := srcPixels + sy0 * srcStride + sx1 * 4;
+      p01 := srcPixels + sy1 * srcStride + sx0 * 4;
+      p11 := srcPixels + sy1 * srcStride + sx1 * 4;
 
       b := (p00[0] * invFx * invFy + p10[0] * fx * invFy + p01[0] * invFx * fy + p11[0] * fx * fy) shr 16;
       g := (p00[1] * invFx * invFy + p10[1] * fx * invFy + p01[1] * invFx * fy + p11[1] * fx * fy) shr 16;

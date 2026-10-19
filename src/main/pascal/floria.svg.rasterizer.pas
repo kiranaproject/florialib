@@ -143,7 +143,9 @@ begin
     targetH := 100;
   end;
 
-  if ASupersample and Assigned(ADoc.Root) and ADoc.Root.ViewBox.HasValue and (targetW <= 64) and (targetH <= 64) then
+  if ASupersample and Assigned(ADoc.Root) and
+     (ADoc.Root.ViewBox.HasValue or (ADoc.Root.Width.Specified and (ADoc.Root.Width.Value > 0.0)) or (ADoc.GetIntrinsicWidth() > 0.0)) and
+     (targetW <= 64) and (targetH <= 64) then
   begin
     hiW := targetW * 2;
     hiH := targetH * 2;

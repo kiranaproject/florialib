@@ -848,11 +848,42 @@ begin
 end;
 
 procedure TSVGSvgElement.ComputeViewBox(TargetW, TargetH: Double);
+var
+  EffectiveBox: TSVGViewBox;
+  IW, IH: Double;
 begin
   if FViewBox.HasValue then
     FViewBoxTransform := SVGCalculateViewBoxTransform(FViewBox, FPreserveAspectRatio, TargetW, TargetH)
   else
-    FViewBoxTransform := SVGMatrixIdentity();
+  begin
+    IW := 0.0;
+    IH := 0.0;
+    if FWidth.Specified and (FWidth.Value > 0.0) then
+      IW := SVGLengthToPixels(FWidth);
+    if FHeight.Specified and (FHeight.Value > 0.0) then
+      IH := SVGLengthToPixels(FHeight);
+
+    if (IW <= 0.0) or (IH <= 0.0) then
+    begin
+      if Assigned(FDocument) then
+      begin
+        if IW <= 0.0 then IW := FDocument.GetIntrinsicWidth();
+        if IH <= 0.0 then IH := FDocument.GetIntrinsicHeight();
+      end;
+    end;
+
+    if (IW > 0.0) and (IH > 0.0) and (TargetW > 0.0) and (TargetH > 0.0) then
+    begin
+      EffectiveBox.HasValue := True;
+      EffectiveBox.MinX := 0.0;
+      EffectiveBox.MinY := 0.0;
+      EffectiveBox.Width := IW;
+      EffectiveBox.Height := IH;
+      FViewBoxTransform := SVGCalculateViewBoxTransform(EffectiveBox, FPreserveAspectRatio, TargetW, TargetH);
+    end
+    else
+      FViewBoxTransform := SVGMatrixIdentity();
+  end;
 end;
 
 procedure TSVGSvgElement.ComputeStyles(const AParentStyle: TSVGStyleRecord; const AParentMatrix: TSVGMatrix);
@@ -1295,25 +1326,41 @@ begin
 end;
 
 function TSVGDocument.GetIntrinsicWidth(): Double;
+var
+  BBox: TSVGRect;
 begin
   if Assigned(FRoot) then
   begin
     if FRoot.Width.Specified and (FRoot.Width.Value > 0.0) then
       Exit(SVGLengthToPixels(FRoot.Width))
     else if FRoot.ViewBox.HasValue and (FRoot.ViewBox.Width > 0.0) then
-      Exit(FRoot.ViewBox.Width);
+      Exit(FRoot.ViewBox.Width)
+    else
+    begin
+      BBox := FRoot.GetLocalBoundingBox();
+      if BBox.Width > 0.0 then
+        Exit(BBox.X + BBox.Width);
+    end;
   end;
   Result := 300.0; // Default SVG fallback
 end;
 
 function TSVGDocument.GetIntrinsicHeight(): Double;
+var
+  BBox: TSVGRect;
 begin
   if Assigned(FRoot) then
   begin
     if FRoot.Height.Specified and (FRoot.Height.Value > 0.0) then
       Exit(SVGLengthToPixels(FRoot.Height))
     else if FRoot.ViewBox.HasValue and (FRoot.ViewBox.Height > 0.0) then
-      Exit(FRoot.ViewBox.Height);
+      Exit(FRoot.ViewBox.Height)
+    else
+    begin
+      BBox := FRoot.GetLocalBoundingBox();
+      if BBox.Height > 0.0 then
+        Exit(BBox.Y + BBox.Height);
+    end;
   end;
   Result := 150.0; // Default SVG fallback
 end;
