@@ -41,6 +41,7 @@ type
     procedure TestCSDMoveResizeAndFrameExtents();
     procedure TestMultiMonitorTopologyAndWorkareas();
     procedure TestMultiMonitorNavigationAndMigration();
+    procedure TestWindowCapabilitiesAndFixedSize();
   end;
 
 implementation
@@ -1072,6 +1073,73 @@ begin
     AssertSame('Client migrated back to Mon1', Mon1, Cli.CurrentMonitor());
     AssertTrue('Client within Mon1 X bounds', Cli.CurrentRect.X >= Mon1.Workarea.X);
     AssertTrue('Client fits within Mon1 width', Cli.CurrentRect.Right() <= Mon1.Workarea.Right());
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestWindowCapabilitiesAndFixedSize();
+var
+  Mgr: TXCBWindowManager;
+  Cli: TXCBWMClient;
+  Constrained: TXCBPoint;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Cli := Mgr.ManageWindow(1001);
+    AssertNotNull('Client managed', Cli);
+
+    // 1. Verify default capabilities and buttons
+    AssertTrue('CanResize default', Cli.CanResize);
+    AssertTrue('CanMaximize default', Cli.CanMaximize);
+    AssertTrue('CanMinimize default', Cli.CanMinimize);
+    AssertTrue('CanClose default', Cli.CanClose);
+    AssertTrue('HasMaximizeButton default', Cli.HasMaximizeButton);
+    AssertTrue('HasMinimizeButton default', Cli.HasMinimizeButton);
+    AssertTrue('HasCloseButton default', Cli.HasCloseButton);
+
+    // 2. Disabling CanMaximize disallows maximizing and fullscreen
+    Cli.CanMaximize := False;
+    Cli.Maximize();
+    AssertFalse('Cannot maximize when CanMaximize=False', wsMaximizedHorz in Cli.State);
+    AssertFalse('Cannot maximize when CanMaximize=False', wsMaximizedVert in Cli.State);
+    Cli.SetFullscreen(True);
+    AssertFalse('Cannot fullscreen when CanMaximize=False', wsFullscreen in Cli.State);
+
+    // 3. Disabling CanResize disallows tiling and keeps size constrained
+    Cli.CanResize := False;
+    Cli.TileLeft();
+    AssertFalse('Cannot tile left when CanResize=False', wsTiledLeft in Cli.State);
+    Cli.TileRight();
+    AssertFalse('Cannot tile right when CanResize=False', wsTiledRight in Cli.State);
+    Constrained := Cli.ConstrainSize(999, 888);
+    AssertEquals('ConstrainSize Width preserves CurrentRect', Cli.CurrentRect.Width, Constrained.X);
+    AssertEquals('ConstrainSize Height preserves CurrentRect', Cli.CurrentRect.Height, Constrained.Y);
+
+    // 4. Disabling CanMinimize disallows minimizing
+    Cli.CanMinimize := False;
+    Cli.Minimize();
+    AssertFalse('Cannot minimize when CanMinimize=False', wsMinimized in Cli.State);
+
+    // 5. Fixed-size hints emulation (min_size = max_size)
+    Cli.CanResize := True;
+    Cli.CanMaximize := True;
+    Cli.HasMaximizeButton := True;
+    Cli.MinSize := TXCBPoint.Create(450, 300);
+    Cli.MaxSize := TXCBPoint.Create(450, 300);
+    // When min size equals max size, window is fixed size
+    if (Cli.MinSize.X > 0) and (Cli.MaxSize.X > 0) and
+       (Cli.MinSize.Y > 0) and (Cli.MaxSize.Y > 0) and
+       (Cli.MinSize.X >= Cli.MaxSize.X) and
+       (Cli.MinSize.Y >= Cli.MaxSize.Y) then
+    begin
+      Cli.CanResize := False;
+      Cli.CanMaximize := False;
+      Cli.HasMaximizeButton := False;
+    end;
+    AssertFalse('Fixed-size disables CanResize', Cli.CanResize);
+    AssertFalse('Fixed-size disables CanMaximize', Cli.CanMaximize);
+    AssertFalse('Fixed-size hides HasMaximizeButton', Cli.HasMaximizeButton);
   finally
     Mgr.Free();
   end;

@@ -24,7 +24,29 @@ uses
 
 const
   XCB_ALL_DESKTOPS = Cardinal($FFFFFFFF);
+
+  // Motif Hints flags
+  XCB_MWM_HINTS_FUNCTIONS   = 1 shl 0;
   XCB_MWM_HINTS_DECORATIONS = 1 shl 1;
+  XCB_MWM_HINTS_INPUT_MODE  = 1 shl 2;
+  XCB_MWM_HINTS_STATUS      = 1 shl 3;
+
+  // Motif Functions
+  XCB_MWM_FUNC_ALL          = 1 shl 0;
+  XCB_MWM_FUNC_RESIZE       = 1 shl 1;
+  XCB_MWM_FUNC_MOVE         = 1 shl 2;
+  XCB_MWM_FUNC_MINIMIZE     = 1 shl 3;
+  XCB_MWM_FUNC_MAXIMIZE     = 1 shl 4;
+  XCB_MWM_FUNC_CLOSE        = 1 shl 5;
+
+  // Motif Decorations
+  XCB_MWM_DECOR_ALL         = 1 shl 0;
+  XCB_MWM_DECOR_BORDER      = 1 shl 1;
+  XCB_MWM_DECOR_RESIZEH     = 1 shl 2;
+  XCB_MWM_DECOR_TITLE       = 1 shl 3;
+  XCB_MWM_DECOR_MENU        = 1 shl 4;
+  XCB_MWM_DECOR_MINIMIZE    = 1 shl 5;
+  XCB_MWM_DECOR_MAXIMIZE    = 1 shl 6;
 
 procedure xcb_free(p: Pointer); cdecl; external 'c' name 'free';
 
@@ -281,6 +303,13 @@ type
     FHasProgramPosition  : Boolean;
     FWinGravity          : Cardinal;
     FStrut               : TXCBStrutPartial;
+    FCanResize           : Boolean;
+    FCanMaximize         : Boolean;
+    FCanMinimize         : Boolean;
+    FCanClose            : Boolean;
+    FHasMaximizeButton   : Boolean;
+    FHasMinimizeButton   : Boolean;
+    FHasCloseButton      : Boolean;
   public
     constructor Create(const AClientWin: xcb_window_t; const AManager: TXCBWindowManager);
     destructor Destroy(); override;
@@ -333,6 +362,13 @@ type
     property HasProgramPosition  : Boolean           read FHasProgramPosition write FHasProgramPosition;
     property WinGravity          : Cardinal          read FWinGravity write FWinGravity;
     property Strut               : TXCBStrutPartial  read FStrut write FStrut;
+    property CanResize           : Boolean           read FCanResize write FCanResize;
+    property CanMaximize         : Boolean           read FCanMaximize write FCanMaximize;
+    property CanMinimize         : Boolean           read FCanMinimize write FCanMinimize;
+    property CanClose            : Boolean           read FCanClose write FCanClose;
+    property HasMaximizeButton   : Boolean           read FHasMaximizeButton write FHasMaximizeButton;
+    property HasMinimizeButton   : Boolean           read FHasMinimizeButton write FHasMinimizeButton;
+    property HasCloseButton      : Boolean           read FHasCloseButton write FHasCloseButton;
   end;
 
   // TXCBWindowManager
@@ -411,12 +447,14 @@ type
     procedure DoOnDesktopChanged(const AOldDesktop, ANewDesktop: Integer); virtual;
     procedure DoOnWorkareaChanged(const AOldWorkarea, ANewWorkarea: TXCBRect); virtual;
     procedure DoOnFramePaint(const AClient: TXCBWMClient; const ARect: TXCBRect); virtual;
+    procedure DoOnClientPropertiesChanged(const AClient: TXCBWMClient); virtual;
   public
     constructor Create(AConn: Pxcb_connection_t = nil; const AScreenNum: Integer = 0);
     destructor Destroy(); override;
 
     function ClaimOwnership(): Boolean; virtual;
     procedure InitEWMH();
+    procedure UpdateAllowedActions(const AClient: TXCBWMClient);
     procedure ScanWindows();
     function ManageWindow(const AWindow: xcb_window_t): TXCBWMClient;
     procedure UnmanageWindow(const AClient: TXCBWMClient);
@@ -816,6 +854,13 @@ begin
   FHasProgramPosition := False;
   FWinGravity := 1;
   FStrut := TXCBStrutPartial.Create();
+  FCanResize := True;
+  FCanMaximize := True;
+  FCanMinimize := True;
+  FCanClose := True;
+  FHasMaximizeButton := True;
+  FHasMinimizeButton := True;
+  FHasCloseButton := True;
 end;
 
 destructor TXCBWMClient.Destroy();
@@ -991,6 +1036,7 @@ var
   Ev: xcb_client_message_event_t;
   Data32: PCardinalArray;
 begin
+  if not FCanClose then Exit;
   if FManager = nil then Exit;
   if FManager.Connection = nil then Exit;
 
@@ -1020,6 +1066,7 @@ var
   TargetRect: TXCBRect;
   TargetMon: TXCBMonitor;
 begin
+  if not FCanMaximize then Exit;
   // Only update FRestoredRect if not already tiled, maximized, or fullscreen
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
           (wsTiledLeft in FState) or (wsTiledRight in FState) or
@@ -1063,6 +1110,7 @@ var
   TargetMon: TXCBMonitor;
   sw, sh: Integer;
 begin
+  if not FCanResize then Exit;
   if (wsTiledLeft in FState) then Exit;
 
   // Only update FRestoredRect if not already tiled, maximized, or fullscreen
@@ -1116,6 +1164,7 @@ var
   TargetMon: TXCBMonitor;
   sw, sh: Integer;
 begin
+  if not FCanResize then Exit;
   if (wsTiledRight in FState) then Exit;
 
   // Only update FRestoredRect if not already tiled, maximized, or fullscreen
@@ -1232,6 +1281,7 @@ var
   I: Integer;
   OtherCli: TXCBWMClient;
 begin
+  if not FCanMinimize then Exit;
   if wsMinimized in FState then Exit;
 
   Include(FState, wsMinimized);
@@ -1279,6 +1329,7 @@ var
   TargetMon: TXCBMonitor;
   X, Y, W, H: Integer;
 begin
+  if AFullscreen and not FCanMaximize then Exit;
   if AFullscreen = (wsFullscreen in FState) then Exit;
 
   if AFullscreen then
@@ -1467,6 +1518,13 @@ function TXCBWMClient.ConstrainSize(const AWidth, AHeight: Integer): TXCBPoint;
 var
   W, H: Integer;
 begin
+  if not FCanResize then
+  begin
+    Result.X := FCurrentRect.Width;
+    Result.Y := FCurrentRect.Height;
+    Exit;
+  end;
+
   W := AWidth;
   H := AHeight;
 
@@ -1761,7 +1819,7 @@ end;
 procedure TXCBWindowManager.InitEWMH();
 var
   Cookies: Pxcb_intern_atom_cookie_t;
-  SuppAtoms: array[0..39] of xcb_atom_t;
+  SuppAtoms: array[0..51] of xcb_atom_t;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -1867,6 +1925,18 @@ begin
   SuppAtoms[37] := FEwmh._NET_MOVERESIZE_WINDOW;
   SuppAtoms[38] := FEwmh._NET_FRAME_EXTENTS;
   SuppAtoms[39] := FEwmh._NET_REQUEST_FRAME_EXTENTS;
+  SuppAtoms[40] := FEwmh._NET_WM_ALLOWED_ACTIONS;
+  SuppAtoms[41] := FEwmh._NET_WM_ACTION_MOVE;
+  SuppAtoms[42] := FEwmh._NET_WM_ACTION_RESIZE;
+  SuppAtoms[43] := FEwmh._NET_WM_ACTION_MINIMIZE;
+  SuppAtoms[44] := FEwmh._NET_WM_ACTION_SHADE;
+  SuppAtoms[45] := FEwmh._NET_WM_ACTION_STICK;
+  SuppAtoms[46] := FEwmh._NET_WM_ACTION_MAXIMIZE_HORZ;
+  SuppAtoms[47] := FEwmh._NET_WM_ACTION_MAXIMIZE_VERT;
+  SuppAtoms[48] := FEwmh._NET_WM_ACTION_FULLSCREEN;
+  SuppAtoms[49] := FEwmh._NET_WM_ACTION_CHANGE_DESKTOP;
+  SuppAtoms[50] := FEwmh._NET_WM_ACTION_CLOSE;
+  SuppAtoms[51] := FEwmh._NET_WM_ACTION_ABOVE;
 
   xcb_change_property(
     FConn,
@@ -1875,13 +1945,72 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    40,
+    52,
     @SuppAtoms[0]
   );
 
   RefreshEWMHDesktop();
   RefreshEWMHClientList();
   xcb_flush(FConn);
+end;
+
+procedure TXCBWindowManager.UpdateAllowedActions(const AClient: TXCBWMClient);
+var
+  Actions: array[0..11] of xcb_atom_t;
+  Count: Integer;
+begin
+  if (FConn = nil) or (AClient = nil) or (not FEwmhInitialized) then Exit;
+
+  Count := 0;
+  // Move is always supported for normal managed windows
+  Actions[Count] := FEwmh._NET_WM_ACTION_MOVE;
+  Inc(Count);
+
+  if AClient.CanResize then
+  begin
+    Actions[Count] := FEwmh._NET_WM_ACTION_RESIZE;
+    Inc(Count);
+  end;
+
+  if AClient.CanMinimize then
+  begin
+    Actions[Count] := FEwmh._NET_WM_ACTION_MINIMIZE;
+    Inc(Count);
+  end;
+
+  if AClient.CanMaximize then
+  begin
+    Actions[Count] := FEwmh._NET_WM_ACTION_MAXIMIZE_HORZ;
+    Inc(Count);
+    Actions[Count] := FEwmh._NET_WM_ACTION_MAXIMIZE_VERT;
+    Inc(Count);
+    Actions[Count] := FEwmh._NET_WM_ACTION_FULLSCREEN;
+    Inc(Count);
+  end;
+
+  Actions[Count] := FEwmh._NET_WM_ACTION_CHANGE_DESKTOP;
+  Inc(Count);
+  Actions[Count] := FEwmh._NET_WM_ACTION_STICK;
+  Inc(Count);
+  Actions[Count] := FEwmh._NET_WM_ACTION_ABOVE;
+  Inc(Count);
+
+  if AClient.CanClose then
+  begin
+    Actions[Count] := FEwmh._NET_WM_ACTION_CLOSE;
+    Inc(Count);
+  end;
+
+  xcb_change_property(
+    FConn,
+    XCB_PROP_MODE_REPLACE,
+    AClient.ClientWindow,
+    FEwmh._NET_WM_ALLOWED_ACTIONS,
+    XCB_ATOM_ATOM,
+    32,
+    Count,
+    @Actions[0]
+  );
 end;
 
 procedure TXCBWindowManager.RefreshEWMHClientList();
@@ -2584,6 +2713,15 @@ var
 begin
   if (FConn = nil) or (AClient = nil) then Exit;
 
+  // Reset capabilities to defaults
+  AClient.CanResize := True;
+  AClient.CanMaximize := True;
+  AClient.CanMinimize := True;
+  AClient.CanClose := True;
+  AClient.HasMaximizeButton := True;
+  AClient.HasMinimizeButton := True;
+  AClient.HasCloseButton := True;
+
   // 1. Window Attributes
   AttrCookie := xcb_get_window_attributes(FConn, AClient.ClientWindow);
   AttrReply := xcb_get_window_attributes_reply(FConn, AttrCookie, nil);
@@ -2702,6 +2840,14 @@ begin
     end;
   end;
 
+  if AClient.WindowType in [wtDialog, wtUtility, wtToolbar] then
+  begin
+    AClient.CanMaximize := False;
+    AClient.HasMaximizeButton := False;
+    AClient.CanMinimize := False;
+    AClient.HasMinimizeButton := False;
+  end;
+
   // 4. _NET_WM_PID
   if FEwmhInitialized then
   begin
@@ -2803,7 +2949,52 @@ begin
           if (MwmHintsPtr^.flags and XCB_MWM_HINTS_DECORATIONS) <> 0 then
           begin
             if MwmHintsPtr^.decorations = 0 then
-              AClient.Borderless := True;
+              AClient.Borderless := True
+            else
+            begin
+              AClient.Borderless := False;
+              if (MwmHintsPtr^.decorations and XCB_MWM_DECOR_ALL) <> 0 then
+              begin
+                // Subtractive mode: bits set are excluded
+                if (MwmHintsPtr^.decorations and XCB_MWM_DECOR_MINIMIZE) <> 0 then
+                  AClient.HasMinimizeButton := False;
+                if (MwmHintsPtr^.decorations and XCB_MWM_DECOR_MAXIMIZE) <> 0 then
+                  AClient.HasMaximizeButton := False;
+                if (MwmHintsPtr^.decorations and (XCB_MWM_DECOR_TITLE or XCB_MWM_DECOR_MENU)) = (XCB_MWM_DECOR_TITLE or XCB_MWM_DECOR_MENU) then
+                  AClient.HasCloseButton := False;
+              end
+              else
+              begin
+                // Additive mode: only bits set are included
+                AClient.HasMinimizeButton := (MwmHintsPtr^.decorations and XCB_MWM_DECOR_MINIMIZE) <> 0;
+                AClient.HasMaximizeButton := (MwmHintsPtr^.decorations and XCB_MWM_DECOR_MAXIMIZE) <> 0;
+                AClient.HasCloseButton := (MwmHintsPtr^.decorations and (XCB_MWM_DECOR_TITLE or XCB_MWM_DECOR_MENU)) <> 0;
+              end;
+            end;
+          end;
+
+          if (MwmHintsPtr^.flags and XCB_MWM_HINTS_FUNCTIONS) <> 0 then
+          begin
+            if (MwmHintsPtr^.functions and XCB_MWM_FUNC_ALL) <> 0 then
+            begin
+              // Subtractive mode: bits set are excluded
+              if (MwmHintsPtr^.functions and XCB_MWM_FUNC_RESIZE) <> 0 then
+                AClient.CanResize := False;
+              if (MwmHintsPtr^.functions and XCB_MWM_FUNC_MINIMIZE) <> 0 then
+                AClient.CanMinimize := False;
+              if (MwmHintsPtr^.functions and XCB_MWM_FUNC_MAXIMIZE) <> 0 then
+                AClient.CanMaximize := False;
+              if (MwmHintsPtr^.functions and XCB_MWM_FUNC_CLOSE) <> 0 then
+                AClient.CanClose := False;
+            end
+            else
+            begin
+              // Additive mode: only bits set are included
+              AClient.CanResize := (MwmHintsPtr^.functions and XCB_MWM_FUNC_RESIZE) <> 0;
+              AClient.CanMinimize := (MwmHintsPtr^.functions and XCB_MWM_FUNC_MINIMIZE) <> 0;
+              AClient.CanMaximize := (MwmHintsPtr^.functions and XCB_MWM_FUNC_MAXIMIZE) <> 0;
+              AClient.CanClose := (MwmHintsPtr^.functions and XCB_MWM_FUNC_CLOSE) <> 0;
+            end;
           end;
         end;
       finally
@@ -2933,6 +3124,62 @@ begin
       xcb_free(PropReply);
     end;
   end;
+
+  // Fixed-size window detection from WM_NORMAL_HINTS
+  if (AClient.MinSize.X > 0) and (AClient.MaxSize.X > 0) and
+     (AClient.MinSize.Y > 0) and (AClient.MaxSize.Y > 0) and
+     (AClient.MinSize.X >= AClient.MaxSize.X) and
+     (AClient.MinSize.Y >= AClient.MaxSize.Y) then
+  begin
+    AClient.CanResize := False;
+    AClient.CanMaximize := False;
+    AClient.HasMaximizeButton := False;
+  end;
+
+  // Reconcile capabilities and decoration buttons
+  if not AClient.CanResize then
+  begin
+    AClient.CanMaximize := False;
+    AClient.HasMaximizeButton := False;
+  end;
+
+  if not AClient.CanMaximize then
+    AClient.HasMaximizeButton := False;
+
+  if not AClient.HasMaximizeButton then
+    AClient.CanMaximize := False;
+
+  if not AClient.CanMinimize then
+    AClient.HasMinimizeButton := False;
+
+  if not AClient.HasMinimizeButton then
+    AClient.CanMinimize := False;
+
+  if not AClient.CanClose then
+    AClient.HasCloseButton := False;
+
+  if not AClient.HasCloseButton then
+    AClient.CanClose := False;
+
+  if AClient.IsReparented and (FConn <> nil) then
+  begin
+    if not AClient.CanResize then
+    begin
+      if AClient.ResizeWindow <> 0 then
+      begin
+        xcb_destroy_window(FConn, AClient.ResizeWindow);
+        AClient.ResizeWindow := 0;
+      end;
+    end
+    else
+    begin
+      if AClient.ResizeWindow = 0 then
+        AClient.ResizeWindow := CreateResizeWindow(AClient, AClient.CurrentRect);
+    end;
+  end;
+
+  if FEwmhInitialized then
+    UpdateAllowedActions(AClient);
 end;
 
 function TXCBWindowManager.CreateFrameWindow(const AClient: TXCBWMClient; const ARect: TXCBRect): xcb_window_t;
@@ -3110,7 +3357,10 @@ begin
   if FrameWin = 0 then Exit;
 
   AClient.FrameWindow := FrameWin;
-  AClient.ResizeWindow := CreateResizeWindow(AClient, FrameRect);
+  if AClient.CanResize then
+    AClient.ResizeWindow := CreateResizeWindow(AClient, FrameRect)
+  else
+    AClient.ResizeWindow := 0;
   AClient.CurrentRect := FrameRect;
   AClient.IsReparented := True;
 
@@ -3341,14 +3591,25 @@ begin
 
     if (wsMaximizedHorz in Cli.State) and (wsMaximizedVert in Cli.State) then
     begin
-      Cli.Maximize();
-      SendSyntheticConfigureNotify(Cli);
+      if Cli.CanMaximize then
+      begin
+        Cli.Maximize();
+        SendSyntheticConfigureNotify(Cli);
+      end
+      else
+      begin
+        Exclude(Cli.FState, wsMaximizedHorz);
+        Exclude(Cli.FState, wsMaximizedVert);
+      end;
     end
     else if wsFullscreen in Cli.State then
     begin
       Exclude(Cli.FState, wsFullscreen);
-      Cli.SetFullscreen(True);
-      SendSyntheticConfigureNotify(Cli);
+      if Cli.CanMaximize then
+      begin
+        Cli.SetFullscreen(True);
+        SendSyntheticConfigureNotify(Cli);
+      end;
     end;
 
     Cli.UpdateEWMHState();
@@ -3907,8 +4168,11 @@ begin
 
               if (MsgData32^[0] and (1 shl 8)) <> 0 then newX := Integer(MsgData32^[1]);
               if (MsgData32^[0] and (1 shl 9)) <> 0 then newY := Integer(MsgData32^[2]);
-              if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
-              if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
+              if Cli.CanResize then
+              begin
+                if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
+                if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
+              end;
 
               FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
               if FrameRect.Y < 0 then
@@ -3934,8 +4198,11 @@ begin
 
               if (MsgData32^[0] and (1 shl 8)) <> 0 then newX := Integer(MsgData32^[1]);
               if (MsgData32^[0] and (1 shl 9)) <> 0 then newY := Integer(MsgData32^[2]);
-              if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
-              if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
+              if Cli.CanResize then
+              begin
+                if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
+                if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
+              end;
 
               if isMaximizedOrTiled then
               begin
@@ -4004,8 +4271,18 @@ begin
           ReadClientProperties(Cli);
           RecomputeWorkarea();
         end
-        else if FEwmhInitialized and ((PropEv^.atom = FEwmh._NET_WM_NAME) or (PropEv^.atom = XCB_ATOM_WM_NAME)) then
+        else if (PropEv^.atom = FAtomMotifWmHints) or
+                (PropEv^.atom = XCB_ATOM_WM_NORMAL_HINTS) or
+                (FEwmhInitialized and (PropEv^.atom = FEwmh._NET_WM_WINDOW_TYPE)) then
+        begin
           ReadClientProperties(Cli);
+          DoOnClientPropertiesChanged(Cli);
+        end
+        else if FEwmhInitialized and ((PropEv^.atom = FEwmh._NET_WM_NAME) or (PropEv^.atom = XCB_ATOM_WM_NAME)) then
+        begin
+          ReadClientProperties(Cli);
+          DoOnClientPropertiesChanged(Cli);
+        end;
       end;
       Result := True;
     end;
@@ -4121,6 +4398,7 @@ var
   dragCursor: xcb_cursor_t;
 begin
   if (AClient = nil) or (AMode = dmNone) then Exit;
+  if (AMode <> dmMove) and (not AClient.CanResize) then Exit;
 
   FDragClient := AClient;
   FDragMode := AMode;
@@ -4157,6 +4435,7 @@ var
   MinW, MinH: Integer;
 begin
   if (FDragClient = nil) or (FDragMode = dmNone) then Exit;
+  if (FDragMode <> dmMove) and (not FDragClient.CanResize) then Exit;
 
   DeltaX := ARootX - FDragStartPointer.X;
   DeltaY := ARootY - FDragStartPointer.Y;
@@ -4327,6 +4606,11 @@ procedure TXCBWindowManager.DoOnFramePaint(const AClient: TXCBWMClient; const AR
 begin
   if Assigned(FOnFramePaint) then
     FOnFramePaint(Self, AClient, ARect);
+end;
+
+procedure TXCBWindowManager.DoOnClientPropertiesChanged(const AClient: TXCBWMClient);
+begin
+  // Virtual method for subclasses (e.g. TWMSamaCompositingWM) to repaint frame/buttons
 end;
 
 end.
