@@ -32,6 +32,8 @@ type
     procedure TestTitlebarRect();
     procedure TestInteractiveDrag();
     procedure TestConfigureRequestGeometry();
+    procedure TestConfigureRequestWhileMaximizedOrTiled();
+    procedure TestInitialMaximizedStateOnMap();
     procedure TestLiveConnectionIfAvailable();
     procedure TestStrutsAndRecomputeWorkarea();
     procedure TestDynamicWorkareaReflow();
@@ -549,6 +551,99 @@ begin
 
     // Height must NOT have grown
     AssertEquals('Frame height must stay constant after position change', InitialFrameH, Client.CurrentRect.Height);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestConfigureRequestWhileMaximizedOrTiled();
+var
+  Mgr: TXCBWindowManager;
+  Client: TXCBWMClient;
+  CfgEv: xcb_configure_request_event_t;
+  ExpectedFrameR: TXCBRect;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Mgr.FrameMetrics := TXCBFrameMetrics.Create(24, 2);
+
+    // 1. Reparented window maximized
+    Client := Mgr.ManageWindow(1001);
+    Client.CurrentRect := TXCBRect.Create(100, 100, 800, 600);
+    Client.IsReparented := True;
+    Client.CurrentRect := Mgr.FrameMetrics.ClientToFrameRect(Client.CurrentRect);
+    Client.Maximize();
+
+    AssertTrue('Client is maximized horz', wsMaximizedHorz in Client.State);
+    AssertTrue('Client is maximized vert', wsMaximizedVert in Client.State);
+    AssertEquals('Maximized frame X', 0, Client.CurrentRect.X);
+    AssertEquals('Maximized frame Y', 0, Client.CurrentRect.Y);
+    AssertEquals('Maximized frame Width', 1920, Client.CurrentRect.Width);
+    AssertEquals('Maximized frame Height', 1080, Client.CurrentRect.Height);
+
+    // Simulate configure request from client with smaller size (e.g. Lazarus debug stop)
+    FillChar(CfgEv, SizeOf(CfgEv), 0);
+    CfgEv.response_type := XCB_CONFIGURE_REQUEST;
+    CfgEv.window := 1001;
+    CfgEv.value_mask := XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
+                        XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT;
+    CfgEv.x := 50;
+    CfgEv.y := 50;
+    CfgEv.width := 600;
+    CfgEv.height := 400;
+
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@CfgEv));
+
+    // Active frame geometry must NOT change or shrink!
+    AssertEquals('Maximized frame X remains intact', 0, Client.CurrentRect.X);
+    AssertEquals('Maximized frame Y remains intact', 0, Client.CurrentRect.Y);
+    AssertEquals('Maximized frame Width remains intact', 1920, Client.CurrentRect.Width);
+    AssertEquals('Maximized frame Height remains intact', 1080, Client.CurrentRect.Height);
+
+    // RestoredRect must have been updated to the requested geometry
+    ExpectedFrameR := Mgr.FrameMetrics.ClientToFrameRect(TXCBRect.Create(50, 50, 600, 400));
+    AssertEquals('RestoredRect X updated', ExpectedFrameR.X, Client.RestoredRect.X);
+    AssertEquals('RestoredRect Y updated', ExpectedFrameR.Y, Client.RestoredRect.Y);
+    AssertEquals('RestoredRect Width updated', ExpectedFrameR.Width, Client.RestoredRect.Width);
+    AssertEquals('RestoredRect Height updated', ExpectedFrameR.Height, Client.RestoredRect.Height);
+
+    // Restore client: must restore to the updated RestoredRect!
+    Client.Restore();
+    AssertEquals('Restored frame X matches requested', ExpectedFrameR.X, Client.CurrentRect.X);
+    AssertEquals('Restored frame Y matches requested', ExpectedFrameR.Y, Client.CurrentRect.Y);
+    AssertEquals('Restored frame Width matches requested', ExpectedFrameR.Width, Client.CurrentRect.Width);
+    AssertEquals('Restored frame Height matches requested', ExpectedFrameR.Height, Client.CurrentRect.Height);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestInitialMaximizedStateOnMap();
+var
+  Mgr: TXCBWindowManager;
+  Client: TXCBWMClient;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Mgr.FrameMetrics := TXCBFrameMetrics.Create(24, 2);
+
+    Client := TXCBWMClient.Create(2001, Mgr);
+    Client.CurrentRect := TXCBRect.Create(50, 50, 500, 400);
+    // Simulate initial EWMH state read from property
+    Client.State := [wsMaximizedHorz, wsMaximizedVert];
+
+    // Manually register in manager simulating ManageWindow
+    Mgr.Clients.Add(Client);
+    Client.RestoredRect := Client.CurrentRect;
+    // Apply initial maximize
+    Client.Maximize();
+
+    AssertTrue('State has wsMaximizedHorz', wsMaximizedHorz in Client.State);
+    AssertTrue('State has wsMaximizedVert', wsMaximizedVert in Client.State);
+    AssertEquals('Maximized X', 0, Client.CurrentRect.X);
+    AssertEquals('Maximized Y', 0, Client.CurrentRect.Y);
+    AssertEquals('Maximized W', 1920, Client.CurrentRect.Width);
+    AssertEquals('Maximized H', 1080, Client.CurrentRect.Height);
   finally
     Mgr.Free();
   end;

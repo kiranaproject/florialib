@@ -277,6 +277,9 @@ type
     FIsReparented        : Boolean;
     FOverrideRedirect    : Boolean;
     FBorderless          : Boolean;
+    FHasUserPosition     : Boolean;
+    FHasProgramPosition  : Boolean;
+    FWinGravity          : Cardinal;
     FStrut               : TXCBStrutPartial;
   public
     constructor Create(const AClientWin: xcb_window_t; const AManager: TXCBWindowManager);
@@ -326,6 +329,9 @@ type
     property IsReparented        : Boolean           read FIsReparented write FIsReparented;
     property OverrideRedirect    : Boolean           read FOverrideRedirect write FOverrideRedirect;
     property Borderless          : Boolean           read FBorderless write FBorderless;
+    property HasUserPosition     : Boolean           read FHasUserPosition write FHasUserPosition;
+    property HasProgramPosition  : Boolean           read FHasProgramPosition write FHasProgramPosition;
+    property WinGravity          : Cardinal          read FWinGravity write FWinGravity;
     property Strut               : TXCBStrutPartial  read FStrut write FStrut;
   end;
 
@@ -806,6 +812,9 @@ begin
   FIsReparented := False;
   FOverrideRedirect := False;
   FBorderless := False;
+  FHasUserPosition := False;
+  FHasProgramPosition := False;
+  FWinGravity := 1;
   FStrut := TXCBStrutPartial.Create();
 end;
 
@@ -1011,8 +1020,6 @@ var
   TargetRect: TXCBRect;
   TargetMon: TXCBMonitor;
 begin
-  if (wsMaximizedHorz in FState) and (wsMaximizedVert in FState) then Exit;
-
   // Only update FRestoredRect if not already tiled, maximized, or fullscreen
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
           (wsTiledLeft in FState) or (wsTiledRight in FState) or
@@ -2573,6 +2580,7 @@ var
   ClassStr: AnsiString;
   P1, P2: PAnsiChar;
   MwmHintsPtr: PXCBMwmHints;
+  SizeHints: xcb_size_hints_t;
 begin
   if (FConn = nil) or (AClient = nil) then Exit;
 
@@ -2840,6 +2848,88 @@ begin
       end;
     end;
   end;
+
+  // 10. Initial _NET_WM_STATE
+  if FEwmhInitialized then
+  begin
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FEwmh._NET_WM_STATE, XCB_ATOM_ATOM, 0, 32);
+    PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+    if PropReply <> nil then
+    begin
+      try
+        DataLen := xcb_get_property_value_length(PropReply) div SizeOf(xcb_atom_t);
+        if DataLen > 0 then
+        begin
+          AtomsPtr := Pxcb_atom_t(xcb_get_property_value(PropReply));
+          for I := 0 to DataLen - 1 do
+          begin
+            if AtomsPtr[I] = FEwmh._NET_WM_STATE_MAXIMIZED_HORZ then
+              Include(AClient.FState, wsMaximizedHorz)
+            else if AtomsPtr[I] = FEwmh._NET_WM_STATE_MAXIMIZED_VERT then
+              Include(AClient.FState, wsMaximizedVert)
+            else if AtomsPtr[I] = FEwmh._NET_WM_STATE_FULLSCREEN then
+              Include(AClient.FState, wsFullscreen)
+            else if AtomsPtr[I] = FEwmh._NET_WM_STATE_HIDDEN then
+              Include(AClient.FState, wsMinimized)
+            else if AtomsPtr[I] = FEwmh._NET_WM_STATE_ABOVE then
+              Include(AClient.FState, wsAbove);
+          end;
+        end;
+      finally
+        xcb_free(PropReply);
+      end;
+    end;
+  end;
+
+  // 11. Initial _NET_WM_DESKTOP
+  if FEwmhInitialized then
+  begin
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FEwmh._NET_WM_DESKTOP, XCB_ATOM_CARDINAL, 0, 1);
+    PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+    if PropReply <> nil then
+    begin
+      try
+        if xcb_get_property_value_length(PropReply) >= SizeOf(Cardinal) then
+          AClient.FDesktop := Integer(PCardinal(xcb_get_property_value(PropReply))^);
+      finally
+        xcb_free(PropReply);
+      end;
+    end;
+  end;
+
+  // 12. WM_NORMAL_HINTS (Size hints, USPosition, PPosition, WinGravity)
+  PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, XCB_ATOM_WM_NORMAL_HINTS, XCB_ATOM_WM_SIZE_HINTS, 0, 18);
+  PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+  if PropReply <> nil then
+  begin
+    try
+      DataLen := xcb_get_property_value_length(PropReply);
+      if DataLen >= SizeOf(Cardinal) then
+      begin
+        FillChar(SizeHints, SizeOf(SizeHints), 0);
+        if DataLen > SizeOf(SizeHints) then
+          DataLen := SizeOf(SizeHints);
+        Move(xcb_get_property_value(PropReply)^, SizeHints, DataLen);
+
+        if (SizeHints.flags and XCB_ICCCM_SIZE_HINT_US_POSITION) <> 0 then
+          AClient.FHasUserPosition := True;
+        if (SizeHints.flags and XCB_ICCCM_SIZE_HINT_P_POSITION) <> 0 then
+          AClient.FHasProgramPosition := True;
+        if (SizeHints.flags and XCB_ICCCM_SIZE_HINT_P_MIN_SIZE) <> 0 then
+          AClient.FMinSize := TXCBPoint.Create(SizeHints.min_width, SizeHints.min_height);
+        if (SizeHints.flags and XCB_ICCCM_SIZE_HINT_P_MAX_SIZE) <> 0 then
+          AClient.FMaxSize := TXCBPoint.Create(SizeHints.max_width, SizeHints.max_height);
+        if (SizeHints.flags and XCB_ICCCM_SIZE_HINT_BASE_SIZE) <> 0 then
+          AClient.FBaseSize := TXCBPoint.Create(SizeHints.base_width, SizeHints.base_height);
+        if (SizeHints.flags and XCB_ICCCM_SIZE_HINT_P_RESIZE_INC) <> 0 then
+          AClient.FSizeInc := TXCBPoint.Create(Max(1, SizeHints.width_inc), Max(1, SizeHints.height_inc));
+        if (SizeHints.flags and XCB_ICCCM_SIZE_HINT_P_WIN_GRAVITY) <> 0 then
+          AClient.FWinGravity := SizeHints.win_gravity;
+      end;
+    finally
+      xcb_free(PropReply);
+    end;
+  end;
 end;
 
 function TXCBWindowManager.CreateFrameWindow(const AClient: TXCBWMClient; const ARect: TXCBRect): xcb_window_t;
@@ -2953,7 +3043,9 @@ begin
     AClient.CurrentRect := TXCBRect.Create(AClient.CurrentRect.X, AClient.CurrentRect.Y, AClient.CurrentRect.Width, 400);
 
   // New window placement: follow pointer for regular windows, center dialogs over parent/workarea
-  if (AClient.CurrentRect.X = 0) and (AClient.CurrentRect.Y = 0) then
+  if (AClient.CurrentRect.X = 0) and (AClient.CurrentRect.Y = 0) and
+     not AClient.HasUserPosition and not AClient.HasProgramPosition and
+     not (wsMaximizedHorz in AClient.State) and not (wsFullscreen in AClient.State) then
   begin
     PtrCookie := xcb_query_pointer(FConn, FRootWindow);
     PtrReply := xcb_query_pointer_reply(FConn, PtrCookie, nil);
@@ -3096,18 +3188,29 @@ var
 begin
   if (FConn = nil) or (AClient = nil) or (AClient.ClientWindow = 0) then Exit;
 
-  InnerRect := FFrameMetrics.FrameToClientInnerRect(AClient.CurrentRect);
-
   FillChar(Ce, SizeOf(Ce), 0);
   Ce.response_type := XCB_CONFIGURE_NOTIFY;
   Ce.event := AClient.ClientWindow;
   Ce.window := AClient.ClientWindow;
   Ce.above_sibling := XCB_NONE;
-  // Per ICCCM: coordinates must be in root window coordinate space
-  Ce.x := SmallInt(AClient.CurrentRect.X + InnerRect.X);
-  Ce.y := SmallInt(AClient.CurrentRect.Y + InnerRect.Y);
-  Ce.width := Word(InnerRect.Width);
-  Ce.height := Word(InnerRect.Height);
+
+  if AClient.IsReparented then
+  begin
+    InnerRect := FFrameMetrics.FrameToClientInnerRect(AClient.CurrentRect);
+    // Per ICCCM: coordinates must be in root window coordinate space
+    Ce.x := SmallInt(AClient.CurrentRect.X + InnerRect.X);
+    Ce.y := SmallInt(AClient.CurrentRect.Y + InnerRect.Y);
+    Ce.width := Word(InnerRect.Width);
+    Ce.height := Word(InnerRect.Height);
+  end
+  else
+  begin
+    Ce.x := SmallInt(AClient.CurrentRect.X);
+    Ce.y := SmallInt(AClient.CurrentRect.Y);
+    Ce.width := Word(AClient.CurrentRect.Width);
+    Ce.height := Word(AClient.CurrentRect.Height);
+  end;
+
   Ce.border_width := 0;
   Ce.override_redirect := 0;
 
@@ -3232,6 +3335,19 @@ begin
     FClients.Add(Cli);
     if Cli.Strut.HasStrut() then
       RecomputeWorkarea();
+
+    if (wsMaximizedHorz in Cli.State) and (wsMaximizedVert in Cli.State) then
+    begin
+      Cli.Maximize();
+      SendSyntheticConfigureNotify(Cli);
+    end
+    else if wsFullscreen in Cli.State then
+    begin
+      Exclude(Cli.FState, wsFullscreen);
+      Cli.SetFullscreen(True);
+      SendSyntheticConfigureNotify(Cli);
+    end;
+
     Cli.UpdateEWMHState();
     Result := Cli;
 
@@ -3264,8 +3380,6 @@ begin
       WmStateData[1] := 0;
       xcb_change_property(FConn, XCB_PROP_MODE_REPLACE, AClient.ClientWindow, FAtomWMState, FAtomWMState, 32, 2, @WmStateData[0]);
     end;
-    if FEwmhInitialized then
-      xcb_delete_property(FConn, AClient.ClientWindow, FEwmh._NET_WM_STATE);
   end;
 
   if FActiveClient = AClient then
@@ -3420,6 +3534,7 @@ var
   reqDragMode: TXCBDragMode;
   Dir: Cardinal;
   FrameExtentsData: array[0..3] of Cardinal;
+  isMaximizedOrTiled: Boolean;
 begin
   Result := False;
   if AEvent = nil then Exit;
@@ -3454,6 +3569,9 @@ begin
       Cli := FindClient(CfgEv^.window);
       if Cli <> nil then
       begin
+        isMaximizedOrTiled := (wsMaximizedHorz in Cli.State) or (wsMaximizedVert in Cli.State) or
+                              (wsFullscreen in Cli.State) or (wsTiledLeft in Cli.State) or (wsTiledRight in Cli.State);
+
         if (CfgEv^.window = Cli.ClientWindow) and Cli.IsReparented then
         begin
           newX := Cli.CurrentRect.X + FFrameMetrics.Insets.Left;
@@ -3469,8 +3587,17 @@ begin
           FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
           if FrameRect.Y < 0 then
             FrameRect.Y := 0;
-          Cli.SetGeometry(FrameRect.X, FrameRect.Y, FrameRect.Width, FrameRect.Height);
-          SendSyntheticConfigureNotify(Cli);
+
+          if isMaximizedOrTiled then
+          begin
+            Cli.RestoredRect := FrameRect;
+            SendSyntheticConfigureNotify(Cli);
+          end
+          else
+          begin
+            Cli.SetGeometry(FrameRect.X, FrameRect.Y, FrameRect.Width, FrameRect.Height);
+            SendSyntheticConfigureNotify(Cli);
+          end;
         end
         else
         begin
@@ -3484,7 +3611,22 @@ begin
           if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_WIDTH) <> 0 then newW := CfgEv^.width;
           if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_HEIGHT) <> 0 then newH := CfgEv^.height;
 
-          Cli.SetGeometry(newX, newY, newW, newH);
+          if isMaximizedOrTiled then
+          begin
+            Cli.RestoredRect := TXCBRect.Create(newX, newY, newW, newH);
+            SendSyntheticConfigureNotify(Cli);
+          end
+          else
+          begin
+            Cli.SetGeometry(newX, newY, newW, newH);
+            SendSyntheticConfigureNotify(Cli);
+          end;
+        end;
+
+        if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_STACK_MODE) <> 0 then
+        begin
+          if CfgEv^.stack_mode = XCB_STACK_MODE_ABOVE then
+            Cli.Activate();
         end;
       end
       else
