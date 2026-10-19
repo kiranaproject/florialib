@@ -449,8 +449,8 @@ begin
 
   if ABilinear and (FPixelFormat = fpfBGRA32) and (NewW > 1) and (NewH > 1) and (FWidth > 1) and (FHeight > 1) then
   begin
-    stepX_fp := (Int64(FWidth) shl 16) div NewW;
-    stepY_fp := (Int64(FHeight) shl 16) div NewH;
+    maxSrcX_fp := Int64(FWidth - 1) shl 16;
+    maxSrcY_fp := Int64(FHeight - 1) shl 16;
     srcStride := FStride;
     dstStride := Result.Stride;
     srcPixels := PByte(FPixelBuffer);
@@ -458,7 +458,9 @@ begin
 
     for dy := 0 to NewH - 1 do
     begin
-      curSrcY_fp := Int64(dy) * stepY_fp;
+      curSrcY_fp := (((Int64(dy) * 2 + 1) * Int64(FHeight) shl 15) div NewH) - (1 shl 15);
+      if curSrcY_fp < 0 then curSrcY_fp := 0;
+      if curSrcY_fp > maxSrcY_fp then curSrcY_fp := maxSrcY_fp;
       sy0 := curSrcY_fp shr 16;
       fy := (curSrcY_fp shr 8) and $FF;
       invFy := 256 - fy;
@@ -476,7 +478,9 @@ begin
 
       for dx := 0 to NewW - 1 do
       begin
-        curSrcX_fp := Int64(dx) * stepX_fp;
+        curSrcX_fp := (((Int64(dx) * 2 + 1) * Int64(FWidth) shl 15) div NewW) - (1 shl 15);
+        if curSrcX_fp < 0 then curSrcX_fp := 0;
+        if curSrcX_fp > maxSrcX_fp then curSrcX_fp := maxSrcX_fp;
         sx0 := curSrcX_fp shr 16;
         fx := (curSrcX_fp shr 8) and $FF;
         invFx := 256 - fx;
@@ -510,15 +514,17 @@ begin
   end
   else
   begin
-    // Nearest neighbor sampling fallback
+    // Nearest neighbor sampling fallback (centered pixel mapping)
     for DstY := 0 to NewH - 1 do
     begin
-      SrcY := (DstY * FHeight) div NewH;
+      SrcY := ((Int64(DstY) * 2 + 1) * FHeight) div (NewH * 2);
+      if SrcY < 0 then SrcY := 0;
       if SrcY >= FHeight then SrcY := FHeight - 1;
 
       for DstX := 0 to NewW - 1 do
       begin
-        SrcX := (DstX * FWidth) div NewW;
+        SrcX := ((Int64(DstX) * 2 + 1) * FWidth) div (NewW * 2);
+        if SrcX < 0 then SrcX := 0;
         if SrcX >= FWidth then SrcX := FWidth - 1;
 
         PCol := GetPixel(SrcX, SrcY);

@@ -163,11 +163,16 @@ procedure TFloriaImageTest.TestImageScaling();
 var
   Img, ScaledSmall, ScaledLarge: TFloriaImage;
   Pix: TBgraPixel;
+  dy: Integer;
 begin
   Img := TFloriaImage.Create(4, 4);
   try
     Img.Clear(255, 0, 0, 255); // Red
-    Img.Pixels[0, 0] := TBgraPixel.Create(0, 0, 255, 255); // Blue in top-left
+    // Fill top-left 2x2 quadrant with Blue
+    Img.Pixels[0, 0] := TBgraPixel.Create(0, 0, 255, 255);
+    Img.Pixels[1, 0] := TBgraPixel.Create(0, 0, 255, 255);
+    Img.Pixels[0, 1] := TBgraPixel.Create(0, 0, 255, 255);
+    Img.Pixels[1, 1] := TBgraPixel.Create(0, 0, 255, 255);
 
     // Test nearest neighbor scaling
     ScaledSmall := Img.CreateScaled(2, 2, False);
@@ -201,6 +206,26 @@ begin
       AssertEquals('Upscaled bottom-right Red', 255, Pix.R);
     finally
       ScaledLarge.Free();
+    end;
+
+    // Test symmetry when downscaling 24x24 to 20x20 (e.g. icon downscaling)
+    Img.Free();
+    Img := TFloriaImage.Create(24, 24);
+    Img.Clear(0, 0, 0, 0);
+    // Draw a symmetrical border at col 0 and col 23
+    for dy := 0 to 23 do
+    begin
+      Img.Pixels[0, dy] := TBgraPixel.Create(100, 150, 200, 255);
+      Img.Pixels[23, dy] := TBgraPixel.Create(100, 150, 200, 255);
+    end;
+    ScaledSmall := Img.CreateScaled(20, 20, True);
+    try
+      // Leftmost pixel (col 0) and rightmost pixel (col 19) should have symmetrical alpha/color
+      AssertTrue('Symmetrical scaling left/right Alpha', Abs(ScaledSmall.Pixels[0, 10].A - ScaledSmall.Pixels[19, 10].A) <= 1);
+      AssertTrue('Symmetrical scaling left/right Blue', Abs(ScaledSmall.Pixels[0, 10].B - ScaledSmall.Pixels[19, 10].B) <= 1);
+      AssertTrue('Preserved edge alpha', ScaledSmall.Pixels[19, 10].A > 200);
+    finally
+      ScaledSmall.Free();
     end;
   finally
     Img.Free();
