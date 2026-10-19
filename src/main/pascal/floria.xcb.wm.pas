@@ -2594,17 +2594,20 @@ begin
   end;
 
   // 2. Window Geometry
-  GeomCookie := xcb_get_geometry(FConn, AClient.ClientWindow);
-  GeomReply := xcb_get_geometry_reply(FConn, GeomCookie, nil);
-  if GeomReply <> nil then
+  if not AClient.IsReparented then
   begin
-    AClient.CurrentRect := TXCBRect.Create(
-      GeomReply^.x,
-      GeomReply^.y,
-      GeomReply^.width,
-      GeomReply^.height
-    );
-    xcb_free(GeomReply);
+    GeomCookie := xcb_get_geometry(FConn, AClient.ClientWindow);
+    GeomReply := xcb_get_geometry_reply(FConn, GeomCookie, nil);
+    if GeomReply <> nil then
+    begin
+      AClient.CurrentRect := TXCBRect.Create(
+        GeomReply^.x,
+        GeomReply^.y,
+        GeomReply^.width,
+        GeomReply^.height
+      );
+      xcb_free(GeomReply);
+    end;
   end;
 
   // 3. _NET_WM_WINDOW_TYPE
@@ -3893,15 +3896,58 @@ begin
             Cli := FindClient(MsgEv^.window);
           if Cli <> nil then
           begin
-            newX := Cli.CurrentRect.X;
-            newY := Cli.CurrentRect.Y;
-            newW := Cli.CurrentRect.Width;
-            newH := Cli.CurrentRect.Height;
-            if (MsgData32^[0] and (1 shl 8)) <> 0 then newX := Integer(MsgData32^[1]);
-            if (MsgData32^[0] and (1 shl 9)) <> 0 then newY := Integer(MsgData32^[2]);
-            if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
-            if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
-            Cli.SetGeometry(newX, newY, newW, newH);
+            isMaximizedOrTiled := (wsMaximizedHorz in Cli.State) or (wsMaximizedVert in Cli.State) or
+                                  (wsFullscreen in Cli.State) or (wsTiledLeft in Cli.State) or (wsTiledRight in Cli.State);
+            if Cli.IsDecorated() then
+            begin
+              newX := Cli.CurrentRect.X + FFrameMetrics.Insets.Left;
+              newY := Cli.CurrentRect.Y + FFrameMetrics.Insets.Top;
+              newW := Cli.CurrentRect.Width - FFrameMetrics.Insets.Left - FFrameMetrics.Insets.Right;
+              newH := Cli.CurrentRect.Height - FFrameMetrics.Insets.Top - FFrameMetrics.Insets.Bottom;
+
+              if (MsgData32^[0] and (1 shl 8)) <> 0 then newX := Integer(MsgData32^[1]);
+              if (MsgData32^[0] and (1 shl 9)) <> 0 then newY := Integer(MsgData32^[2]);
+              if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
+              if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
+
+              FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
+              if FrameRect.Y < 0 then
+                FrameRect.Y := 0;
+
+              if isMaximizedOrTiled then
+              begin
+                Cli.RestoredRect := FrameRect;
+                SendSyntheticConfigureNotify(Cli);
+              end
+              else
+              begin
+                Cli.SetGeometry(FrameRect.X, FrameRect.Y, FrameRect.Width, FrameRect.Height);
+                SendSyntheticConfigureNotify(Cli);
+              end;
+            end
+            else
+            begin
+              newX := Cli.CurrentRect.X;
+              newY := Cli.CurrentRect.Y;
+              newW := Cli.CurrentRect.Width;
+              newH := Cli.CurrentRect.Height;
+
+              if (MsgData32^[0] and (1 shl 8)) <> 0 then newX := Integer(MsgData32^[1]);
+              if (MsgData32^[0] and (1 shl 9)) <> 0 then newY := Integer(MsgData32^[2]);
+              if (MsgData32^[0] and (1 shl 10)) <> 0 then newW := Integer(MsgData32^[3]);
+              if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
+
+              if isMaximizedOrTiled then
+              begin
+                Cli.RestoredRect := TXCBRect.Create(newX, newY, newW, newH);
+                SendSyntheticConfigureNotify(Cli);
+              end
+              else
+              begin
+                Cli.SetGeometry(newX, newY, newW, newH);
+                SendSyntheticConfigureNotify(Cli);
+              end;
+            end;
           end;
         end
         else if MsgEv^.type_ = FEwmh._NET_REQUEST_FRAME_EXTENTS then
