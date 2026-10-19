@@ -826,8 +826,8 @@ var
 begin
   if AText = '' then Exit;
   if not Assigned(AFont) then actualFont := FloriaGetSystemFont() else actualFont := AFont;
-  ty := Y + (H / 2.0) + (actualFont.Ascent - actualFont.Descent) / 2.0;
-  DrawText(X, ty, AText, actualFont, R, G, B);
+  ty := Round(Y + (H / 2.0) + (actualFont.Ascent - actualFont.Descent) / 2.0);
+  DrawText(Round(X), ty, AText, actualFont, R, G, B);
 end;
 
 procedure TFloriaCanvasAgg.DrawTextHershey(X, Y: Double; const AText: string; ASize: Double; R, G, B: Double);
@@ -1038,8 +1038,8 @@ begin
   end;
 
   TW := AFont.GetTextWidth(AText);
-  TX := X + (W - TW) / 2.0;
-  TY := Y + (H / 2.0) + (AFont.Ascent - AFont.Descent) / 2.0;
+  TX := Round(X + (W - TW) / 2.0);
+  TY := Round(Y + (H / 2.0) + (AFont.Ascent - AFont.Descent) / 2.0);
 
   DrawText(TX, TY, AText, AFont, R, G, B);
 end;
@@ -1498,9 +1498,9 @@ procedure TFloriaCanvasAgg.DrawImageScaled(X, Y, W, H: Double; AImage: TFloriaIm
 begin
   if not Assigned(AImage) then Exit;
   if (Round(W) = AImage.Width) and (Round(H) = AImage.Height) then
-    DrawImage(X, Y, AImage, AOpacity)
+    DrawImage(Round(X), Round(Y), AImage, AOpacity)
   else
-    DrawImagePart(X, Y, W, H, AImage, 0, 0, AImage.Width, AImage.Height, AOpacity);
+    DrawImagePart(Round(X), Round(Y), Round(W), Round(H), AImage, 0, 0, AImage.Width, AImage.Height, AOpacity);
 end;
 
 procedure TFloriaCanvasAgg.RenderPath(var APath: path_storage; const AStyle: TSVGStyleRecord; Scale: Double = 1.0);
