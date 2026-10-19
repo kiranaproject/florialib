@@ -227,6 +227,26 @@ begin
     finally
       ScaledSmall.Free();
     end;
+
+    // Test large downscaling (e.g. 128x128 to 20x20) preserves high-frequency details smoothly
+    Img.Free();
+    Img := TFloriaImage.Create(128, 128);
+    Img.Clear(0, 0, 0, 0);
+    for dy := 32 to 95 do
+    begin
+      Img.Pixels[32, dy] := TBgraPixel.Create(255, 255, 255, 255);
+      Img.Pixels[95, dy] := TBgraPixel.Create(255, 255, 255, 255);
+      Img.Pixels[dy, 32] := TBgraPixel.Create(255, 255, 255, 255);
+      Img.Pixels[dy, 95] := TBgraPixel.Create(255, 255, 255, 255);
+    end;
+    ScaledSmall := Img.CreateScaled(20, 20, True);
+    try
+      AssertEquals('Large downscale Width', 20, ScaledSmall.Width);
+      AssertEquals('Large downscale Height', 20, ScaledSmall.Height);
+      AssertTrue('Thin feature retained in downsampling', ScaledSmall.Pixels[5, 10].A > 0);
+    finally
+      ScaledSmall.Free();
+    end;
   finally
     Img.Free();
   end;

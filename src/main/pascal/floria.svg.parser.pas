@@ -397,6 +397,11 @@ begin
     end;
     CreatedElem := RadGrad;
   end
+  else if (Tag = 'clippath') or (Tag = 'mask') then
+  begin
+    // Non-rendering definition containers; do not add children to display tree
+    Exit;
+  end
   else
   begin
     // Unknown or container element (like <a>): process children

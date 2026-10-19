@@ -718,6 +718,12 @@ begin
         Result.UriId := Trim(Copy(Trimmed, P1 + 1, MaxInt));
     end;
   end
+  else if (Length(Trimmed) > 1) and (Trimmed[1] = '#') and
+          not (TCSSColor.TryParse(Trimmed, Col) or TCSSColor.FromHex(Trimmed, Col)) then
+  begin
+    Result.Kind := pkUri;
+    Result.UriId := Trim(Copy(Trimmed, 2, MaxInt));
+  end
   else if TCSSColor.TryParse(Trimmed, Col) or TCSSColor.FromHex('#' + Trimmed, Col) then
   begin
     Result.Kind := pkColor;

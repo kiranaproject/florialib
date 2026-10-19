@@ -1495,12 +1495,28 @@ begin
 end;
 
 procedure TFloriaCanvasAgg.DrawImageScaled(X, Y, W, H: Double; AImage: TFloriaImage; AOpacity: Double = 1.0);
+var
+  ScaledImg: TFloriaImage;
+  rw, rh: Integer;
 begin
   if not Assigned(AImage) then Exit;
-  if (Round(W) = AImage.Width) and (Round(H) = AImage.Height) then
+  rw := Round(W);
+  rh := Round(H);
+  if (rw <= 0) or (rh <= 0) then Exit;
+
+  if (rw = AImage.Width) and (rh = AImage.Height) then
     DrawImage(Round(X), Round(Y), AImage, AOpacity)
+  else if (AImage.Width div 2 >= rw) or (AImage.Height div 2 >= rh) then
+  begin
+    ScaledImg := AImage.CreateScaled(rw, rh, True);
+    try
+      DrawImage(Round(X), Round(Y), ScaledImg, AOpacity);
+    finally
+      ScaledImg.Free();
+    end;
+  end
   else
-    DrawImagePart(Round(X), Round(Y), Round(W), Round(H), AImage, 0, 0, AImage.Width, AImage.Height, AOpacity);
+    DrawImagePart(Round(X), Round(Y), rw, rh, AImage, 0, 0, AImage.Width, AImage.Height, AOpacity);
 end;
 
 procedure TFloriaCanvasAgg.RenderPath(var APath: path_storage; const AStyle: TSVGStyleRecord; Scale: Double = 1.0);

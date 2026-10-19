@@ -425,8 +425,148 @@ begin
   Result.IsPremultiplied := FIsPremultiplied;
 end;
 
+function Downsample2x(ASrc: TFloriaImage; ADownX, ADownY: Boolean): TFloriaImage;
+var
+  w, h, nw, nh, y, x: Integer;
+  srcPixels, dstPixels: PByte;
+  srcStride, dstStride: Integer;
+  p00, p10, p01, p11, dstP: PByte;
+  a00, a10, a01, a11, totalA, halfA: Integer;
+  isPremul: Boolean;
+begin
+  w := ASrc.Width;
+  h := ASrc.Height;
+  if ADownX then nw := w div 2 else nw := w;
+  if ADownY then nh := h div 2 else nh := h;
+  if nw < 1 then nw := 1;
+  if nh < 1 then nh := 1;
+
+  Result := TFloriaImage.Create(nw, nh, ASrc.PixelFormat);
+  Result.IsPremultiplied := ASrc.IsPremultiplied;
+  if (Result.PixelBuffer = nil) or (ASrc.PixelBuffer = nil) then Exit;
+
+  srcPixels := PByte(ASrc.PixelBuffer);
+  dstPixels := PByte(Result.PixelBuffer);
+  srcStride := ASrc.Stride;
+  dstStride := Result.Stride;
+  isPremul := ASrc.IsPremultiplied;
+
+  if ADownX and ADownY then
+  begin
+    for y := 0 to nh - 1 do
+    begin
+      dstP := dstPixels + y * dstStride;
+      for x := 0 to nw - 1 do
+      begin
+        p00 := srcPixels + (y * 2) * srcStride + (x * 2) * 4;
+        p10 := srcPixels + (y * 2) * srcStride + (x * 2 + 1) * 4;
+        p01 := srcPixels + (y * 2 + 1) * srcStride + (x * 2) * 4;
+        p11 := srcPixels + (y * 2 + 1) * srcStride + (x * 2 + 1) * 4;
+
+        a00 := p00[3]; a10 := p10[3]; a01 := p01[3]; a11 := p11[3];
+        totalA := a00 + a10 + a01 + a11;
+
+        if totalA = 0 then
+        begin
+          dstP[0] := 0; dstP[1] := 0; dstP[2] := 0; dstP[3] := 0;
+        end
+        else if isPremul then
+        begin
+          dstP[0] := (p00[0] + p10[0] + p01[0] + p11[0] + 2) div 4;
+          dstP[1] := (p00[1] + p10[1] + p01[1] + p11[1] + 2) div 4;
+          dstP[2] := (p00[2] + p10[2] + p01[2] + p11[2] + 2) div 4;
+          dstP[3] := (totalA + 2) div 4;
+        end
+        else
+        begin
+          halfA := totalA div 2;
+          dstP[0] := (p00[0] * a00 + p10[0] * a10 + p01[0] * a01 + p11[0] * a11 + halfA) div totalA;
+          dstP[1] := (p00[1] * a00 + p10[1] * a10 + p01[1] * a01 + p11[1] * a11 + halfA) div totalA;
+          dstP[2] := (p00[2] * a00 + p10[2] * a10 + p01[2] * a01 + p11[2] * a11 + halfA) div totalA;
+          dstP[3] := (totalA + 2) div 4;
+        end;
+        Inc(dstP, 4);
+      end;
+    end;
+  end
+  else if ADownX then
+  begin
+    for y := 0 to nh - 1 do
+    begin
+      dstP := dstPixels + y * dstStride;
+      for x := 0 to nw - 1 do
+      begin
+        p00 := srcPixels + y * srcStride + (x * 2) * 4;
+        p10 := srcPixels + y * srcStride + (x * 2 + 1) * 4;
+
+        a00 := p00[3]; a10 := p10[3];
+        totalA := a00 + a10;
+
+        if totalA = 0 then
+        begin
+          dstP[0] := 0; dstP[1] := 0; dstP[2] := 0; dstP[3] := 0;
+        end
+        else if isPremul then
+        begin
+          dstP[0] := (p00[0] + p10[0] + 1) div 2;
+          dstP[1] := (p00[1] + p10[1] + 1) div 2;
+          dstP[2] := (p00[2] + p10[2] + 1) div 2;
+          dstP[3] := (totalA + 1) div 2;
+        end
+        else
+        begin
+          halfA := totalA div 2;
+          dstP[0] := (p00[0] * a00 + p10[0] * a10 + halfA) div totalA;
+          dstP[1] := (p00[1] * a00 + p10[1] * a10 + halfA) div totalA;
+          dstP[2] := (p00[2] * a00 + p10[2] * a10 + halfA) div totalA;
+          dstP[3] := (totalA + 1) div 2;
+        end;
+        Inc(dstP, 4);
+      end;
+    end;
+  end
+  else if ADownY then
+  begin
+    for y := 0 to nh - 1 do
+    begin
+      dstP := dstPixels + y * dstStride;
+      for x := 0 to nw - 1 do
+      begin
+        p00 := srcPixels + (y * 2) * srcStride + x * 4;
+        p01 := srcPixels + (y * 2 + 1) * srcStride + x * 4;
+
+        a00 := p00[3]; a01 := p01[3];
+        totalA := a00 + a01;
+
+        if totalA = 0 then
+        begin
+          dstP[0] := 0; dstP[1] := 0; dstP[2] := 0; dstP[3] := 0;
+        end
+        else if isPremul then
+        begin
+          dstP[0] := (p00[0] + p01[0] + 1) div 2;
+          dstP[1] := (p00[1] + p01[1] + 1) div 2;
+          dstP[2] := (p00[2] + p01[2] + 1) div 2;
+          dstP[3] := (totalA + 1) div 2;
+        end
+        else
+        begin
+          halfA := totalA div 2;
+          dstP[0] := (p00[0] * a00 + p01[0] * a01 + halfA) div totalA;
+          dstP[1] := (p00[1] * a00 + p01[1] * a01 + halfA) div totalA;
+          dstP[2] := (p00[2] * a00 + p01[2] * a01 + halfA) div totalA;
+          dstP[3] := (totalA + 1) div 2;
+        end;
+        Inc(dstP, 4);
+      end;
+    end;
+  end;
+end;
+
 function TFloriaImage.CreateScaled(const NewW, NewH: Integer; const ABilinear: Boolean = True): TFloriaImage;
 var
+  CurImg, NextImg: TFloriaImage;
+  DownX, DownY: Boolean;
   DstX, DstY: Integer;
   SrcX, SrcY: Integer;
   PCol: TBgraPixel;
@@ -442,6 +582,35 @@ var
 begin
   if (NewW <= 0) or (NewH <= 0) or (FWidth <= 0) or (FHeight <= 0) or (FPixelBuffer = nil) then
     Exit(TFloriaImage.Create(0, 0, FPixelFormat));
+
+  if (NewW = FWidth) and (NewH = FHeight) then
+    Exit(Clone());
+
+  // If bilinear downscaling by 2x or more in any dimension, iteratively downsample 2x first
+  if ABilinear and (FPixelFormat = fpfBGRA32) and
+     ((FWidth div 2 >= NewW) or (FHeight div 2 >= NewH)) then
+  begin
+    CurImg := Self;
+    repeat
+      DownX := (CurImg.Width div 2 >= NewW);
+      DownY := (CurImg.Height div 2 >= NewH);
+      if not DownX and not DownY then Break;
+
+      NextImg := Downsample2x(CurImg, DownX, DownY);
+      if CurImg <> Self then CurImg.Free();
+      CurImg := NextImg;
+    until False;
+
+    if (CurImg.Width = NewW) and (CurImg.Height = NewH) then
+    begin
+      Result := CurImg;
+      Exit;
+    end;
+
+    Result := CurImg.CreateScaled(NewW, NewH, True);
+    if CurImg <> Self then CurImg.Free();
+    Exit;
+  end;
 
   Result := TFloriaImage.Create(NewW, NewH, FPixelFormat);
   if (Result.PixelBuffer = nil) then Exit;
