@@ -299,6 +299,7 @@ type
     FIsReparented        : Boolean;
     FOverrideRedirect    : Boolean;
     FBorderless          : Boolean;
+    FTransientFor        : xcb_window_t;
     FHasUserPosition     : Boolean;
     FHasProgramPosition  : Boolean;
     FWinGravity          : Cardinal;
@@ -358,6 +359,7 @@ type
     property IsReparented        : Boolean           read FIsReparented write FIsReparented;
     property OverrideRedirect    : Boolean           read FOverrideRedirect write FOverrideRedirect;
     property Borderless          : Boolean           read FBorderless write FBorderless;
+    property TransientFor        : xcb_window_t      read FTransientFor write FTransientFor;
     property HasUserPosition     : Boolean           read FHasUserPosition write FHasUserPosition;
     property HasProgramPosition  : Boolean           read FHasProgramPosition write FHasProgramPosition;
     property WinGravity          : Cardinal          read FWinGravity write FWinGravity;
@@ -850,6 +852,7 @@ begin
   FIsReparented := False;
   FOverrideRedirect := False;
   FBorderless := False;
+  FTransientFor := 0;
   FHasUserPosition := False;
   FHasProgramPosition := False;
   FWinGravity := 1;
@@ -959,8 +962,9 @@ var
   Values: array[0..1] of Cardinal;
   Ev: xcb_client_message_event_t;
   Data32: PCardinalArray;
-  OldCli: TXCBWMClient;
+  OldCli, TransCli: TXCBWMClient;
   WasMinimized: Boolean;
+  I: Integer;
 begin
   WasMinimized := wsMinimized in FState;
   if WasMinimized then
@@ -975,6 +979,16 @@ begin
         xcb_map_window(FManager.Connection, FResizeWindow);
     end;
     UpdateEWMHState();
+    if (FManager <> nil) and (FManager.Clients <> nil) then
+    begin
+      for I := 0 to FManager.Clients.Count - 1 do
+      begin
+        TransCli := TXCBWMClient(FManager.Clients[I]);
+        if (TransCli <> Self) and (TransCli.TransientFor = FClientWindow) and
+           (wsMinimized in TransCli.State) then
+          TransCli.Activate();
+      end;
+    end;
     if FManager <> nil then
       FManager.DoOnClientRestored(Self);
   end;
@@ -1005,6 +1019,21 @@ begin
       xcb_configure_window(FManager.Connection, FResizeWindow,
                            XCB_CONFIG_WINDOW_SIBLING or XCB_CONFIG_WINDOW_STACK_MODE,
                            @Values[0]);
+    end;
+
+    // Raise transient children to maintain ICCCM transient stacking order
+    if FManager.Clients <> nil then
+    begin
+      for I := 0 to FManager.Clients.Count - 1 do
+      begin
+        TransCli := TXCBWMClient(FManager.Clients[I]);
+        if (TransCli <> Self) and (TransCli.TransientFor = FClientWindow) and
+           not (wsMinimized in TransCli.State) and TransCli.IsReparented and (TransCli.FrameWindow <> 0) then
+        begin
+          Values[0] := XCB_STACK_MODE_ABOVE;
+          xcb_configure_window(FManager.Connection, TransCli.FrameWindow, XCB_CONFIG_WINDOW_STACK_MODE, @Values[0]);
+        end;
+      end;
     end;
 
     // Set input focus
@@ -1279,7 +1308,7 @@ end;
 procedure TXCBWMClient.Minimize();
 var
   I: Integer;
-  OtherCli: TXCBWMClient;
+  OtherCli, TransCli: TXCBWMClient;
 begin
   if not FCanMinimize then Exit;
   if wsMinimized in FState then Exit;
@@ -1301,6 +1330,18 @@ begin
 
   if FManager <> nil then
   begin
+    // Minimize transient children belonging to this client
+    if FManager.Clients <> nil then
+    begin
+      for I := 0 to FManager.Clients.Count - 1 do
+      begin
+        TransCli := TXCBWMClient(FManager.Clients[I]);
+        if (TransCli <> Self) and (TransCli.TransientFor = FClientWindow) and
+           not (wsMinimized in TransCli.State) then
+          TransCli.Minimize();
+      end;
+    end;
+
     if FManager.ActiveClient = Self then
     begin
       FManager.ActiveClient := nil;
@@ -3125,6 +3166,24 @@ begin
     end;
   end;
 
+  // 13. WM_TRANSIENT_FOR
+  PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, XCB_ATOM_WM_TRANSIENT_FOR, XCB_ATOM_WINDOW, 0, 1);
+  PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+  if PropReply <> nil then
+  begin
+    try
+      DataLen := xcb_get_property_value_length(PropReply);
+      if DataLen >= SizeOf(xcb_window_t) then
+        AClient.TransientFor := Pxcb_window_t(xcb_get_property_value(PropReply))^
+      else
+        AClient.TransientFor := 0;
+    finally
+      xcb_free(PropReply);
+    end;
+  end
+  else
+    AClient.TransientFor := 0;
+
   // Fixed-size window detection from WM_NORMAL_HINTS
   if (AClient.MinSize.X > 0) and (AClient.MaxSize.X > 0) and
      (AClient.MinSize.Y > 0) and (AClient.MaxSize.Y > 0) and
@@ -3283,6 +3342,7 @@ var
   PtrReply: Pxcb_query_pointer_reply_t;
   TargetMon: TXCBMonitor;
   PlaceX, PlaceY: Integer;
+  ParentCli: TXCBWMClient;
 begin
   if (AClient = nil) or AClient.IsReparented or (FConn = nil) then Exit;
 
@@ -3292,10 +3352,66 @@ begin
   if AClient.CurrentRect.Height <= 1 then
     AClient.CurrentRect := TXCBRect.Create(AClient.CurrentRect.X, AClient.CurrentRect.Y, AClient.CurrentRect.Width, 400);
 
-  // New window placement: follow pointer for regular windows, center dialogs over parent/workarea
-  if (AClient.CurrentRect.X = 0) and (AClient.CurrentRect.Y = 0) and
-     not AClient.HasUserPosition and not AClient.HasProgramPosition and
+  // New window placement:
+  // Case A: Dialog placement (wtDialog or has TransientFor)
+  // If the dialog doesn't have an explicit user-set position (HasUserPosition = False),
+  // center it over its transient parent window or over the active workarea.
+  if ((AClient.WindowType = wtDialog) or (AClient.TransientFor <> 0)) and
+     not AClient.HasUserPosition and
      not (wsMaximizedHorz in AClient.State) and not (wsFullscreen in AClient.State) then
+  begin
+    ParentCli := nil;
+    if AClient.TransientFor <> 0 then
+    begin
+      ParentCli := FindClientByClientWindow(AClient.TransientFor);
+      if ParentCli = nil then
+        ParentCli := FindClient(AClient.TransientFor);
+      // Strictly ignore dock windows as transient parents
+      if (ParentCli <> nil) and (ParentCli.WindowType = wtDock) then
+        ParentCli := nil;
+    end;
+    if (ParentCli = nil) and (FActiveClient <> nil) and (FActiveClient <> AClient) and
+       (FActiveClient.WindowType in [wtNormal, wtDialog]) then
+      ParentCli := FActiveClient;
+
+    if ParentCli <> nil then
+    begin
+      TargetMon := MonitorForClient(ParentCli);
+      if TargetMon = nil then TargetMon := FPrimaryMonitor;
+      PlaceX := ParentCli.CurrentRect.X + ((ParentCli.CurrentRect.Width - AClient.CurrentRect.Width) div 2);
+      PlaceY := ParentCli.CurrentRect.Y + ((ParentCli.CurrentRect.Height - AClient.CurrentRect.Height) div 2);
+    end
+    else
+    begin
+      TargetMon := FPrimaryMonitor;
+      if TargetMon <> nil then
+      begin
+        PlaceX := TargetMon.Workarea.X + ((TargetMon.Workarea.Width - AClient.CurrentRect.Width) div 2);
+        PlaceY := TargetMon.Workarea.Y + ((TargetMon.Workarea.Height - AClient.CurrentRect.Height) div 2);
+      end
+      else
+      begin
+        PlaceX := 100;
+        PlaceY := 100;
+      end;
+    end;
+
+    if TargetMon <> nil then
+    begin
+      if PlaceX + AClient.CurrentRect.Width > TargetMon.Workarea.Right() then
+        PlaceX := Max(TargetMon.Workarea.X, TargetMon.Workarea.Right() - AClient.CurrentRect.Width);
+      if PlaceY + AClient.CurrentRect.Height > TargetMon.Workarea.Bottom() then
+        PlaceY := Max(TargetMon.Workarea.Y, TargetMon.Workarea.Bottom() - AClient.CurrentRect.Height);
+      if PlaceX < TargetMon.Workarea.X then PlaceX := TargetMon.Workarea.X;
+      if PlaceY < TargetMon.Workarea.Y then PlaceY := TargetMon.Workarea.Y;
+    end;
+
+    AClient.CurrentRect := TXCBRect.Create(PlaceX, PlaceY, AClient.CurrentRect.Width, AClient.CurrentRect.Height);
+  end
+  // Case B: Regular windows without explicit coordinates: follow pointer
+  else if (AClient.CurrentRect.X = 0) and (AClient.CurrentRect.Y = 0) and
+          not AClient.HasUserPosition and not AClient.HasProgramPosition and
+          not (wsMaximizedHorz in AClient.State) and not (wsFullscreen in AClient.State) then
   begin
     PtrCookie := xcb_query_pointer(FConn, FRootWindow);
     PtrReply := xcb_query_pointer_reply(FConn, PtrCookie, nil);
@@ -3304,25 +3420,7 @@ begin
       TargetMon := MonitorForPoint(PtrReply^.root_x, PtrReply^.root_y);
       if TargetMon = nil then TargetMon := FPrimaryMonitor;
 
-      if AClient.WindowType = wtDialog then
-      begin
-        if (FActiveClient <> nil) and (FActiveClient <> AClient) and (MonitorForClient(FActiveClient) = TargetMon) then
-        begin
-          PlaceX := FActiveClient.CurrentRect.X + ((FActiveClient.CurrentRect.Width - AClient.CurrentRect.Width) div 2);
-          PlaceY := FActiveClient.CurrentRect.Y + ((FActiveClient.CurrentRect.Height - AClient.CurrentRect.Height) div 2);
-        end
-        else if TargetMon <> nil then
-        begin
-          PlaceX := TargetMon.Workarea.X + ((TargetMon.Workarea.Width - AClient.CurrentRect.Width) div 2);
-          PlaceY := TargetMon.Workarea.Y + ((TargetMon.Workarea.Height - AClient.CurrentRect.Height) div 2);
-        end
-        else
-        begin
-          PlaceX := PtrReply^.root_x;
-          PlaceY := PtrReply^.root_y;
-        end;
-      end
-      else if TargetMon <> nil then
+      if TargetMon <> nil then
       begin
         PlaceX := PtrReply^.root_x - 30;
         PlaceY := PtrReply^.root_y - 20;
@@ -4273,6 +4371,7 @@ begin
         end
         else if (PropEv^.atom = FAtomMotifWmHints) or
                 (PropEv^.atom = XCB_ATOM_WM_NORMAL_HINTS) or
+                (PropEv^.atom = XCB_ATOM_WM_TRANSIENT_FOR) or
                 (FEwmhInitialized and (PropEv^.atom = FEwmh._NET_WM_WINDOW_TYPE)) then
         begin
           ReadClientProperties(Cli);

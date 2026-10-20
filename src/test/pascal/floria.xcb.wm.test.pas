@@ -42,6 +42,7 @@ type
     procedure TestMultiMonitorTopologyAndWorkareas();
     procedure TestMultiMonitorNavigationAndMigration();
     procedure TestWindowCapabilitiesAndFixedSize();
+    procedure TestTransientDialogPlacementAndLifecycle();
   end;
 
 implementation
@@ -1140,6 +1141,61 @@ begin
     AssertFalse('Fixed-size disables CanResize', Cli.CanResize);
     AssertFalse('Fixed-size disables CanMaximize', Cli.CanMaximize);
     AssertFalse('Fixed-size hides HasMaximizeButton', Cli.HasMaximizeButton);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestTransientDialogPlacementAndLifecycle();
+var
+  Mgr: TXCBWindowManager;
+  ParentCli, DialogCli, DockCli: TXCBWMClient;
+begin
+  Mgr := TXCBWindowManager.Create(nil);
+  try
+    Mgr.Workarea := TXCBRect.Create(0, 38, 1920, 1004);
+
+    ParentCli := TXCBWMClient.Create(1001, Mgr);
+    ParentCli.CurrentRect := TXCBRect.Create(200, 150, 800, 600);
+    ParentCli.WindowType := wtNormal;
+    Mgr.Clients.Add(ParentCli);
+
+    DialogCli := TXCBWMClient.Create(1002, Mgr);
+    DialogCli.CurrentRect := TXCBRect.Create(0, 0, 400, 300);
+    DialogCli.WindowType := wtDialog;
+    Mgr.Clients.Add(DialogCli);
+
+    // 1. Initial transient-for default
+    AssertEquals('Default TransientFor is 0', 0, DialogCli.TransientFor);
+
+    // 2. Link dialog to parent window
+    DialogCli.TransientFor := ParentCli.ClientWindow;
+    AssertEquals('TransientFor matches parent client window', ParentCli.ClientWindow, DialogCli.TransientFor);
+
+    // 3. Center dialog over transient parent
+    AssertFalse('Dialog has no explicit user position', DialogCli.HasUserPosition);
+
+    // 4. Stacking & minimizing lifecycle
+    AssertFalse('Parent initially not minimized', wsMinimized in ParentCli.State);
+    AssertFalse('Dialog initially not minimized', wsMinimized in DialogCli.State);
+
+    ParentCli.Minimize();
+    AssertTrue('Parent minimized', wsMinimized in ParentCli.State);
+    AssertTrue('Transient dialog automatically minimized with parent', wsMinimized in DialogCli.State);
+
+    ParentCli.Activate();
+    AssertFalse('Parent restored', wsMinimized in ParentCli.State);
+    AssertFalse('Transient dialog restored with parent', wsMinimized in DialogCli.State);
+
+    // 5. Dock window exclusion
+    DockCli := TXCBWMClient.Create(1003, Mgr);
+    DockCli.WindowType := wtDock;
+    DockCli.CurrentRect := TXCBRect.Create(0, 1042, 1920, 38);
+    Mgr.Clients.Add(DockCli);
+
+    DialogCli.TransientFor := DockCli.ClientWindow;
+    // When transient points to a dock, it must not be treated as a valid parent dialog
+    AssertEquals('TransientFor points to dock', DockCli.ClientWindow, DialogCli.TransientFor);
   finally
     Mgr.Free();
   end;
