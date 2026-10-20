@@ -43,6 +43,7 @@ type
     procedure TestMultiMonitorNavigationAndMigration();
     procedure TestWindowCapabilitiesAndFixedSize();
     procedure TestTransientDialogPlacementAndLifecycle();
+    procedure TestDesktopWindowPolicy();
   end;
 
 implementation
@@ -1196,6 +1197,47 @@ begin
     DialogCli.TransientFor := DockCli.ClientWindow;
     // When transient points to a dock, it must not be treated as a valid parent dialog
     AssertEquals('TransientFor points to dock', DockCli.ClientWindow, DialogCli.TransientFor);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestDesktopWindowPolicy();
+var
+  Mgr: TXCBWindowManager;
+  DeskCli: TXCBWMClient;
+begin
+  Mgr := TXCBWindowManager.Create(nil);
+  try
+    DeskCli := TXCBWMClient.Create(2001, Mgr);
+    DeskCli.WindowType := wtDesktop;
+    DeskCli.CurrentRect := TXCBRect.Create(0, 0, 1920, 1080);
+    Mgr.Clients.Add(DeskCli);
+
+    // 1. Desktop window is not reparented
+    AssertFalse('Desktop is not reparented', DeskCli.IsReparented);
+
+    // 2. Capabilities are disabled
+    DeskCli.CanMinimize := False;
+    DeskCli.CanMaximize := False;
+    DeskCli.CanResize := False;
+    DeskCli.CanClose := False;
+
+    AssertFalse('Desktop cannot minimize', DeskCli.CanMinimize);
+    AssertFalse('Desktop cannot maximize', DeskCli.CanMaximize);
+    AssertFalse('Desktop cannot resize', DeskCli.CanResize);
+    AssertFalse('Desktop cannot close', DeskCli.CanClose);
+
+    // 3. Minimizing is suppressed
+    DeskCli.Minimize();
+    AssertFalse('Desktop cannot be minimized', wsMinimized in DeskCli.State);
+
+    // 4. Drag / Move is suppressed
+    Mgr.BeginDrag(DeskCli, dmMove, 500, 500);
+    AssertNull('Desktop window cannot be dragged/moved', Mgr.DragClient);
+
+    Mgr.BeginDrag(DeskCli, dmResizeRight, 1920, 500);
+    AssertNull('Desktop window cannot be resized', Mgr.DragClient);
   finally
     Mgr.Free();
   end;

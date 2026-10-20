@@ -1009,7 +1009,10 @@ begin
     else
       WinToRaise := FClientWindow;
 
-    Values[0] := XCB_STACK_MODE_ABOVE;
+    if FWindowType = wtDesktop then
+      Values[0] := XCB_STACK_MODE_BELOW
+    else
+      Values[0] := XCB_STACK_MODE_ABOVE;
     xcb_configure_window(FManager.Connection, WinToRaise, XCB_CONFIG_WINDOW_STACK_MODE, @Values[0]);
 
     if (FResizeWindow <> 0) and (WinToRaise = FFrameWindow) and not ((wsMaximizedHorz in FState) or (wsFullscreen in FState)) then
@@ -2887,6 +2890,16 @@ begin
     AClient.HasMaximizeButton := False;
     AClient.CanMinimize := False;
     AClient.HasMinimizeButton := False;
+  end
+  else if AClient.WindowType in [wtDock, wtDesktop] then
+  begin
+    AClient.CanMaximize := False;
+    AClient.HasMaximizeButton := False;
+    AClient.CanMinimize := False;
+    AClient.HasMinimizeButton := False;
+    AClient.CanClose := False;
+    AClient.HasCloseButton := False;
+    AClient.CanResize := False;
   end;
 
   // 4. _NET_WM_PID
@@ -3648,6 +3661,11 @@ begin
           );
         end;
         xcb_map_window(FConn, Cli.ClientWindow);
+        if Cli.WindowType = wtDesktop then
+        begin
+          Extents[0] := XCB_STACK_MODE_BELOW;
+          xcb_configure_window(FConn, Cli.ClientWindow, XCB_CONFIG_WINDOW_STACK_MODE, @Extents[0]);
+        end;
       end;
     end
     else
@@ -3662,7 +3680,7 @@ begin
       end;
     end;
 
-    if FConn <> nil then
+    if (FConn <> nil) and not (Cli.WindowType in [wtDesktop, wtDock]) then
     begin
       EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE;
       xcb_change_window_attributes(FConn, Cli.ClientWindow, XCB_CW_EVENT_MASK, @EventMask);
@@ -3680,6 +3698,11 @@ begin
       xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
                       XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
                       XCB_BUTTON_INDEX_3, XCB_MOD_MASK_1 or XCB_MOD_MASK_2);
+    end
+    else if FConn <> nil then
+    begin
+      EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE;
+      xcb_change_window_attributes(FConn, Cli.ClientWindow, XCB_CW_EVENT_MASK, @EventMask);
     end;
 
     Cli.RestoredRect := Cli.CurrentRect;
@@ -4497,6 +4520,7 @@ var
   dragCursor: xcb_cursor_t;
 begin
   if (AClient = nil) or (AMode = dmNone) then Exit;
+  if AClient.WindowType in [wtDesktop, wtDock] then Exit;
   if (AMode <> dmMove) and (not AClient.CanResize) then Exit;
 
   FDragClient := AClient;
