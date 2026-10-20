@@ -823,11 +823,20 @@ procedure TFloriaCanvasAgg.DrawTextLeft(X, Y, W, H: Double; const AText: string;
 var
   actualFont: TFloriaFont;
   ty: Double;
+  needClip: Boolean;
 begin
   if AText = '' then Exit;
   if not Assigned(AFont) then actualFont := FloriaGetSystemFont() else actualFont := AFont;
   ty := Round(Y + (H / 2.0) + (actualFont.Ascent - actualFont.Descent) / 2.0);
-  DrawText(Round(X), ty, AText, actualFont, R, G, B);
+  needClip := (W > 0.0) and (H > 0.0);
+  if needClip then
+    PushClipRect(Round(X), Round(Y), Round(W), Round(H));
+  try
+    DrawText(Round(X), ty, AText, actualFont, R, G, B);
+  finally
+    if needClip then
+      PopClipRect();
+  end;
 end;
 
 procedure TFloriaCanvasAgg.DrawTextHershey(X, Y: Double; const AText: string; ASize: Double; R, G, B: Double);
@@ -1027,6 +1036,7 @@ end;
 procedure TFloriaCanvasAgg.DrawTextCentered(X, Y, W, H: Integer; const AText: string; AFont: TFloriaFont; R, G, B: Double);
 var
   TW, TX, TY: Double;
+  needClip: Boolean;
 begin
   if AText = '' then Exit;
   if not Assigned(AFont) then AFont := FloriaGetSystemFont();
@@ -1038,10 +1048,21 @@ begin
   end;
 
   TW := AFont.GetTextWidth(AText);
-  TX := Round(X + (W - TW) / 2.0);
+  if (W > 0) and (TW > W) then
+    TX := X
+  else
+    TX := Round(X + (W - TW) / 2.0);
   TY := Round(Y + (H / 2.0) + (AFont.Ascent - AFont.Descent) / 2.0);
 
-  DrawText(TX, TY, AText, AFont, R, G, B);
+  needClip := (W > 0) and (H > 0) and (TW > W);
+  if needClip then
+    PushClipRect(X, Y, W, H);
+  try
+    DrawText(TX, TY, AText, AFont, R, G, B);
+  finally
+    if needClip then
+      PopClipRect();
+  end;
 end;
 
 procedure TFloriaCanvasAgg.DrawText(X, Y: Double; const AText: string; ASize: Double; R, G, B: Double);

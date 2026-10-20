@@ -629,22 +629,47 @@ procedure TFloriaCanvasGL.DrawTextCentered(X, Y, W, H: Integer; const AText: str
 var
   tw: Double;
   font: TFloriaFont;
+  tx: Integer;
+  needClip: Boolean;
 begin
   if (AText = '') or (W <= 0) or (H <= 0) then Exit;
   font := AFont;
   if not Assigned(font) then font := FloriaGetSystemFont();
   tw := font.GetTextWidth(AText);
-  DrawText(Round(X + (W - tw) / 2.0), Round(Y + (H / 2.0) + (font.Ascent - font.Descent) / 2.0), AText, font, R, G, B);
+  if (W > 0) and (tw > W) then
+    tx := X
+  else
+    tx := Round(X + (W - tw) / 2.0);
+
+  needClip := (W > 0) and (H > 0) and (tw > W);
+  if needClip then
+    PushClipRect(X, Y, W, H);
+  try
+    DrawText(tx, Round(Y + (H / 2.0) + (font.Ascent - font.Descent) / 2.0), AText, font, R, G, B);
+  finally
+    if needClip then
+      PopClipRect();
+  end;
 end;
 
 procedure TFloriaCanvasGL.DrawTextLeft(X, Y, W, H: Double; const AText: string; AFont: TFloriaFont; R, G, B: Double);
 var
   font: TFloriaFont;
+  needClip: Boolean;
 begin
   if (AText = '') then Exit;
   font := AFont;
   if not Assigned(font) then font := FloriaGetSystemFont();
-  DrawText(Round(X), Round(Y + (H / 2.0) + (font.Ascent - font.Descent) / 2.0), AText, font, R, G, B);
+
+  needClip := (W > 0.0) and (H > 0.0);
+  if needClip then
+    PushClipRect(Round(X), Round(Y), Round(W), Round(H));
+  try
+    DrawText(Round(X), Round(Y + (H / 2.0) + (font.Ascent - font.Descent) / 2.0), AText, font, R, G, B);
+  finally
+    if needClip then
+      PopClipRect();
+  end;
 end;
 
 procedure TFloriaCanvasGL.DrawTextRotated(X, Y: Double; const AText: string; AFont: TFloriaFont; AngleDeg: Double; R, G, B: Double);
