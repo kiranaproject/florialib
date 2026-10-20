@@ -9,7 +9,10 @@ unit Floria.Image.JPEG;
 // - Baseline DCT JPEG decoding (SOF0).
 // - Chroma subsampling: 4:4:4, 4:2:2 (H2V1), and 4:2:0 (H2V2).
 // - Grayscale (1-component) and YCbCr (3-component) color spaces.
-// - Fixed-point 8x8 Inverse Discrete Cosine Transform (IDCT).
+// - Fixed-point 8x8 Inverse Discrete Cosine Transform (IDCT) via IJG integer standard.
+// - ITU-T T.81 compliant canonical Huffman decoding (MinCode/MaxCode/ValPtr).
+// - 8-bit and 16-bit Quantization tables.
+// - Restart markers (DRI / RST0..RST7).
 // - Automatic byte-stuffing ($FF00) stripping in entropy stream.
 
 {$mode objfpc}{$H+}
@@ -43,13 +46,29 @@ const
     53, 60, 61, 54, 47, 55, 62, 63
   );
 
+  FIX_0_298631336 = 2446;
+  FIX_0_390180644 = 3196;
+  FIX_0_541196100 = 4433;
+  FIX_0_765366865 = 6270;
+  FIX_0_899976223 = 7373;
+  FIX_1_175875602 = 9633;
+  FIX_1_501321110 = 12299;
+  FIX_1_847759065 = 15137;
+  FIX_1_961570560 = 16069;
+  FIX_2_053119869 = 16819;
+  FIX_2_562915447 = 20995;
+  FIX_3_072711026 = 25172;
+
 type
   TQuantTable = array[0..63] of Word;
 
   TJpegHuffmanTable = record
     Counts  : array[1..16] of Byte;
     Symbols : array[0..255] of Byte;
-    Offsets : array[1..17] of Integer;
+    MinCode : array[1..16] of Integer;
+    MaxCode : array[1..16] of Integer;
+    ValPtr  : array[1..16] of Integer;
+    IsValid : Boolean;
   end;
 
   TJpegComponent = record
@@ -68,6 +87,7 @@ type
     BytePos  : Integer;
     BitBuf   : Cardinal;
     BitsInBuf: Integer;
+    Marker   : Byte;
   end;
 
 procedure InitJpegBitStream(var BS: TJpegBitStream; const AData: Pointer; const ASize: Integer);
@@ -77,6 +97,7 @@ begin
   BS.BytePos := 0;
   BS.BitBuf := 0;
   BS.BitsInBuf := 0;
+  BS.Marker := 0;
 end;
 
 function ReadJpegBit(var BS: TJpegBitStream): Integer;
@@ -91,8 +112,18 @@ begin
       Inc(BS.BytePos);
       if B = $FF then
       begin
-        if (BS.BytePos < BS.Size) and (BS.Data[BS.BytePos] = $00) then
-          Inc(BS.BytePos); // Skip stuffed zero byte
+        while (BS.BytePos < BS.Size) and (BS.Data[BS.BytePos] = $FF) do
+          Inc(BS.BytePos);
+        if BS.BytePos < BS.Size then
+        begin
+          if BS.Data[BS.BytePos] = $00 then
+            Inc(BS.BytePos)
+          else if (BS.Data[BS.BytePos] >= $D0) and (BS.Data[BS.BytePos] <= $D7) then
+          begin
+            BS.Marker := BS.Data[BS.BytePos];
+            Inc(BS.BytePos);
+          end;
+        end;
       end;
       BS.BitBuf := B;
       BS.BitsInBuf := 8;
@@ -118,29 +149,56 @@ begin
     Result := (Result shl 1) or ReadJpegBit(BS);
 end;
 
+procedure BuildHuffmanTable(var Table: TJpegHuffmanTable);
+var
+  I, J, Code: Integer;
+begin
+  J := 0;
+  Code := 0;
+  for I := 1 to 16 do
+  begin
+    if Table.Counts[I] = 0 then
+      Table.MaxCode[I] := -1
+    else
+    begin
+      Table.ValPtr[I] := J;
+      Table.MinCode[I] := Code;
+      Code := Code + Table.Counts[I] - 1;
+      Table.MaxCode[I] := Code;
+      Inc(Code);
+      Inc(J, Table.Counts[I]);
+    end;
+    Code := Code shl 1;
+  end;
+  Table.IsValid := True;
+end;
+
 function DecodeJpegHuffmanSymbol(var BS: TJpegBitStream; const Table: TJpegHuffmanTable): Integer;
 var
   Code: Integer;
   Len: Integer;
-  Count: Integer;
+  J: Integer;
 begin
-  Code := 0;
-  for Len := 1 to 16 do
+  if not Table.IsValid then Exit(0);
+  Code := ReadJpegBit(BS);
+  Len := 1;
+  while (Len <= 16) and (Code > Table.MaxCode[Len]) do
   begin
+    Inc(Len);
     Code := (Code shl 1) or ReadJpegBit(BS);
-    Count := Table.Counts[Len];
-    if Code < Count then
-    begin
-      Result := Table.Symbols[Table.Offsets[Len] + Code];
-      Exit;
-    end;
-    Code := Code - Count;
+  end;
+  if Len <= 16 then
+  begin
+    J := Table.ValPtr[Len] + Code - Table.MinCode[Len];
+    if (J >= 0) and (J <= 255) then
+      Exit(Table.Symbols[J]);
   end;
   Result := 0;
 end;
 
 function ExtendJpegSign(const Val, Bits: Integer): Integer;
 begin
+  if Bits <= 0 then Exit(0);
   if Val < (1 shl (Bits - 1)) then
     Result := Val + (-1 shl Bits) + 1
   else
@@ -148,114 +206,167 @@ begin
 end;
 
 // ============================================================================
-// Fast 8x8 Inverse Discrete Cosine Transform (IDCT)
+// Fast 8x8 Inverse Discrete Cosine Transform (IDCT) — IJG Integer Algorithm
 // ============================================================================
 
 procedure InverseDCT8x8(var Block: array of Integer);
 var
-  I: Integer;
-  X0, X1, X2, X3, X4, X5, X6, X7, X8: Integer;
-  Row: array[0..63] of Integer;
-  P: Integer;
+  I, J: Integer;
+  Val: Integer;
+  Z1, Z2, Z3, Z4, Z5: Integer;
+  Tmp0, Tmp1, Tmp2, Tmp3: Integer;
+  Tmp10, Tmp11, Tmp12, Tmp13: Integer;
+  Ws: array[0..63] of Integer;
+  RowStart: Integer;
+  AllZero: Boolean;
 begin
-  // Horizontal IDCT
+  // Pass 1: process rows
   for I := 0 to 7 do
   begin
-    P := I * 8;
-    if (Block[P+1] = 0) and (Block[P+2] = 0) and (Block[P+3] = 0) and
-       (Block[P+4] = 0) and (Block[P+5] = 0) and (Block[P+6] = 0) and (Block[P+7] = 0) then
+    RowStart := I * 8;
+    AllZero := True;
+    for J := 1 to 7 do
     begin
-      X0 := Block[P] shl 3;
-      Row[P+0] := X0; Row[P+1] := X0; Row[P+2] := X0; Row[P+3] := X0;
-      Row[P+4] := X0; Row[P+5] := X0; Row[P+6] := X0; Row[P+7] := X0;
+      if Block[RowStart + J] <> 0 then
+      begin
+        AllZero := False;
+        Break;
+      end;
+    end;
+
+    if AllZero then
+    begin
+      Val := Block[RowStart] shl 2;
+      for J := 0 to 7 do
+        Ws[RowStart + J] := Val;
       Continue;
     end;
 
-    X0 := (Block[P+0] shl 11) + 128;
-    X1 := Block[P+4] shl 11;
-    X2 := Block[P+6];
-    X3 := Block[P+2];
-    X4 := Block[P+1];
-    X5 := Block[P+7];
-    X6 := Block[P+5];
-    X7 := Block[P+3];
+    // Even part
+    Z2 := Block[RowStart + 2];
+    Z3 := Block[RowStart + 6];
+    Z1 := (Z2 + Z3) * FIX_0_541196100;
+    Tmp2 := Z1 + Z3 * (-FIX_1_847759065);
+    Tmp3 := Z1 + Z2 * FIX_0_765366865;
 
-    X8 := X7 + X5;
-    X7 := X7 - X5;
-    X5 := X4 + X6;
-    X4 := X4 - X6;
+    Tmp0 := (Block[RowStart + 0] + Block[RowStart + 4]) shl 13;
+    Tmp1 := (Block[RowStart + 0] - Block[RowStart + 4]) shl 13;
 
-    X6 := (X8 + X5) * 4433;
-    X5 := X6 + X5 * 6270;
-    X8 := X6 - X8 * 15137;
+    Tmp10 := Tmp0 + Tmp3;
+    Tmp13 := Tmp0 - Tmp3;
+    Tmp11 := Tmp1 + Tmp2;
+    Tmp12 := Tmp1 - Tmp2;
 
-    X6 := X4 * 9633 + X7 * 2446;
-    X4 := X4 * 2446 - X7 * 9633;
+    // Odd part
+    Tmp0 := Block[RowStart + 7];
+    Tmp1 := Block[RowStart + 5];
+    Tmp2 := Block[RowStart + 3];
+    Tmp3 := Block[RowStart + 1];
 
-    X7 := X0 + X1;
-    X0 := X0 - X1;
-    X1 := (X3 + X2) * 4433;
-    X2 := X1 - X2 * 15137;
-    X3 := X1 + X3 * 6270;
+    Z1 := Tmp0 + Tmp3;
+    Z2 := Tmp1 + Tmp2;
+    Z3 := Tmp0 + Tmp2;
+    Z4 := Tmp1 + Tmp3;
+    Z5 := (Z3 + Z4) * FIX_1_175875602;
 
-    X1 := X7 + X3;
-    X7 := X7 - X3;
-    X3 := X0 + X2;
-    X0 := X0 - X2;
+    Tmp0 := Tmp0 * FIX_0_298631336;
+    Tmp1 := Tmp1 * FIX_2_053119869;
+    Tmp2 := Tmp2 * FIX_3_072711026;
+    Tmp3 := Tmp3 * FIX_1_501321110;
+    Z1 := Z1 * (-FIX_0_899976223);
+    Z2 := Z2 * (-FIX_2_562915447);
+    Z3 := Z3 * (-FIX_1_961570560);
+    Z4 := Z4 * (-FIX_0_390180644);
 
-    Row[P+0] := (X1 + X5) shr 8;
-    Row[P+7] := (X1 - X5) shr 8;
-    Row[P+1] := (X3 + X4) shr 8;
-    Row[P+6] := (X3 - X4) shr 8;
-    Row[P+2] := (X0 + X6) shr 8;
-    Row[P+5] := (X0 - X6) shr 8;
-    Row[P+3] := (X7 + X8) shr 8;
-    Row[P+4] := (X7 - X8) shr 8;
+    Z3 := Z3 + Z5;
+    Z4 := Z4 + Z5;
+
+    Tmp0 := Tmp0 + Z1 + Z3;
+    Tmp1 := Tmp1 + Z2 + Z4;
+    Tmp2 := Tmp2 + Z2 + Z3;
+    Tmp3 := Tmp3 + Z1 + Z4;
+
+    Ws[RowStart + 0] := SarLongint(Tmp10 + Tmp3 + 1024, 11);
+    Ws[RowStart + 7] := SarLongint(Tmp10 - Tmp3 + 1024, 11);
+    Ws[RowStart + 1] := SarLongint(Tmp11 + Tmp2 + 1024, 11);
+    Ws[RowStart + 6] := SarLongint(Tmp11 - Tmp2 + 1024, 11);
+    Ws[RowStart + 2] := SarLongint(Tmp12 + Tmp1 + 1024, 11);
+    Ws[RowStart + 5] := SarLongint(Tmp12 - Tmp1 + 1024, 11);
+    Ws[RowStart + 3] := SarLongint(Tmp13 + Tmp0 + 1024, 11);
+    Ws[RowStart + 4] := SarLongint(Tmp13 - Tmp0 + 1024, 11);
   end;
 
-  // Vertical IDCT
+  // Pass 2: process columns
   for I := 0 to 7 do
   begin
-    X0 := (Row[I] shl 8) + 8192;
-    X1 := Row[I+32] shl 8;
-    X2 := Row[I+48];
-    X3 := Row[I+16];
-    X4 := Row[I+8];
-    X5 := Row[I+56];
-    X6 := Row[I+40];
-    X7 := Row[I+24];
+    AllZero := True;
+    for J := 1 to 7 do
+    begin
+      if Ws[J * 8 + I] <> 0 then
+      begin
+        AllZero := False;
+        Break;
+      end;
+    end;
 
-    X8 := X7 + X5;
-    X7 := X7 - X5;
-    X5 := X4 + X6;
-    X4 := X4 - X6;
+    if AllZero then
+    begin
+      Val := SarLongint(Ws[I] + 16, 5);
+      for J := 0 to 7 do
+        Block[J * 8 + I] := Val;
+      Continue;
+    end;
 
-    X6 := (X8 + X5) * 4433;
-    X5 := X6 + X5 * 6270;
-    X8 := X6 - X8 * 15137;
+    Z2 := Ws[2 * 8 + I];
+    Z3 := Ws[6 * 8 + I];
+    Z1 := (Z2 + Z3) * FIX_0_541196100;
+    Tmp2 := Z1 + Z3 * (-FIX_1_847759065);
+    Tmp3 := Z1 + Z2 * FIX_0_765366865;
 
-    X6 := X4 * 9633 + X7 * 2446;
-    X4 := X4 * 2446 - X7 * 9633;
+    Tmp0 := (Ws[0 * 8 + I] + Ws[4 * 8 + I]) shl 13;
+    Tmp1 := (Ws[0 * 8 + I] - Ws[4 * 8 + I]) shl 13;
 
-    X7 := X0 + X1;
-    X0 := X0 - X1;
-    X1 := (X3 + X2) * 4433;
-    X2 := X1 - X2 * 15137;
-    X3 := X1 + X3 * 6270;
+    Tmp10 := Tmp0 + Tmp3;
+    Tmp13 := Tmp0 - Tmp3;
+    Tmp11 := Tmp1 + Tmp2;
+    Tmp12 := Tmp1 - Tmp2;
 
-    X1 := X7 + X3;
-    X7 := X7 - X3;
-    X3 := X0 + X2;
-    X0 := X0 - X2;
+    Tmp0 := Ws[7 * 8 + I];
+    Tmp1 := Ws[5 * 8 + I];
+    Tmp2 := Ws[3 * 8 + I];
+    Tmp3 := Ws[1 * 8 + I];
 
-    Block[I+0]  := (X1 + X5) shr 14;
-    Block[I+56] := (X1 - X5) shr 14;
-    Block[I+8]  := (X3 + X4) shr 14;
-    Block[I+48] := (X3 - X4) shr 14;
-    Block[I+16] := (X0 + X6) shr 14;
-    Block[I+40] := (X0 - X6) shr 14;
-    Block[I+24] := (X7 + X8) shr 14;
-    Block[I+32] := (X7 - X8) shr 14;
+    Z1 := Tmp0 + Tmp3;
+    Z2 := Tmp1 + Tmp2;
+    Z3 := Tmp0 + Tmp2;
+    Z4 := Tmp1 + Tmp3;
+    Z5 := (Z3 + Z4) * FIX_1_175875602;
+
+    Tmp0 := Tmp0 * FIX_0_298631336;
+    Tmp1 := Tmp1 * FIX_2_053119869;
+    Tmp2 := Tmp2 * FIX_3_072711026;
+    Tmp3 := Tmp3 * FIX_1_501321110;
+    Z1 := Z1 * (-FIX_0_899976223);
+    Z2 := Z2 * (-FIX_2_562915447);
+    Z3 := Z3 * (-FIX_1_961570560);
+    Z4 := Z4 * (-FIX_0_390180644);
+
+    Z3 := Z3 + Z5;
+    Z4 := Z4 + Z5;
+
+    Tmp0 := Tmp0 + Z1 + Z3;
+    Tmp1 := Tmp1 + Z2 + Z4;
+    Tmp2 := Tmp2 + Z2 + Z3;
+    Tmp3 := Tmp3 + Z1 + Z4;
+
+    Block[0 * 8 + I] := SarLongint(Tmp10 + Tmp3 + 131072, 18);
+    Block[7 * 8 + I] := SarLongint(Tmp10 - Tmp3 + 131072, 18);
+    Block[1 * 8 + I] := SarLongint(Tmp11 + Tmp2 + 131072, 18);
+    Block[6 * 8 + I] := SarLongint(Tmp11 - Tmp2 + 131072, 18);
+    Block[2 * 8 + I] := SarLongint(Tmp12 + Tmp1 + 131072, 18);
+    Block[5 * 8 + I] := SarLongint(Tmp12 - Tmp1 + 131072, 18);
+    Block[3 * 8 + I] := SarLongint(Tmp13 + Tmp0 + 131072, 18);
+    Block[4 * 8 + I] := SarLongint(Tmp13 - Tmp0 + 131072, 18);
   end;
 end;
 
@@ -302,7 +413,7 @@ var
   QuantTables: array[0..3] of TQuantTable;
   DCHuffman: array[0..3] of TJpegHuffmanTable;
   ACHuffman: array[0..3] of TJpegHuffmanTable;
-  TableId, TableClass: Byte;
+  TableId, TableClass, TablePrec: Byte;
   Counts: array[1..16] of Byte;
   TotalSyms, I, K: Integer;
   CompId: Byte;
@@ -315,7 +426,7 @@ var
   CompIdx: Integer;
   BlockIdx: Integer;
   BlocksPerMCU: array[0..3] of Integer;
-  Blocks: array[0..3, 0..3, 0..63] of Integer;
+  Blocks: array[0..3, 0..15, 0..63] of Integer;
   RawBlock: array[0..63] of Integer;
   Sym, Bits, CoeffIdx: Integer;
   R, G, B: Integer;
@@ -325,9 +436,13 @@ var
   BlockX, BlockY: Integer;
   DstPixel: PBgraPixel;
   TempByte: Byte;
+  TempWord, hWord, wWord: Word;
+  RestartInterval, McuCount: Integer;
 begin
   W := 0; H := 0; NumComponents := 0;
   MaxH := 1; MaxV := 1;
+  RestartInterval := 0;
+  McuCount := 0;
   FillChar(QuantTables, SizeOf(QuantTables), 0);
   FillChar(DCHuffman, SizeOf(DCHuffman), 0);
   FillChar(ACHuffman, SizeOf(ACHuffman), 0);
@@ -352,9 +467,9 @@ begin
       begin
         AStream.ReadBuffer(Len, 2); Len := BEtoN(Len);
         AStream.Seek(1, soFromCurrent); // Sample precision (8)
-        AStream.ReadBuffer(H, 2); H := BEtoN(Cardinal(H));
-        AStream.ReadBuffer(W, 2); W := BEtoN(Cardinal(W));
-        AStream.ReadBuffer(NumComponents, 1);
+        AStream.ReadBuffer(hWord, 2); H := BEtoN(hWord);
+        AStream.ReadBuffer(wWord, 2); W := BEtoN(wWord);
+        AStream.ReadBuffer(TempByte, 1); NumComponents := TempByte;
 
         for I := 0 to NumComponents - 1 do
         begin
@@ -368,6 +483,11 @@ begin
           Components[I].DcPred := 0;
         end;
       end
+      // SOF2: Progressive DCT (unsupported)
+      else if Marker = $FFC2 then
+      begin
+        raise Exception.Create('Progressive JPEG (SOF2) is not currently supported; please use Baseline JPEG');
+      end
       // DQT: Define Quantization Tables
       else if Marker = $FFDB then
       begin
@@ -377,12 +497,38 @@ begin
         begin
           AStream.ReadBuffer(TableId, 1);
           Dec(Len);
+          TablePrec := (TableId shr 4) and $0F;
           TableId := TableId and $0F;
-          for K := 0 to 63 do
+          if TableId <= 3 then
           begin
-            AStream.ReadBuffer(TempByte, 1);
-            QuantTables[TableId][ZIGZAG[K]] := TempByte;
-            Dec(Len);
+            for K := 0 to 63 do
+            begin
+              if TablePrec = 0 then
+              begin
+                AStream.ReadBuffer(TempByte, 1);
+                QuantTables[TableId][K] := TempByte;
+                Dec(Len);
+              end
+              else
+              begin
+                AStream.ReadBuffer(TempWord, 2);
+                QuantTables[TableId][K] := BEtoN(TempWord);
+                Dec(Len, 2);
+              end;
+            end;
+          end
+          else
+          begin
+            if TablePrec = 0 then
+            begin
+              AStream.Seek(64, soFromCurrent);
+              Dec(Len, 64);
+            end
+            else
+            begin
+              AStream.Seek(128, soFromCurrent);
+              Dec(Len, 128);
+            end;
           end;
         end;
       end
@@ -403,29 +549,40 @@ begin
             Inc(TotalSyms, Counts[K]);
           end;
 
-          if TableClass = 0 then
+          if TableId <= 3 then
           begin
-            DCHuffman[TableId].Counts := Counts;
-            DCHuffman[TableId].Offsets[1] := 0;
-            for K := 1 to 16 do
-              DCHuffman[TableId].Offsets[K + 1] := DCHuffman[TableId].Offsets[K] + Counts[K];
-            for K := 0 to TotalSyms - 1 do
+            if TableClass = 0 then
             begin
-              AStream.ReadBuffer(DCHuffman[TableId].Symbols[K], 1); Dec(Len);
+              DCHuffman[TableId].Counts := Counts;
+              for K := 0 to TotalSyms - 1 do
+              begin
+                AStream.ReadBuffer(DCHuffman[TableId].Symbols[K], 1); Dec(Len);
+              end;
+              BuildHuffmanTable(DCHuffman[TableId]);
+            end
+            else
+            begin
+              ACHuffman[TableId].Counts := Counts;
+              for K := 0 to TotalSyms - 1 do
+              begin
+                AStream.ReadBuffer(ACHuffman[TableId].Symbols[K], 1); Dec(Len);
+              end;
+              BuildHuffmanTable(ACHuffman[TableId]);
             end;
           end
           else
           begin
-            ACHuffman[TableId].Counts := Counts;
-            ACHuffman[TableId].Offsets[1] := 0;
-            for K := 1 to 16 do
-              ACHuffman[TableId].Offsets[K + 1] := ACHuffman[TableId].Offsets[K] + Counts[K];
-            for K := 0 to TotalSyms - 1 do
-            begin
-              AStream.ReadBuffer(ACHuffman[TableId].Symbols[K], 1); Dec(Len);
-            end;
+            AStream.Seek(TotalSyms, soFromCurrent);
+            Dec(Len, TotalSyms);
           end;
         end;
+      end
+      // DRI: Define Restart Interval
+      else if Marker = $FFDD then
+      begin
+        AStream.ReadBuffer(Len, 2); Len := BEtoN(Len);
+        AStream.ReadBuffer(TempWord, 2);
+        RestartInterval := BEtoN(TempWord);
       end
       // SOS: Start of Scan
       else if Marker = $FFDA then
@@ -487,6 +644,15 @@ begin
     begin
       for McuX := 0 to McusX - 1 do
       begin
+        // Handle restart interval
+        if (RestartInterval > 0) and (McuCount > 0) and (McuCount mod RestartInterval = 0) then
+        begin
+          for I := 0 to NumComponents - 1 do
+            Components[I].DcPred := 0;
+          BS.BitsInBuf := 0;
+        end;
+        Inc(McuCount);
+
         for CompIdx := 0 to NumComponents - 1 do
         begin
           for BlockIdx := 0 to BlocksPerMCU[CompIdx] - 1 do
@@ -567,9 +733,9 @@ begin
               CrVal := Blocks[2, BlockIdx, (((SubY * Components[2].VFactor * 8) div McuH) mod 8) * 8 +
                                           (((SubX * Components[2].HFactor * 8) div McuW) mod 8)];
 
-              R := ClampByte(YVal + (359 * CrVal) shr 8);
-              G := ClampByte(YVal - (88 * CbVal + 183 * CrVal) shr 8);
-              B := ClampByte(YVal + (454 * CbVal) shr 8);
+              R := ClampByte(YVal + SarLongint(359 * CrVal, 8));
+              G := ClampByte(YVal - SarLongint(88 * CbVal + 183 * CrVal, 8));
+              B := ClampByte(YVal + SarLongint(454 * CbVal, 8));
             end;
 
             DstPixel := PBgraPixel(PByte(AImage.Scanline[PixY]) + PixX * 4);

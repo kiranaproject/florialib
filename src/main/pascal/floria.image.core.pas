@@ -307,7 +307,7 @@ end;
 
 procedure TFloriaImage.Allocate(const AWidth, AHeight: Integer; const AFormat: TFloriaPixelFormat = fpfBGRA32);
 var
-  TotalBytes: Integer;
+  TotalBytes: Int64;
 begin
   if Assigned(FPixelBuffer) then
   begin
@@ -333,7 +333,7 @@ begin
 
   if (FWidth > 0) and (FHeight > 0) then
   begin
-    TotalBytes := FHeight * FStride;
+    TotalBytes := Int64(FHeight) * Int64(FStride);
     GetMem(FPixelBuffer, TotalBytes);
     FillChar(FPixelBuffer^, TotalBytes, 0);
     FRenderingBuf.Construct();

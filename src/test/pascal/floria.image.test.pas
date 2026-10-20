@@ -32,6 +32,7 @@ type
     procedure TestJPEGMarkerDetection();
     procedure TestInvalidStreamHandling();
     procedure TestPremultipliedAlpha();
+    procedure TestBaselineJPEGDecode();
   end;
 
 implementation
@@ -520,6 +521,29 @@ begin
     AssertTrue('Demultiplied Green restored ~ 100', Abs(Pix.G - 100) <= 2);
     AssertTrue('Demultiplied Blue restored ~ 50', Abs(Pix.B - 50) <= 2);
     AssertEquals('Demultiplied Alpha', 128, Pix.A);
+  finally
+    Img.Free();
+  end;
+end;
+
+procedure TFloriaImageTest.TestBaselineJPEGDecode();
+const
+  JpegPath = '/home/afumi/Pictures/pexels-zhen-ciang-huang-2150740552-31416900.jpg';
+var
+  Img: TFloriaImage;
+  Pix: TBgraPixel;
+begin
+  if not FileExists(JpegPath) then Exit;
+
+  Img := TFloriaImage.CreateFromFile(JpegPath);
+  try
+    AssertEquals('Decoded Width', 2560, Img.Width);
+    AssertEquals('Decoded Height', 3840, Img.Height);
+    AssertEquals('Decoded Stride', 2560 * 4, Img.Stride);
+    AssertNotNull('PixelBuffer allocated', Img.PixelBuffer);
+
+    Pix := Img.Pixels[1280, 1920];
+    AssertEquals('Decoded center pixel alpha is 255', 255, Pix.A);
   finally
     Img.Free();
   end;
