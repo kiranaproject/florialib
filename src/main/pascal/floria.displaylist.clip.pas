@@ -7,7 +7,7 @@ interface
 
 uses
   Classes, SysUtils, Math,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.DisplayList;
 
 type

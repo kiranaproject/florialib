@@ -23,7 +23,7 @@ uses
   Floria.Canvas.Blend,
   Floria.Canvas.Filter,
   Floria.Errors,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.Path.Ops,
   Floria.Text.Paragraph,
   Floria.DisplayList,

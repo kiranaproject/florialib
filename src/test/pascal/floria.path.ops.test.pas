@@ -7,7 +7,7 @@ interface
 uses
   Classes, SysUtils, Math, fpcunit, testregistry,
   agg_path_storage,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.Path.Ops;
 
 type

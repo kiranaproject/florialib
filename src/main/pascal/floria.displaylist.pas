@@ -15,7 +15,7 @@ uses
   Floria.Canvas.Agg,
   Floria.SVG.Types,
   Floria.SVG.DOM,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.Path.Ops,
   Floria.Text.Paragraph;
 

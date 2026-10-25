@@ -40,7 +40,7 @@ uses
   Floria.Unicode.BiDi,
   Floria.Text.HarfBuzz,
   Floria.Canvas.Agg,
-  Floria.Path.Clipper.Core;
+  Floria.Geometry;
 
 type
   // Forward declarations

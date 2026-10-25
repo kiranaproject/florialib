@@ -21,7 +21,7 @@ interface
 
 uses
   ctypes, Classes, SysUtils, Math,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.Path.Ops;
 
 type

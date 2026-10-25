@@ -14,7 +14,7 @@ unit Floria.Path.Clipper.Offset;
 interface
 
 uses
-  Classes, Floria.Path.Clipper.Core, Floria.Path.Clipper.Engine;
+  Classes, Floria.Geometry, Floria.Path.Clipper.Core, Floria.Path.Clipper.Engine;
 
 type
 

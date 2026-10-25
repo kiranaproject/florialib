@@ -22,7 +22,7 @@ uses
   Floria.Image.Core,
   Floria.Font,
   Floria.Canvas.Agg,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.Path.Ops,
   agg_path_storage,
   Floria.SVG.Types,

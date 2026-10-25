@@ -14,6 +14,10 @@
         <UnitName Value="Floria.Errors"/>
       </Item>
       <Item>
+        <Filename Value="floria.geometry.pas"/>
+        <UnitName Value="Floria.Geometry"/>
+      </Item>
+      <Item>
         <Filename Value="floria.css.ast.pas"/>
         <UnitName Value="Floria.CSS.AST"/>
       </Item>

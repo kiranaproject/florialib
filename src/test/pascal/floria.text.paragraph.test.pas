@@ -9,7 +9,7 @@ uses
   Floria.Image.Core,
   Floria.Font,
   Floria.Canvas.Agg,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.Text.Paragraph;
 
 type

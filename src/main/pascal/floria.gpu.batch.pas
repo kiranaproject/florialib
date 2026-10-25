@@ -21,7 +21,7 @@ uses
   ctypes, Classes, SysUtils, Math,
   Floria.Image.Core,
   Floria.Canvas.Blend,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.DisplayList,
   Floria.DisplayList.Clip,
   Floria.GL,

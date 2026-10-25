@@ -8,7 +8,7 @@ uses
   Classes, SysUtils, Math, fpcunit, testregistry,
   Floria.Image.Core,
   Floria.Canvas.Blend,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.Path.Ops,
   Floria.DisplayList,
   Floria.DisplayList.Clip,

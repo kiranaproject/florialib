@@ -14,7 +14,7 @@ interface
 {$I floria.path.clipper.inc}
 
 uses
-  Classes, Math, SysUtils, Floria.Path.Clipper.Core;
+  Classes, Math, SysUtils, Floria.Geometry, Floria.Path.Clipper.Core;
 
 type
   TLocation = (locLeft, locTop, locRight, locBottom, locInside);

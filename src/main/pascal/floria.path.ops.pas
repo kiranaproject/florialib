@@ -28,6 +28,7 @@ uses
   agg_conv_curve,
   Floria.SVG.Types,
   Floria.SVG.Path,
+  Floria.Geometry,
   Floria.Path.Clipper.Core,
   Floria.Path.Clipper.Engine,
   Floria.Path.Clipper.Offset,
@@ -588,7 +589,7 @@ end;
 function TFloriaPath.GetBounds(): TRectD;
 begin
   FlushCurrentSubpath();
-  Result := Floria.Path.Clipper.Core.GetBounds(FPaths);
+  Result := Floria.Geometry.GetBounds(FPaths);
 end;
 
 procedure TFloriaPath.Translate(const DX, DY: Double);
@@ -607,7 +608,7 @@ end;
 function TFloriaPath.GetArea(): Double;
 begin
   FlushCurrentSubpath();
-  Result := Floria.Path.Clipper.Core.Area(FPaths);
+  Result := Area(FPaths);
 end;
 
 // ---------------------------------------------------------------------------

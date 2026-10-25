@@ -19,7 +19,7 @@ uses
   Floria.Canvas.Blend,
   Floria.SVG.Types,
   Floria.SVG.DOM,
-  Floria.Path.Clipper.Core,
+  Floria.Geometry,
   Floria.GPU.Atlas,
   Floria.GPU.Batch,
   Floria.GPU.Shaders,

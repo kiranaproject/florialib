@@ -15,7 +15,8 @@ unit Floria.Path.Clipper.Core;
 interface
 
 uses
-  SysUtils, Classes, Math;
+  SysUtils, Classes, Math,
+  Floria.Geometry;
 
 type
 {$IFDEF USINGZ}
@@ -25,14 +26,6 @@ type
   PPoint64  = ^TPoint64;
   TPoint64  = record
     X, Y: Int64;
-{$IFDEF USINGZ}
-    Z: ZType;
-{$ENDIF}
-  end;
-
-  PPointD   = ^TPointD;
-  TPointD   = record
-    X, Y: double;
 {$IFDEF USINGZ}
     Z: ZType;
 {$ENDIF}
@@ -49,14 +42,10 @@ type
   TPaths64 = array of TPath64;
   TArrayOfPaths = array of TPaths64;
 
-  TPathD = array of TPointD;
-  TPathsD = array of TPathD;
-  TArrayOfPathsD = array of TPathsD;
 
   // The most commonly used filling rules for polygons are EvenOdd and NonZero.
   // https://en.wikipedia.org/wiki/Even-odd_rule
   // https://en.wikipedia.org/wiki/Nonzero-rule
-  TFillRule = (frEvenOdd, frNonZero, frPositive, frNegative);
 
   TArrayOfBoolean = array of Boolean;
   TArrayOfInteger = array of Integer;
@@ -84,29 +73,6 @@ type
     property IsEmpty: Boolean read GetIsEmpty;
     property IsValid: Boolean read GetIsValid;
     property MidPoint: TPoint64 read GetMidPoint;
-  end;
-
-  TRectD = {$ifdef RECORD_METHODS}record{$else}object{$endif}
-  private
-    function GetWidth: double; {$IFDEF INLINING} inline; {$ENDIF}
-    function GetHeight: double; {$IFDEF INLINING} inline; {$ENDIF}
-    function GetIsEmpty: Boolean; {$IFDEF INLINING} inline; {$ENDIF}
-    function GetIsValid: Boolean; {$IFDEF INLINING} inline; {$ENDIF}
-    function GetMidPoint: TPointD; {$IFDEF INLINING} inline; {$ENDIF}
-  public
-    Left   : double;
-    Top    : double;
-    Right  : double;
-    Bottom : double;
-    function Contains(const pt: TPointD): Boolean; overload;
-    function Contains(const rec: TRectD): Boolean; overload;
-    function Intersects(const rec: TRectD): Boolean;
-    function AsPath: TPathD;
-    property Width: double read GetWidth;
-    property Height: double read GetHeight;
-    property IsEmpty: Boolean read GetIsEmpty;
-    property IsValid: Boolean read GetIsValid;
-    property MidPoint: TPointD read GetMidPoint;
   end;
 
 {$IFDEF FPC}
@@ -166,12 +132,9 @@ function GetSign(const val: double): integer;
 function Area(const path: TPath64): Double; overload;
 function Area(const paths: TPaths64): Double; overload;
   {$IFDEF INLINING} inline; {$ENDIF}
-function Area(const path: TPathD): Double; overload;
-function Area(const paths: TPathsD): Double; overload;
   {$IFDEF INLINING} inline; {$ENDIF}
 function IsPositive(const path: TPath64): Boolean; overload;
   {$IFDEF INLINING} inline; {$ENDIF}
-function IsPositive(const path: TPathD): Boolean; overload;
   {$IFDEF INLINING} inline; {$ENDIF}
 
 function IsCollinear(const pt1, sharedPt, pt2: TPoint64): Boolean;
@@ -216,7 +179,6 @@ function PointD(const X, Y: Double; Z: ZType = 0): TPointD; overload;
 {$ELSE}
 function Point64(const X, Y: Int64): TPoint64; overload; {$IFDEF INLINING} inline; {$ENDIF}
 function Point64(const X, Y: Double): TPoint64; overload; {$IFDEF INLINING} inline; {$ENDIF}
-function PointD(const X, Y: Double): TPointD; overload; {$IFDEF INLINING} inline; {$ENDIF}
 {$ENDIF}
 
 function Negate(const pt: TPoint64): TPoint64; overload; {$IFDEF INLINING} inline; {$ENDIF}
@@ -230,15 +192,11 @@ function Rect64(const left, top, right, bottom: Int64): TRect64; overload;
   {$IFDEF INLINING} inline; {$ENDIF}
 function Rect64(const recD: TRectD): TRect64; overload;
   {$IFDEF INLINING} inline; {$ENDIF}
-function RectD(const left, top, right, bottom: double): TRectD; overload;
-  {$IFDEF INLINING} inline; {$ENDIF}
 function RectD(const rec64: TRect64): TRectD; overload;
   {$IFDEF INLINING} inline; {$ENDIF}
 function GetBounds(const paths: TArrayOfPaths): TRect64; overload;
 function GetBounds(const paths: TPaths64): TRect64; overload;
-function GetBounds(const paths: TPathsD): TRectD; overload;
 function GetBounds(const path: TPath64): TRect64; overload;
-function GetBounds(const path: TPathD): TRectD; overload;
 
 function TranslatePoint(const pt: TPoint64; dx, dy: Int64): TPoint64; overload;
 function TranslatePoint(const pt: TPointD; dx, dy: double): TPointD; overload;
@@ -375,18 +333,9 @@ const
   MaxCoord    = MaxInt64 div 4;
   MinCoord    = - MaxCoord;
   invalid64   = MaxInt64;
-  invalidD    = infinity;
 
-  NullPointD  : TPointD = (X: 0; Y: 0);
   NullRect64  : TRect64 = (left: 0; top: 0; right: 0; Bottom: 0);
   InvalidPt64 : TPoint64 = (X: invalid64; Y: invalid64);
-  InvalidPtD :  TPointD = (X: invalidD; Y: invalidD);
-
-  NullRectD   : TRectD = (left: 0; top: 0; right: 0; Bottom: 0);
-  InvalidRect64 : TRect64 =
-    (left: invalid64; top: invalid64; right: invalid64; bottom: invalid64);
-  InvalidRectD : TRectD =
-    (left: invalidD; top: invalidD; right: invalidD; bottom: invalidD);
 
   Tolerance   : Double = 1.0E-12;
 
@@ -479,66 +428,6 @@ end;
 //------------------------------------------------------------------------------
 // TRectD methods ...
 //------------------------------------------------------------------------------
-
-function TRectD.GetWidth: double;
-begin
-  result := right - left;
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.GetHeight: double;
-begin
-  result := bottom - top;
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.GetIsEmpty: Boolean;
-begin
-  result := (bottom <= top) or (right <= left);
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.GetIsValid: Boolean;
-begin
-  result := left <> invalidD;
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.GetMidPoint: TPointD;
-begin
-  result := PointD((Left + Right) * 0.5, (Top + Bottom) * 0.5);
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.Contains(const pt: TPointD): Boolean;
-begin
-  result := (pt.X > Left) and (pt.X < Right) and
-    (pt.Y > Top) and (pt.Y < Bottom);
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.Contains(const rec: TRectD): Boolean;
-begin
-  result := (rec.Left >= Left) and (rec.Right <= Right) and
-    (rec.Top >= Top) and (rec.Bottom <= Bottom);
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.Intersects(const rec: TRectD): Boolean;
-begin
-  Result := (Max(Left, rec.Left) <= Min(Right, rec.Right)) and
-    (Max(Top, rec.Top) <= Min(Bottom, rec.Bottom));
-end;
-//------------------------------------------------------------------------------
-
-function TRectD.AsPath: TPathD;
-begin
-  SetLength(Result, 4);
-  Result[0] := PointD(Left, Top);
-  Result[1] := PointD(Right, Top);
-  Result[2] := PointD(Right, Bottom);
-  Result[3] := PointD(Left, Bottom);
-end;
 
 //------------------------------------------------------------------------------
 // TListEx class
@@ -1532,12 +1421,6 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function PointD(const X, Y: Double): TPointD;
-begin
-  Result.X := X;
-  Result.Y := Y;
-end;
-//------------------------------------------------------------------------------
 
 function Point64(const pt: TPointD): TPoint64;
 begin
@@ -1600,14 +1483,6 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function RectD(const left, top, right, bottom: double): TRectD;
-begin
-  Result.Left   := left;
-  Result.Top    := top;
-  Result.Right  := right;
-  Result.Bottom := bottom;
-end;
-//------------------------------------------------------------------------------
 
 function RectD(const rec64: TRect64): TRectD; overload;
 begin
@@ -1665,28 +1540,6 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function GetBounds(const paths: TPathsD): TRectD;
-var
-  i,j: Integer;
-  p: PPointD;
-begin
-  Result := RectD(MaxDouble, MaxDouble, -MaxDouble, -MaxDouble);
-  for i := 0 to High(paths) do
-    if Assigned(paths[i]) then
-    begin
-      p := @paths[i][0];
-      for j := 0 to High(paths[i]) do
-      begin
-        if p.X < Result.Left then Result.Left := p.X;
-        if p.X > Result.Right then Result.Right := p.X;
-        if p.Y < Result.Top then Result.Top := p.Y;
-        if p.Y > Result.Bottom then Result.Bottom := p.Y;
-        inc(p);
-      end;
-    end;
-  if Result.Left = MaxDouble then Result := NullRectD;
-end;
-//------------------------------------------------------------------------------
 
 function GetBounds(const path: TPath64): TRect64;
 var
@@ -1713,30 +1566,6 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function GetBounds(const path: TPathD): TRectD;
-var
-  i, len: Integer;
-  p: PPointD;
-begin
-  len := Length(path);
-  if len = 0 then
-  begin
-    Result := NullRectD;
-    Exit;
-  end;
-
-  Result := RectD(infinity, infinity, -infinity, -infinity);
-  p := @path[0];
-  for i := 0 to High(path) do
-  begin
-    if p.X < Result.Left then Result.Left := p.X;
-    if p.X > Result.Right then Result.Right := p.X;
-    if p.Y < Result.Top then Result.Top := p.Y;
-    if p.Y > Result.Bottom then Result.Bottom := p.Y;
-    inc(p);
-  end;
-end;
-//------------------------------------------------------------------------------
 
 function TranslatePoint(const pt: TPoint64; dx, dy: Int64): TPoint64;
 begin
@@ -1914,35 +1743,7 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function Area(const path: TPathD): Double;
-var
-  i, highI: Integer;
-  p1,p2: PPointD;
-begin
-  // https://en.wikipedia.org/wiki/Shoelace_formula
-  Result := 0.0;
-  highI := High(path);
-  if highI < 2 then Exit;
-  p1 := @path[highI];
-  p2 := @path[0];
-  for i := 0 to highI do
-  begin
-    Result := Result + (p1.Y + p2.Y) * (p1.X - p2.X);
-    p1 := p2; inc(p2);
-  end;
-  Result := Result * 0.5;
-end;
-//------------------------------------------------------------------------------
 
-function Area(const paths: TPathsD): Double;
-var
-  i: integer;
-begin
-  Result := 0;
-  for i := 0 to High(paths) do
-    Result := Result + Area(paths[i]);
-end;
-//------------------------------------------------------------------------------
 
 function IsPositive(const path: TPath64): Boolean;
 begin
@@ -1950,11 +1751,6 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function IsPositive(const path: TPathD): Boolean;
-begin
-  Result := (Area(path) >= 0);
-end;
-//------------------------------------------------------------------------------
 
 function TriSign(val: Int64): integer; // returns 0, 1 or -1
 {$IFDEF INLINING} inline; {$ENDIF}

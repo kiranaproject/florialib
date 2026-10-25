@@ -21,6 +21,7 @@ uses
   Floria.Canvas.Agg.Test,
   Floria.Canvas.Blend.Test,
   Floria.Canvas.Filter.Test,
+  Floria.Geometry.Test,
   Floria.Path.Ops.Test,
   Floria.Text.Paragraph.Test,
   Floria.Text.Emoji.Test,

@@ -14,7 +14,7 @@ interface
 {$I floria.path.clipper.inc}
 
 uses
-  Classes, Math, Floria.Path.Clipper.Core;
+  Classes, Math, Floria.Geometry, Floria.Path.Clipper.Core;
 
 type
   //PathType:

@@ -107,12 +107,31 @@ commands and known generator limitations.
 
 ---
 
-## 5. Vendored code
+## 5. Geometry and vendored code
 
-`floria.path.clipper.*` is a port of Angus Johnson's **Clipper2** and is
-distributed under the Boost Software License 1.0. It uses Delphi mode and its
-own formatting. Do not reformat it; preserve its headers. See
+### First-party geometry
+
+`Floria.Geometry` owns the library's 2D value types: `TPointD`, `TRectD`,
+`TPathD`, `TPathsD`, and `TFillRule`, plus `PointD`/`RectD` constructors and the
+`GetBounds`, `Area`, and `PointInPolygon` helpers. Canvases, display lists, the
+GPU pipeline, and text layout depend on this unit — never on a clipping engine —
+for basic geometry.
+
+Keep `TPointD` and `TRectD` field names and order stable: existing code relies
+on positional construction and on `FillChar` zero-initialization of records that
+embed them.
+
+### Vendored clipping engine (transitional)
+
+`floria.path.clipper.*` is a port of Angus Johnson's **Clipper2**, distributed
+under the Boost Software License 1.0. It uses Delphi mode and its own
+formatting; do not reformat it, and preserve its headers. See
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
+The vendored units now consume `Floria.Geometry` for the shared value types
+instead of declaring their own copies, so exactly one `TPointD`/`TRectD` exists
+in the program. The long-term plan replaces this engine with a first-party
+implementation; `Floria.Path.Ops` is the intended seam for that work.
 
 ---
 

@@ -13,7 +13,7 @@ unit Floria.Path.Clipper.Minkowski;
 interface
 
 uses
-  Classes, Math, Floria.Path.Clipper.Core;
+  Classes, Math, Floria.Geometry, Floria.Path.Clipper.Core;
 
 function MinkowskiSum(const Pattern, Path: TPath64;
   PathIsClosed: Boolean): TPaths64; overload;

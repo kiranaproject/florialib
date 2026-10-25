@@ -15,7 +15,7 @@ interface
 
 uses
   Math, SysUtils, Classes,
-  Floria.Path.Clipper.Core, Floria.Path.Clipper.Engine, Floria.Path.Clipper.Offset, Floria.Path.Clipper.RectClip;
+  Floria.Geometry, Floria.Path.Clipper.Core, Floria.Path.Clipper.Engine, Floria.Path.Clipper.Offset, Floria.Path.Clipper.RectClip;
 
 // A number of structures defined in other units are redeclared here
 // so those units won't also need to be declared in your own units clauses.
@@ -26,11 +26,11 @@ type
   TRect64     = Floria.Path.Clipper.Core.TRect64;
   TPath64     = Floria.Path.Clipper.Core.TPath64;
   TPaths64    = Floria.Path.Clipper.Core.TPaths64;
-  TPointD     = Floria.Path.Clipper.Core.TPointD;
-  TRectD      = Floria.Path.Clipper.Core.TRectD;
-  TPathD      = Floria.Path.Clipper.Core.TPathD;
-  TPathsD     = Floria.Path.Clipper.Core.TPathsD;
-  TFillRule   = Floria.Path.Clipper.Core.TFillRule;
+  TPointD     = Floria.Geometry.TPointD;
+  TRectD      = Floria.Geometry.TRectD;
+  TPathD      = Floria.Geometry.TPathD;
+  TPathsD     = Floria.Geometry.TPathsD;
+  TFillRule   = Floria.Geometry.TFillRule;
   TPolyTree64 = Floria.Path.Clipper.Engine.TPolyTree64;
   TPolyTreeD  = Floria.Path.Clipper.Engine.TPolyTreeD;
   TJoinType   = Floria.Path.Clipper.Offset.TJoinType;
@@ -38,10 +38,10 @@ type
 
   TArrayOfInt64 = array of Int64;
 const
-  frEvenOdd   = Floria.Path.Clipper.Core.frEvenOdd;
-  frNonZero   = Floria.Path.Clipper.Core.frNonZero;
-  frPositive  = Floria.Path.Clipper.Core.frPositive;
-  frNegative  = Floria.Path.Clipper.Core.frNegative;
+  frEvenOdd   = Floria.Geometry.frEvenOdd;
+  frNonZero   = Floria.Geometry.frNonZero;
+  frPositive  = Floria.Geometry.frPositive;
+  frNegative  = Floria.Geometry.frNegative;
   jtBevel     = Floria.Path.Clipper.Offset.jtBevel;
   jtSquare    = Floria.Path.Clipper.Offset.jtSquare;
   jtRound     = Floria.Path.Clipper.Offset.jtRound;
