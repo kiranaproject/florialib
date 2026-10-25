@@ -129,9 +129,9 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 
 ---
 
-### 8. Boolean Path Operations & Vector Math (`Floria.Path.*`, Clipper2)
+### 8. Boolean Path Operations & Vector Math (`Floria.Path.*`)
 
-- **Pure Object Pascal Clipper2 Engine**: Angus Johnson's polygon clipping engine with native dotted namespaces (`Floria.Path.Clipper.*`).
+- **First-party pure Object Pascal path engine**: booleans (`Floria.Path.Engine.Boolean`), offsetting (`Floria.Path.Engine.Offset`), and simplification, with no vendored third-party source. Geometry value types live in `Floria.Geometry`.
 - **High-Level `TFloriaPath`**:
   - Primitives: `MoveTo`, `LineTo`, `QuadTo`, `CubicTo` (adaptive de Casteljau subdivision), `ArcTo`, and `Close`.
   - Boolean operations: `Union`, `Difference`, `Intersect`, and `XorOp`.

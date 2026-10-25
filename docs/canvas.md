@@ -184,15 +184,14 @@ in `Floria.Geometry`, not in the clipping engine.
 ### Clipping backend
 
 `Floria.Path.Ops` delegates boolean and offset work to
-`Floria.Path.Engine`. A backend registers itself at unit initialization; the
-current default is the vendored Clipper2 port behind
-`Floria.Path.Engine.Clipper2`. `Path.Ops` links that adapter from its
-implementation section, so callers do not inherit a dependency on any specific
-clipping library.
+`Floria.Path.Engine`. A backend registers itself at unit initialization;
+`Floria.Path.Engine.Native` is the implementation. `Path.Ops` links the backend
+from its implementation section, so callers do not inherit a dependency on a
+specific unit.
 
-The default backend is `Floria.Path.Engine.Native`, which implements boolean
-operations, offsetting, and simplification first-party. The Clipper2 adapter
-remains registered as a reference implementation for comparison.
+The backend is `Floria.Path.Engine.Native`, which implements boolean
+operations, offsetting, and simplification first-party. There is no vendored
+clipping library.
 
 Offsetting builds raw offset geometry (edge normals plus per-corner join
 geometry), then unions it to remove the self-overlaps that appear wherever the

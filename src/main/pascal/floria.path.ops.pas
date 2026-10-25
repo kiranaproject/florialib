@@ -121,7 +121,7 @@ type
                      const ArcTolerance: Double = 0.0): TFloriaPath;
     function Simplify(const ATolerance: Double = 0.25): TFloriaPath;
 
-    // --- Interoperability: Clipper TPathsD ---
+    // --- Interoperability: raw path arrays ---
     function ToPathsD(): TPathsD;
     procedure FromPathsD(const APaths: TPathsD);
 
@@ -165,7 +165,6 @@ implementation
 // not inherit a dependency on any specific clipping library. Its unit
 // initialization registers the backend before Path.Ops is used.
 uses
-  Floria.Path.Engine.Clipper2,
   Floria.Path.Engine.Native;
 
 // ---------------------------------------------------------------------------

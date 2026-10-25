@@ -121,17 +121,17 @@ Keep `TPointD` and `TRectD` field names and order stable: existing code relies
 on positional construction and on `FillChar` zero-initialization of records that
 embed them.
 
-### Vendored clipping engine (transitional)
+### Path engine
 
-`floria.path.clipper.*` is a port of Angus Johnson's **Clipper2**, distributed
-under the Boost Software License 1.0. It uses Delphi mode and its own
-formatting; do not reformat it, and preserve its headers. See
-[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+`Floria.Path.Engine` is the seam between the path API and the clipping
+implementation. `Floria.Path.Engine.Native` is the only backend: it implements
+booleans (`Floria.Path.Engine.Boolean`), offsetting
+(`Floria.Path.Engine.Offset`), and simplification first-party.
 
-The vendored units now consume `Floria.Geometry` for the shared value types
-instead of declaring their own copies, so exactly one `TPointD`/`TRectD` exists
-in the program. The long-term plan replaces this engine with a first-party
-implementation; `Floria.Path.Ops` is the intended seam for that work.
+The library previously vendored a Pascal port of Angus Johnson's Clipper2.
+That port has been removed; no third-party source remains. Behaviour is pinned
+by the golden corpus (`src/test/pascal/floria.path.golden.data.pas`), whose
+expected values were captured from the reference implementation before removal.
 
 ---
 

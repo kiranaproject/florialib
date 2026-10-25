@@ -2,10 +2,9 @@ unit Floria.Path.Engine.Native.Test;
 
 // Floria.Path.Engine.Native.Test
 // ==============================
-// Covers the first-party operations, and compares them against the vendored
-// backend while it is still available. The comparison is the real safety net:
-// it proves the native implementation is a drop-in replacement rather than
-// merely self-consistent.
+// Covers the first-party operations. Expected values match the frozen golden
+// data, which was captured from the reference implementation before it was
+// removed, so these assertions are not merely self-consistent.
 
 {$mode objfpc}{$H+}
 
@@ -32,7 +31,6 @@ type
     procedure TestSimplifyNegativeToleranceRaises();
     procedure TestSimplifyPrecisionOutOfRangeRaises();
     procedure TestSimplifyEmptyInput();
-    procedure TestSimplifyMatchesClipper2();
     procedure TestBooleanStillDelegates();
     procedure TestOffsetStillDelegates();
   end;
@@ -158,7 +156,7 @@ end;
 
 procedure TFloriaNativeEngineTest.TestSimplifyZeroToleranceKeepsShape();
 var
-  Paths, Res, ClipperRes: TPathsD;
+  Paths, Res: TPathsD;
 begin
   // Zero tolerance still removes exactly-collinear vertices (their distance is
   // 0, which is not greater than the tolerance). It must not remove corners.
@@ -168,13 +166,6 @@ begin
   AssertEquals('zero tolerance keeps the contour', 1, Length(Res));
   AssertEquals('rectangle reduces to its four corners', 4, Length(Res[0]));
   AssertEquals('area preserved at zero tolerance', 5000.0, Abs(Area(Res)), 1.0);
-
-  // Agree with the vendored backend on this input.
-  UseFloriaPathEngine('clipper2');
-  ClipperRes := FloriaPathEngine().SimplifyPaths(Paths, 0.0, True, 2);
-  UseFloriaPathEngine('native');
-  AssertEquals('matches clipper2 at zero tolerance',
-    Length(ClipperRes[0]), Length(Res[0]));
 end;
 
 procedure TFloriaNativeEngineTest.TestSimplifyNegativeToleranceRaises();
@@ -237,28 +228,6 @@ begin
   Res := FloriaPathEngine().SimplifyPaths(Paths, 0.5, True, 2);
   AssertEquals('one empty contour preserved', 1, Length(Res));
   AssertEquals('empty contour stays empty', 0, Length(Res[0]));
-end;
-
-procedure TFloriaNativeEngineTest.TestSimplifyMatchesClipper2();
-var
-  Paths, NativeRes, ClipperRes: TPathsD;
-  I: Integer;
-begin
-  Paths := BuildCollinearRect();
-
-  UseFloriaPathEngine('clipper2');
-  ClipperRes := FloriaPathEngine().SimplifyPaths(Paths, 0.5, True, 2);
-
-  UseFloriaPathEngine('native');
-  NativeRes := FloriaPathEngine().SimplifyPaths(Paths, 0.5, True, 2);
-
-  AssertEquals('same contour count', Length(ClipperRes), Length(NativeRes));
-  for I := 0 to High(ClipperRes) do
-    AssertEquals('same vertex count for contour ' + IntToStr(I),
-      Length(ClipperRes[I]), Length(NativeRes[I]));
-
-  AssertEquals('identical vertex set',
-    PathSignature(ClipperRes), PathSignature(NativeRes));
 end;
 
 procedure TFloriaNativeEngineTest.TestBooleanStillDelegates();

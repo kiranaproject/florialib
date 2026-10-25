@@ -5,9 +5,10 @@ unit Floria.Path.Engine.Boolean.Test;
 // Covers the first-party boolean engine: union, difference, intersection,
 // exclusive-or, and self-union under all four fill rules.
 //
-// Every case is also compared against the vendored backend while it remains
-// available. That comparison is what makes "native is a drop-in replacement"
-// a checked claim rather than an assumption.
+// Expected areas here are the values the corpus freezes as golden data (see
+// Floria.Path.Golden.Data), which were captured from the reference
+// implementation before it was removed. The assertions below state those
+// numbers directly so this suite also reads as documentation.
 
 {$mode objfpc}{$H+}
 
@@ -23,10 +24,6 @@ type
   TFloriaBooleanTest = class(TTestCase)
   private
     FSaved: TFloriaPathEngine;
-    procedure CompareWithClipper2(const AContext: string;
-      AOp: TPathBooleanOp;
-      const ASubject, AClip: TPathsD;
-      ARule: TFillRule = frNonZero);
   protected
     procedure SetUp(); override;
     procedure TearDown(); override;
@@ -68,29 +65,6 @@ begin
     SetFloriaPathEngine(FSaved, False);
 end;
 
-procedure TFloriaBooleanTest.CompareWithClipper2(const AContext: string;
-  AOp: TPathBooleanOp; const ASubject, AClip: TPathsD; ARule: TFillRule);
-var
-  NativeRes, ClipperRes: TPathsD;
-  NativeArea, ClipperArea: Double;
-begin
-  UseFloriaPathEngine('native');
-  NativeRes := FloriaPathEngine().BooleanOp(AOp, ASubject, AClip, ARule, 2);
-
-  UseFloriaPathEngine('clipper2');
-  ClipperRes := FloriaPathEngine().BooleanOp(AOp, ASubject, AClip, ARule, 2);
-
-  UseFloriaPathEngine('native');
-
-  NativeArea := Abs(Area(NativeRes));
-  ClipperArea := Abs(Area(ClipperRes));
-
-  AssertTrue(AContext + ': area matches clipper2 (native=' +
-    FormatFloat('0.##', NativeArea) + ' clipper=' +
-    FormatFloat('0.##', ClipperArea) + ')',
-    Abs(NativeArea - ClipperArea) <= 2.0);
-end;
-
 procedure TFloriaBooleanTest.TestUnionOverlapping();
 var
   A, B, Res: TPathsD;
@@ -103,7 +77,6 @@ begin
   AssertEquals('union area', 15000.0, Abs(Area(Res)), 1.0);
   AssertEquals('union bounds left', 0.0, GetBounds(Res).Left, 0.1);
   AssertEquals('union bounds right', 150.0, GetBounds(Res).Right, 0.1);
-  CompareWithClipper2('union overlap', pboUnion, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestDifferenceOverlapping();
@@ -116,7 +89,6 @@ begin
   Res := FloriaPathEngine().BooleanOp(pboDifference, A, B, frNonZero, 2);
 
   AssertEquals('difference area', 5000.0, Abs(Area(Res)), 1.0);
-  CompareWithClipper2('difference overlap', pboDifference, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestIntersectOverlapping();
@@ -129,7 +101,6 @@ begin
   Res := FloriaPathEngine().BooleanOp(pboIntersect, A, B, frNonZero, 2);
 
   AssertEquals('intersection area', 5000.0, Abs(Area(Res)), 1.0);
-  CompareWithClipper2('intersection overlap', pboIntersect, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestXorOverlapping();
@@ -142,7 +113,6 @@ begin
   Res := FloriaPathEngine().BooleanOp(pboXor, A, B, frNonZero, 2);
 
   AssertEquals('xor area', 10000.0, Abs(Area(Res)), 2.0);
-  CompareWithClipper2('xor overlap', pboXor, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestDisjointOperands();
@@ -161,8 +131,6 @@ begin
   Res := FloriaPathEngine().BooleanOp(pboDifference, A, B, frNonZero, 2);
   AssertEquals('disjoint difference keeps subject', 10000.0, Abs(Area(Res)), 1.0);
 
-  CompareWithClipper2('union disjoint', pboUnion, A, B);
-  CompareWithClipper2('intersect disjoint', pboIntersect, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestNestedOperands();
@@ -181,9 +149,6 @@ begin
   Res := FloriaPathEngine().BooleanOp(pboIntersect, A, B, frNonZero, 2);
   AssertEquals('nested intersection is the inner square', 2500.0, Abs(Area(Res)), 1.0);
 
-  CompareWithClipper2('union nested', pboUnion, A, B);
-  CompareWithClipper2('difference nested', pboDifference, A, B);
-  CompareWithClipper2('intersection nested', pboIntersect, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestIdenticalOperands();
@@ -202,8 +167,6 @@ begin
   Res := FloriaPathEngine().BooleanOp(pboDifference, A, B, frNonZero, 2);
   AssertEquals('identical difference is empty', 0, Length(Res));
 
-  CompareWithClipper2('union identical', pboUnion, A, B);
-  CompareWithClipper2('intersection identical', pboIntersect, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestTriangleVsSquare();
@@ -224,10 +187,6 @@ begin
   Res := FloriaPathEngine().BooleanOp(pboIntersect, A, B, frNonZero, 2);
   AssertEquals('triangle intersect square', 3750.0, Abs(Area(Res)), 2.0);
 
-  CompareWithClipper2('union tri-sq', pboUnion, A, B);
-  CompareWithClipper2('intersection tri-sq', pboIntersect, A, B);
-  CompareWithClipper2('difference tri-sq', pboDifference, A, B);
-  CompareWithClipper2('xor tri-sq', pboXor, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestSelfUnionNonZeroFillsHole();
@@ -344,7 +303,6 @@ begin
   AssertEquals('collinear union area', 20000.0, Abs(Area(Res)), 1.0);
   AssertEquals('collinear union width', 200.0, GetBounds(Res).Width, 0.1);
 
-  CompareWithClipper2('collinear union', pboUnion, A, B);
 end;
 
 procedure TFloriaBooleanTest.TestTouchingEdgeOnly();

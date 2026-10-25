@@ -23,7 +23,7 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
       │   Streaming Push Parser │ │ • 29 W3C/Skia Blends    │ │ • ICCCM 2.0 & EWMH/NetWM│
       │ • Complete AST Model    │ │ • Linear Float16/32 HDR │ │ • RandR Multi-Monitor   │
       │ • Typed Value Parsers   │ │ • Composable Filter Tree│ │ • XRender 2D Compositing │
-      │ • 70+ Style Properties  │ │ • Clipper2 Path Ops     │ │ • SHM Framebuffers      │
+      │ • 70+ Style Properties  │ │ • Path Booleans & Offset│ │ • SHM Framebuffers      │
       │ • W3C Selectors & Spec  │ │ • Retained Display List │ │ • Shape & XFixes        │
       │ • Style Cascade Resolver│ │ • GPU EGL/GLES2 Batcher │ │ • Themed Cursors & Keys │
       │ • Rich Typography (BiDi)│ │ • Dynamic Texture Atlas │ │ • Window Reparenting WM │
@@ -49,7 +49,7 @@ Developed by **Dio Affriza**, licensed under the **Mozilla Public License 2.0 (M
 | [**Compression & Hashing**](utilities.md) | Pure Pascal Deflate/Zlib/Gzip and CRC/Adler/FNV/MurmurHash utilities. |
 | [**Testing**](testing.md) | FPCUnit workflow, headless/Xvfb requirements, and `scripts/ci.sh`. |
 | [**Coding Standards & Development**](coding-style.md) | Object Pascal conventions, mandatory `()` routine rules, memory ownership, and Pasbuild build workflow. |
-| [**Third-Party Notices**](../THIRD_PARTY_NOTICES.md) | Clipper2, fpGUI/AggPas, XCB, and system-library attribution. |
+| [**Third-Party Notices**](../THIRD_PARTY_NOTICES.md) | fpGUI/AggPas, XCB, and system-library attribution. |
 | [**Skia-Parity Graphics Architecture Roadmap**](../roadmap.md) | Architectural roadmap documenting the evolution toward Google Skia-parity graphics and GPU vector core. |
 
 ---

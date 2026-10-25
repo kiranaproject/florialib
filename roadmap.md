@@ -56,7 +56,7 @@ flowchart TD
 
 To build a world-class 2D graphics and desktop UI stack in pure Object Pascal and GLSL/Vulkan, we synthesize the key architectural breakthroughs of three major modern graphics engines:
 
-1. **Google Skia**: Our functional benchmark for **mathematical and colorimetric completeness** (29 blend modes, arbitrary color spaces, Clipper2 path ops, HarfBuzz typography, and high-precision software scanline ground truth).
+1. **Google Skia**: Our functional benchmark for **mathematical and colorimetric completeness** (29 blend modes, arbitrary color spaces, first-party path ops, HarfBuzz typography, and high-precision software scanline ground truth).
 2. **Flutter Impeller**: Our modern blueprint for **zero-jank GPU vector execution** (100% AOT precompiled shaders with static PSOs, eliminating runtime shader compilation pauses, and direct single-pass triangle strip tessellation).
 3. **Mozilla WebRender**: Our blueprint for **high-throughput retained desktop UI compositing** (treating UI like 3D game geometry, instanced mega-batching, analytical clip chains in fragment shaders, picture tile caching, and delegating complex arbitrary vector paths to a fallback blob rasterizer).
 
@@ -125,7 +125,7 @@ gantt
     Extended Blend Modes (29 Modes)          :p1_1, 2026-10, 2026-11
     Color Spaces & Linear FP16 Pipeline       :p1_2, 2026-11, 2026-12
     Composable Filter Graph Architecture      :p1_3, 2026-12, 2027-01
-    Boolean Path Operations (Clipper2)        :p1_4, 2027-01, 2027-02
+    Boolean Path Operations (first-party)     :p1_4, 2027-01, 2027-02
     Rich Paragraph Layout Engine              :p1_5, 2027-02, 2027-03
     section Phase 2: Display Lists & Caching
     TFloriaPicture & Command Serialization    :p2_1, 2027-03, 2027-04
@@ -176,13 +176,13 @@ gantt
 - Verified with 20 dedicated unit tests (483/483 passing in `florialib`, 48/48 in `ft`).
 
 #### 1.4 Boolean Path Operations (`Floria.Path.Ops`) — [COMPLETED]
-- Integrated Angus Johnson's Clipper2 polygon clipping engine as pure Object Pascal units under dotted namespaces:
-  - `Floria.Path.Clipper.Core`: Coordinate types (`TPoint64`, `TPointD`, `TRect64`, `TRectD`), winding rules (`TFillRule`), and vector math.
-  - `Floria.Path.Clipper.Engine`: Core sweep-line clipping engine, active edge table, intersection list, and PolyTree hierarchy.
-  - `Floria.Path.Clipper.Offset`: High-performance polygon expansion, deflating, and stroke offset generation (`TClipperOffset`).
-  - `Floria.Path.Clipper.RectClip`: Fast analytical rectangular window clipping (`TRectClip64`, `TRectClipLines64`).
-  - `Floria.Path.Clipper.Minkowski`: 2D Minkowski sum algorithms.
-  - `Floria.Path.Clipper`: High-level procedural API (`Union`, `Difference`, `Intersect`, `XOR_`, `InflatePaths`, `RectClip`).
+- Replaced the vendored Clipper2 port with a first-party pure Object Pascal path engine under dotted namespaces:
+  - `Floria.Geometry`: Coordinate types (`TPointD`, `TRectD`), paths (`TPathD`, `TPathsD`), winding rules (`TFillRule`), bounds, area, and point-in-polygon.
+  - `Floria.Path.Engine`: Backend facade; callers never depend on a specific clipping implementation.
+  - `Floria.Path.Engine.Boolean`: Planar-arrangement booleans (union, difference, intersect, xor) under all four fill rules.
+  - `Floria.Path.Engine.Offset`: Inflate/deflate with all join types and open-path stroke caps.
+  - `Floria.Path.Engine.Native`: The backend, including Douglas-Peucker simplification.
+  - No vendored third-party source remains; behaviour is pinned by a frozen golden corpus.
 - Implemented high-level `TFloriaPath` class:
   - Procedural construction: `MoveTo`, `LineTo`, `QuadTo`, `CubicTo` (adaptive de Casteljau recursive subdivision), `ArcTo`, and `Close`.
   - Shape generators: `AddRect`, `AddRoundedRect`, `AddCircle`, `AddEllipse`, and `AddPolygon`.
@@ -190,9 +190,9 @@ gantt
   - Contour offsetting / inflation: `Inflate` supporting join styles (`Round`, `Miter`, `Square`, `Bevel`) and end caps (`Polygon`, `Joined`, `Butt`, `Square`, `Round`).
   - Simplification: `Simplify` using Douglas-Peucker reduction.
   - Contour winding rule resolution: NonZero, EvenOdd, Positive, and Negative.
-  - Seamless interop: Two-way conversion between `TFloriaPath`, AggPas `path_storage`, SVG `<path>` data strings (`d="..."`), and Clipper native `TPathsD`.
+  - Seamless interop: Two-way conversion between `TFloriaPath`, AggPas `path_storage`, SVG `<path>` data strings (`d="..."`), and raw `TPathsD`.
   - Direct AggPas `path_storage` boolean functions: `PathUnion`, `PathDifference`, `PathIntersect`, `PathXor`.
-- Verified with 16 dedicated unit tests (499/499 passing in `florialib`, 48/48 in `ft`).
+- Verified with dedicated unit tests plus a frozen golden corpus covering booleans, offsetting, and simplification.
 
 #### 1.5 Rich Paragraph Layout Engine (`Floria.Text.Paragraph`) — [COMPLETED]
 - Decoupled rich multi-style text layout and shaping from GUI widgets into a standalone typography engine:
@@ -340,7 +340,7 @@ gantt
    - 29 W3C/Skia blend modes (`Floria.Canvas.Blend`).
    - Physical linear-light color pipeline, sRGB/Display P3/Rec.2020, and `TRgbaF16`/`TRgbaF32` pixels (`Floria.ColorSpace`).
    - Composable non-destructive filter graph with Gaussian/Box/Dual-Kawase blur, ColorMatrix, DropShadow, Morphology, and DisplacementMap (`Floria.Canvas.Filter`).
-   - Pure Pascal Clipper2 engine and high-level `TFloriaPath` with boolean operations, inflation, and simplification (`Floria.Path.*`).
+   - First-party pure Pascal path engine and high-level `TFloriaPath` with boolean operations, inflation, and simplification (`Floria.Path.*`).
    - Rich multi-style paragraph layout with UAX #14 line breaking, bi-directional text flow, hit-testing, and selection bounding boxes (`Floria.Text.Paragraph`).
 2. **Phase 2: Retained Display Lists & Scene Graph Caching** [100% Completed]
    - Semantic display lists, `TFloriaPicture`, and `TFloriaPictureRecorder` (`Floria.DisplayList`).

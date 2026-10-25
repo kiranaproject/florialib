@@ -101,8 +101,7 @@ function FloriaPathEngine(): TFloriaPathEngine;
 begin
   if GActive = nil then
     raise EPathEngineError.Create(
-      'no path engine backend is registered; link a backend unit such as ' +
-      'Floria.Path.Engine.Clipper2');
+      'no path engine backend is registered; link Floria.Path.Engine.Native');
   Result := GActive;
 end;
 

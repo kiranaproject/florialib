@@ -68,7 +68,6 @@ type
     procedure TestUseUnknownBackendRaises();
     procedure TestSetEngineTakesEffect();
     procedure TestRegisteredBackendIsSelectable();
-    procedure TestClipper2RemainsSelectable();
   end;
 
 implementation
@@ -156,14 +155,6 @@ end;
 procedure TFloriaPathEngineTest.TestDefaultBackendIsNative();
 begin
   AssertEquals('default backend name', 'native', FloriaPathEngine().Name());
-end;
-
-procedure TFloriaPathEngineTest.TestClipper2RemainsSelectable();
-begin
-  // The vendored backend stays registered as the fallback for operations the
-  // native engine has not implemented yet.
-  UseFloriaPathEngine('clipper2');
-  AssertEquals('clipper2 selectable by name', 'clipper2', FloriaPathEngine().Name());
 end;
 
 procedure TFloriaPathEngineTest.TestBooleanOpForwarding();

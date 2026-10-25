@@ -29,13 +29,7 @@ uses
 
 type
   TFloriaNativeEngine = class(TFloriaPathEngine)
-  private
-    FFallback: TFloriaPathEngine;
   public
-    // AFallback receives any operation the native engine does not implement.
-    // The native engine does not own it.
-    constructor Create(AFallback: TFloriaPathEngine = nil);
-
     function Name(): string; override;
 
     function BooleanOp(AOp: TPathBooleanOp;
@@ -57,8 +51,6 @@ type
     function SimplifyPaths(const APaths: TPathsD; ATolerance: Double;
       AClosed: Boolean = True;
       APrecision: Integer = 2): TPathsD; override;
-
-    property Fallback: TFloriaPathEngine read FFallback;
   end;
 
 const
@@ -68,8 +60,7 @@ implementation
 
 uses
   Floria.Path.Engine.Boolean,
-  Floria.Path.Engine.Offset,
-  Floria.Path.Engine.Clipper2;
+  Floria.Path.Engine.Offset;
 
 type
   // Integer grid point. Offsets, clipping, and simplification all work on a
@@ -244,12 +235,6 @@ end;
 // TFloriaNativeEngine
 // ---------------------------------------------------------------------------
 
-constructor TFloriaNativeEngine.Create(AFallback: TFloriaPathEngine);
-begin
-  inherited Create();
-  FFallback := AFallback;
-end;
-
 function TFloriaNativeEngine.Name(): string;
 begin
   Result := NATIVE_ENGINE_NAME;
@@ -303,9 +288,7 @@ begin
 end;
 
 initialization
-  // Clipper2 initializes first (implementation uses), so it is already the
-  // active backend when this runs and can serve as the fallback.
-  GInstance := TFloriaNativeEngine.Create(FloriaPathEngine());
+  GInstance := TFloriaNativeEngine.Create();
   RegisterFloriaPathEngine(NATIVE_ENGINE_NAME, GInstance);
   SetFloriaPathEngine(GInstance, False);
 

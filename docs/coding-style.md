@@ -19,7 +19,7 @@ unit Floria.<Subsystem>.<Role>;
 - **Strings**: `{$H+}` enables long `AnsiString` by default.
 - **Advanced Records**: `{$modeswitch advancedrecords}` enables methods and constructors on `record` types.
 
-Vendored units (`floria.path.clipper.*`, derived from Clipper2) and generated bindings (`floria.xcb.*`, `floria.x11.keysym.pas`) are exceptions to this convention. Do not reformat them; keep their upstream headers and regeneration metadata intact.
+Generated bindings (`floria.xcb.*`, `floria.x11.keysym.pas`) are exceptions to this convention. Do not reformat them; keep their regeneration metadata intact.
 
 ---
 
