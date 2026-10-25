@@ -60,7 +60,7 @@ type
     procedure TearDown(); override;
   published
     procedure TestDefaultBackendIsAvailable();
-    procedure TestDefaultBackendIsClipper2();
+    procedure TestDefaultBackendIsNative();
     procedure TestBooleanOpForwarding();
     procedure TestUnionSelfForwarding();
     procedure TestOffsetForwarding();
@@ -68,6 +68,7 @@ type
     procedure TestUseUnknownBackendRaises();
     procedure TestSetEngineTakesEffect();
     procedure TestRegisteredBackendIsSelectable();
+    procedure TestClipper2RemainsSelectable();
   end;
 
 implementation
@@ -152,9 +153,17 @@ begin
   AssertTrue('engine instance is not nil', FloriaPathEngine() <> nil);
 end;
 
-procedure TFloriaPathEngineTest.TestDefaultBackendIsClipper2();
+procedure TFloriaPathEngineTest.TestDefaultBackendIsNative();
 begin
-  AssertEquals('default backend name', 'clipper2', FloriaPathEngine().Name());
+  AssertEquals('default backend name', 'native', FloriaPathEngine().Name());
+end;
+
+procedure TFloriaPathEngineTest.TestClipper2RemainsSelectable();
+begin
+  // The vendored backend stays registered as the fallback for operations the
+  // native engine has not implemented yet.
+  UseFloriaPathEngine('clipper2');
+  AssertEquals('clipper2 selectable by name', 'clipper2', FloriaPathEngine().Name());
 end;
 
 procedure TFloriaPathEngineTest.TestBooleanOpForwarding();

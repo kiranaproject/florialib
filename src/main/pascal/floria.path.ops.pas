@@ -165,7 +165,8 @@ implementation
 // not inherit a dependency on any specific clipping library. Its unit
 // initialization registers the backend before Path.Ops is used.
 uses
-  Floria.Path.Engine.Clipper2;
+  Floria.Path.Engine.Clipper2,
+  Floria.Path.Engine.Native;
 
 // ---------------------------------------------------------------------------
 // Adaptive de Casteljau Subdivision for Bézier Curves

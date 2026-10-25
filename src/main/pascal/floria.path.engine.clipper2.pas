@@ -221,8 +221,9 @@ initialization
     SetFloriaPathEngine(GInstance, False);
 
 finalization
-  if FloriaPathEngine() = GInstance then
-    SetFloriaPathEngine(nil, False);
+  // Do not query the facade here; it raises when no backend is registered and
+  // unit finalization order is not guaranteed.
+  SetFloriaPathEngine(nil, False);
   FreeAndNil(GInstance);
 
 end.

@@ -298,6 +298,10 @@
         <UnitName Value="Floria.Path.Engine.Clipper2"/>
       </Item>
       <Item>
+        <Filename Value="floria.path.engine.native.pas"/>
+        <UnitName Value="Floria.Path.Engine.Native"/>
+      </Item>
+      <Item>
         <Filename Value="floria.path.ops.pas"/>
         <UnitName Value="Floria.Path.Ops"/>
       </Item>

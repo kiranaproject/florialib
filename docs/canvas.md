@@ -190,6 +190,10 @@ current default is the vendored Clipper2 port behind
 implementation section, so callers do not inherit a dependency on any specific
 clipping library.
 
+The default backend is `Floria.Path.Engine.Native`, which implements
+simplification first-party. It holds the Clipper2 adapter as a fallback and
+forwards boolean and offset operations to it until those are reimplemented.
+
 - `FloriaPathEngine()` returns the active backend and raises
   `EPathEngineError` if none is registered.
 - `SetFloriaPathEngine(Engine, Owns)` swaps the backend; `UseFloriaPathEngine(Name)`
