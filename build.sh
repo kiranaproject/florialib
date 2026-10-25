@@ -26,12 +26,12 @@ case "${TARGET}" in
   test)
     echo "==> Running tests with FPC..."
     shift 1 || true
-    pasbuild test "$@"
+    pasbuild test -p pic "$@"
     ;;
   install)
     echo "==> Installing to local Pasbuild repository..."
     shift 1 || true
-    pasbuild install "$@"
+    pasbuild install -p pic "$@"
     ;;
   clean)
     echo "==> Cleaning target artifacts..."
@@ -43,6 +43,6 @@ case "${TARGET}" in
     if [ "${TARGET}" = "fpc" ]; then
       shift 1 || true
     fi
-    pasbuild compile "$@"
+    pasbuild compile -p pic "$@"
     ;;
 esac

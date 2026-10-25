@@ -5,10 +5,14 @@
     <CompilerOptions>
       <Version Value="11"/>
       <SearchPaths>
-        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
+        <UnitOutputDirectory Value="../../../target/lazarus"/>
       </SearchPaths>
     </CompilerOptions>
     <Files>
+      <Item>
+        <Filename Value="floria.errors.pas"/>
+        <UnitName Value="Floria.Errors"/>
+      </Item>
       <Item>
         <Filename Value="floria.css.ast.pas"/>
         <UnitName Value="Floria.CSS.AST"/>
@@ -48,6 +52,14 @@
       <Item>
         <Filename Value="floria.xcb.cursor.pas"/>
         <UnitName Value="Floria.XCB.Cursor"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.xcb.composite.pas"/>
+        <UnitName Value="Floria.XCB.Composite"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.xcb.damage.pas"/>
+        <UnitName Value="Floria.XCB.Damage"/>
       </Item>
       <Item>
         <Filename Value="floria.xcb.ewmh.pas"/>
@@ -162,8 +174,20 @@
         <UnitName Value="Floria.Font"/>
       </Item>
       <Item>
+        <Filename Value="floria.canvas.pas"/>
+        <UnitName Value="Floria.Canvas"/>
+      </Item>
+      <Item>
         <Filename Value="floria.canvas.agg.pas"/>
         <UnitName Value="Floria.Canvas.Agg"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.canvas.filter.pas"/>
+        <UnitName Value="Floria.Canvas.Filter"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.canvas.gl.pas"/>
+        <UnitName Value="Floria.Canvas.GL"/>
       </Item>
       <Item>
         <Filename Value="floria.svg.rasterizer.pas"/>
@@ -270,6 +294,10 @@
         <UnitName Value="Floria.Text.Paragraph"/>
       </Item>
       <Item>
+        <Filename Value="floria.text.emoji.pas"/>
+        <UnitName Value="Floria.Text.Emoji"/>
+      </Item>
+      <Item>
         <Filename Value="floria.displaylist.pas"/>
         <UnitName Value="Floria.DisplayList"/>
       </Item>
@@ -315,6 +343,8 @@
       </Item>
     </Files>
     <RequiredPkgs>
+      <!-- aggpas is fpGUI's extras/aggpas fork (package name "aggpas").
+           Do not replace this with a standalone AggPas port. -->
       <Item>
         <PackageName Value="aggpas"/>
       </Item>

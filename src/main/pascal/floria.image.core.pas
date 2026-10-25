@@ -144,6 +144,10 @@ type
   TWriterRegistry = array[TFloriaImageFormat] of TFloriaImageWriterClass;
 
 var
+  // Codec units self-register in their initialization sections. Do not reset
+  // these registries in this unit's initialization: unit initialization order
+  // is not guaranteed, and a reset could erase codec registrations that ran
+  // before Floria.Image.Core initialized.
   GReaders: TReaderRegistry;
   GWriters: TWriterRegistry;
 
@@ -897,12 +901,5 @@ begin
     Writer.Free();
   end;
 end;
-
-initialization
-  SetLength(GReaders, 0);
-  FillChar(GWriters, SizeOf(GWriters), 0);
-
-finalization
-  SetLength(GReaders, 0);
 
 end.

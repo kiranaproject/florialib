@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # This repository needs FPC, Pasbuild, fpGUI + extras/aggpas, lazbuild,
+    # Xvfb, and Mesa. Use a provisioned self-hosted runner rather than a bare
+    # GitHub-hosted image.
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run florialib checks
+        env:
+          FLORIA_REQUIRE_DISPLAY: "1"
+          FLORIA_REQUIRE_GL: "1"
+        run: ./scripts/ci.sh

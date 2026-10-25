@@ -173,6 +173,12 @@ type
   // ---------------------------------------------------------------------------
   // Allows visitors, GPU compilers, scene graph builders, or analyzers
   // to intercept each recorded command.
+  //
+  // Transform and alpha semantics:
+  //   - OnTransform receives the *absolute* current transform, not a delta.
+  //   - OnSetAlpha receives the *absolute* effective alpha after any
+  //     PushAlpha/PopAlpha operations.
+  //   - OnSave/OnRestore bracket the transform and alpha state.
   // ---------------------------------------------------------------------------
   IFloriaDisplayListReceiver = interface
     ['{7A88A1F1-23B6-4E15-9BE2-43645A95CE01}']
@@ -257,6 +263,8 @@ type
     procedure Playback(ACanvas: TFloriaCanvasAgg; const AClipBounds: TRectD); overload;
     procedure Playback(ACanvas: TFloriaCanvasAgg; const AClipBounds: TRectD; const AInitialMatrix: TFloriaMatrix2D); overload;
     procedure Playback(AReceiver: IFloriaDisplayListReceiver); overload;
+    procedure Playback(AReceiver: IFloriaDisplayListReceiver; const AInitialMatrix: TFloriaMatrix2D;
+      AInitialAlpha: Double = 1.0); overload;
 
     function Dump(): string;
 
@@ -1101,24 +1109,133 @@ begin
 end;
 
 procedure TFloriaPicture.Playback(AReceiver: IFloriaDisplayListReceiver);
+begin
+  Playback(AReceiver, TFloriaMatrix2D.Identity());
+end;
+
+procedure TFloriaPicture.Playback(AReceiver: IFloriaDisplayListReceiver;
+  const AInitialMatrix: TFloriaMatrix2D; AInitialAlpha: Double);
 var
   I: Integer;
   CurOp: TFloriaDisplayOp;
+  CurMatrix: TFloriaMatrix2D;
+  CurAlpha: Double;
+  MatrixDepth: Integer;
+  AlphaSaveDepth: Integer;
+  AlphaPushDepth: Integer;
+  MatrixStack: array of TFloriaMatrix2D;
+  AlphaSaveStack: array of Double;
+  AlphaPushStack: array of Double;
 begin
   if not Assigned(AReceiver) then Exit;
+
+  CurMatrix := AInitialMatrix;
+  CurAlpha := AInitialAlpha;
+  if CurAlpha < 0.0 then CurAlpha := 0.0;
+  if CurAlpha > 1.0 then CurAlpha := 1.0;
+  MatrixDepth := 0;
+  AlphaSaveDepth := 0;
+  AlphaPushDepth := 0;
+  SetLength(MatrixStack, 16);
+  SetLength(AlphaSaveStack, 16);
+  SetLength(AlphaPushStack, 16);
+
+  AReceiver.OnSetAlpha(CurAlpha);
+  if not CurMatrix.IsIdentity() then
+    AReceiver.OnTransform(CurMatrix);
 
   for I := 0 to FOpCount - 1 do
   begin
     CurOp := FOperations[I];
     case CurOp.OpType of
-      dopSave:                AReceiver.OnSave();
-      dopRestore:             AReceiver.OnRestore();
-      dopSetTransform:        AReceiver.OnTransform(CurOp.Matrix);
-      dopTranslate:           AReceiver.OnTransform(TFloriaMatrix2D.Translation(CurOp.Pt1.X, CurOp.Pt1.Y));
-      dopScale:               AReceiver.OnTransform(TFloriaMatrix2D.Scaling(CurOp.Pt1.X, CurOp.Pt1.Y));
-      dopRotate:              AReceiver.OnTransform(TFloriaMatrix2D.RotationDeg(CurOp.GradAngle, CurOp.Pt1.X, CurOp.Pt1.Y));
-      dopPushAlpha:           AReceiver.OnSetAlpha(CurOp.Alpha);
-      dopPopAlpha:            AReceiver.OnSetAlpha(1.0);
+      dopSave:
+      begin
+        if MatrixDepth >= Length(MatrixStack) then
+          SetLength(MatrixStack, Length(MatrixStack) * 2);
+        MatrixStack[MatrixDepth] := CurMatrix;
+        Inc(MatrixDepth);
+
+        if AlphaSaveDepth >= Length(AlphaSaveStack) then
+          SetLength(AlphaSaveStack, Length(AlphaSaveStack) * 2);
+        AlphaSaveStack[AlphaSaveDepth] := CurAlpha;
+        Inc(AlphaSaveDepth);
+
+        AReceiver.OnSave();
+      end;
+
+      dopRestore:
+      begin
+        if MatrixDepth > 0 then
+        begin
+          Dec(MatrixDepth);
+          CurMatrix := MatrixStack[MatrixDepth];
+        end;
+
+        if AlphaSaveDepth > 0 then
+        begin
+          Dec(AlphaSaveDepth);
+          CurAlpha := AlphaSaveStack[AlphaSaveDepth];
+        end;
+
+        AReceiver.OnRestore();
+
+        // Re-synchronize the receiver with the restored absolute state.
+        AReceiver.OnTransform(CurMatrix);
+        AReceiver.OnSetAlpha(CurAlpha);
+      end;
+
+      dopSetTransform:
+      begin
+        CurMatrix := CurOp.Matrix;
+        AReceiver.OnTransform(CurMatrix);
+      end;
+
+      dopTranslate:
+      begin
+        CurMatrix := CurMatrix.Multiply(
+          TFloriaMatrix2D.Translation(CurOp.Pt1.X, CurOp.Pt1.Y));
+        AReceiver.OnTransform(CurMatrix);
+      end;
+
+      dopScale:
+      begin
+        CurMatrix := CurMatrix.Multiply(
+          TFloriaMatrix2D.Scaling(CurOp.Pt1.X, CurOp.Pt1.Y));
+        AReceiver.OnTransform(CurMatrix);
+      end;
+
+      dopRotate:
+      begin
+        CurMatrix := CurMatrix.Multiply(
+          TFloriaMatrix2D.RotationDeg(CurOp.GradAngle, CurOp.Pt1.X, CurOp.Pt1.Y));
+        AReceiver.OnTransform(CurMatrix);
+      end;
+
+      dopPushAlpha:
+      begin
+        if AlphaPushDepth >= Length(AlphaPushStack) then
+          SetLength(AlphaPushStack, Length(AlphaPushStack) * 2);
+        AlphaPushStack[AlphaPushDepth] := CurAlpha;
+        Inc(AlphaPushDepth);
+
+        CurAlpha := CurAlpha * CurOp.Alpha;
+        if CurAlpha < 0.0 then CurAlpha := 0.0;
+        if CurAlpha > 1.0 then CurAlpha := 1.0;
+        AReceiver.OnSetAlpha(CurAlpha);
+      end;
+
+      dopPopAlpha:
+      begin
+        if AlphaPushDepth > 0 then
+        begin
+          Dec(AlphaPushDepth);
+          CurAlpha := AlphaPushStack[AlphaPushDepth];
+        end
+        else
+          CurAlpha := 1.0;
+        AReceiver.OnSetAlpha(CurAlpha);
+      end;
+
       dopSetBlendMode:        AReceiver.OnSetBlendMode(CurOp.BlendMode);
       dopPushClipRect:        AReceiver.OnPushClipRect(CurOp.Rect, CurOp.AntiAlias);
       dopPushClipRoundedRect: AReceiver.OnPushClipRoundedRect(CurOp.Rect, CurOp.RadiusX, CurOp.RadiusY, CurOp.AntiAlias);

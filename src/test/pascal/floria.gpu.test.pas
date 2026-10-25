@@ -37,6 +37,8 @@ type
     procedure TestRenderBatchBoxShadowAndGradients;
     procedure TestGPUPipelineManagerLifecycle;
     procedure TestGPURendererDisplayListPlayback;
+    procedure TestGPURendererTransformsAndAlpha;
+    procedure TestGPURendererPictureOffset;
     procedure TestTessellateStrokeLine;
     procedure TestTessellateStrokeJoins;
     procedure TestTessellateStrokeCaps;
@@ -52,6 +54,8 @@ type
     procedure TestCanvasGLBackdropBlur;
     procedure TestCanvasGLClipping;
     procedure TestCanvasGLTextRasterization;
+    procedure TestCanvasGLSVGFallback;
+    procedure TestEnvironmentRequirements;
   end;
 
 implementation
@@ -394,6 +398,82 @@ begin
   finally
     Renderer.Free();
     Pic.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestGPURendererTransformsAndAlpha;
+var
+  Recorder: TFloriaPictureRecorder;
+  Pic: TFloriaPicture;
+  Renderer: TFloriaGPURenderer;
+  V: TFloriaGPUVertex;
+begin
+  Recorder := TFloriaPictureRecorder.Create();
+  try
+    Recorder.BeginRecording(100.0, 100.0);
+    Recorder.Translate(10.0, 20.0);
+    Recorder.PushAlpha(0.5);
+    Recorder.DrawRect(RectD(0.0, 0.0, 10.0, 10.0), BgraPixel(255, 0, 0, 255));
+    Recorder.PopAlpha();
+    Pic := Recorder.EndRecording();
+  finally
+    Recorder.Free();
+  end;
+
+  Renderer := TFloriaGPURenderer.Create();
+  try
+    Renderer.BeginFrame(100, 100);
+    Pic.Playback(Renderer);
+
+    AssertTrue('Translated rect emitted', Renderer.Batch.VertexCount >= 6);
+    V := Renderer.Batch.Vertices[0];
+    AssertEquals('Transformed left', 10.0, V.PosX, 1e-4);
+    AssertEquals('Transformed top', 20.0, V.PosY, 1e-4);
+    AssertEquals('Alpha applied to shape color', 0.5, V.ColorA, 1e-2);
+  finally
+    Renderer.Free();
+    Pic.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestGPURendererPictureOffset;
+var
+  InnerRecorder, OuterRecorder: TFloriaPictureRecorder;
+  InnerPic, OuterPic: TFloriaPicture;
+  Renderer: TFloriaGPURenderer;
+  V: TFloriaGPUVertex;
+begin
+  InnerRecorder := TFloriaPictureRecorder.Create();
+  try
+    InnerRecorder.BeginRecording(20.0, 20.0);
+    InnerRecorder.DrawRect(RectD(0.0, 0.0, 5.0, 5.0), BgraPixel(0, 0, 255, 255));
+    InnerPic := InnerRecorder.EndRecording();
+  finally
+    InnerRecorder.Free();
+  end;
+
+  OuterRecorder := TFloriaPictureRecorder.Create();
+  try
+    OuterRecorder.BeginRecording(100.0, 100.0);
+    OuterRecorder.DrawPicture(InnerPic, 10.0, 20.0);
+    OuterPic := OuterRecorder.EndRecording();
+  finally
+    OuterRecorder.Free();
+  end;
+
+  Renderer := TFloriaGPURenderer.Create();
+  try
+    Renderer.BeginFrame(100, 100);
+    OuterPic.Playback(Renderer);
+
+    AssertTrue('Nested picture emitted', Renderer.Batch.VertexCount >= 6);
+    V := Renderer.Batch.Vertices[0];
+    AssertEquals('Nested picture X offset', 10.0, V.PosX, 1e-4);
+    AssertEquals('Nested picture Y offset', 20.0, V.PosY, 1e-4);
+  finally
+    Renderer.Free();
+    OuterPic.Free(); // frees the cloned nested picture
+    InnerPic.Free(); // original recording
   end;
 end;
 
@@ -859,6 +939,36 @@ begin
   finally
     Canvas.Free();
   end;
+end;
+
+procedure TFloriaGPUTest.TestCanvasGLSVGFallback;
+var
+  Renderer: TFloriaGPURenderer;
+  Canvas: TFloriaCanvasGL;
+begin
+  Renderer := TFloriaGPURenderer.Create();
+  Canvas := TFloriaCanvasGL.Create(Renderer);
+  try
+    Renderer.BeginFrame(64, 64);
+    Canvas.DrawSVGString(0.0, 0.0, 64.0, 64.0,
+      '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+      '<rect x="4" y="4" width="56" height="56" fill="#336699"/></svg>');
+    AssertTrue('SVG fallback emitted a texture quad', Renderer.Batch.VertexCount > 0);
+  finally
+    Canvas.Free();
+    Renderer.Free();
+  end;
+end;
+
+procedure TFloriaGPUTest.TestEnvironmentRequirements;
+var
+  GL: TGLEngine;
+begin
+  if GetEnvironmentVariable('FLORIA_REQUIRE_GL') = '' then Exit;
+
+  GL := FloriaGL();
+  AssertTrue('FLORIA_REQUIRE_GL is set but no OpenGL/GLES library is available',
+    GL.Available);
 end;
 
 initialization

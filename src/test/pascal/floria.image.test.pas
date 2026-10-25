@@ -18,6 +18,13 @@ uses
   Floria.Image.JPEG;
 
 type
+  TFakeImageReader = class(TFloriaImageReader)
+  public
+    class function CanRead(AStream: TStream): Boolean; override;
+    class function Format(): TFloriaImageFormat; override;
+    procedure ReadImage(AStream: TStream; AImage: TFloriaImage); override;
+  end;
+
   TFloriaImageTest = class(TTestCase)
   published
     procedure TestImageAllocationAndClear();
@@ -29,6 +36,7 @@ type
     procedure TestPNGRoundTrip();
     procedure TestPNGPalettedTransparency();
     procedure TestFormatAutoDetection();
+    procedure TestCodecRegistryRegistration();
     procedure TestJPEGMarkerDetection();
     procedure TestInvalidStreamHandling();
     procedure TestPremultipliedAlpha();
@@ -36,6 +44,36 @@ type
   end;
 
 implementation
+
+class function TFakeImageReader.CanRead(AStream: TStream): Boolean;
+var
+  B: array[0..3] of Byte;
+  OldPos: Int64;
+begin
+  Result := False;
+  if not Assigned(AStream) then Exit;
+
+  OldPos := AStream.Position;
+  try
+    if (AStream.Size - OldPos) >= 4 then
+    begin
+      AStream.ReadBuffer(B, 4);
+      Result := (B[0] = $AA) and (B[1] = $BB) and (B[2] = $CC) and (B[3] = $DD);
+    end;
+  finally
+    AStream.Position := OldPos;
+  end;
+end;
+
+class function TFakeImageReader.Format(): TFloriaImageFormat;
+begin
+  Result := fifBMP;
+end;
+
+procedure TFakeImageReader.ReadImage(AStream: TStream; AImage: TFloriaImage);
+begin
+  // Detection-only test reader.
+end;
 
 procedure TFloriaImageTest.TestImageAllocationAndClear();
 var
@@ -425,6 +463,24 @@ begin
   end;
 end;
 
+procedure TFloriaImageTest.TestCodecRegistryRegistration();
+var
+  MS: TMemoryStream;
+  Magic: array[0..3] of Byte = ($AA, $BB, $CC, $DD);
+begin
+  RegisterImageReader(TFakeImageReader);
+
+  MS := TMemoryStream.Create();
+  try
+    MS.WriteBuffer(Magic[0], 4);
+    MS.Position := 0;
+    AssertEquals('Custom reader participates in auto-detection',
+      Integer(fifBMP), Integer(DetectImageFormat(MS)));
+  finally
+    MS.Free();
+  end;
+end;
+
 procedure TFloriaImageTest.TestJPEGMarkerDetection();
 var
   MS: TMemoryStream;
@@ -527,13 +583,13 @@ begin
 end;
 
 procedure TFloriaImageTest.TestBaselineJPEGDecode();
-const
-  JpegPath = '/home/afumi/Pictures/pexels-zhen-ciang-huang-2150740552-31416900.jpg';
 var
+  JpegPath: string;
   Img: TFloriaImage;
   Pix: TBgraPixel;
 begin
-  if not FileExists(JpegPath) then Exit;
+  JpegPath := GetEnvironmentVariable('FLORIA_TEST_JPEG');
+  if (JpegPath = '') or not FileExists(JpegPath) then Exit;
 
   Img := TFloriaImage.CreateFromFile(JpegPath);
   try

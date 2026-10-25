@@ -170,6 +170,7 @@ end;
 - **Hit-Testing & Selection**:
   - `GetPositionForOffset(X, Y)`: Returns precise text cluster index for caret placement.
   - `GetRectsForRange(Start, End)`: Generates contiguous multi-line bounding rectangles for mouse-drag selection highlighting.
+- **Color Emoji**: `Floria.Text.Emoji` loads CBDT/CBLC and PNG color-bitmap strikes from system emoji fonts via FreeType, caches downscaled BGRA images, and exposes `TFloriaEmojiEngine` / `FloriaEmojiEngine()` for measurement and alpha-blended rendering.
 
 ---
 
@@ -180,6 +181,7 @@ end;
 | `Floria.Unicode.BiDi` | `floria.unicode.bidi.pas` | UAX #9 Bidirectional algorithm |
 | `Floria.Text.HarfBuzz` | `floria.text.harfbuzz.pas` | Dynamic HarfBuzz shaper |
 | `Floria.Text.Paragraph` | `floria.text.paragraph.pas` | Rich paragraph layout & UAX #14 line breaker |
+| `Floria.Text.Emoji` | `floria.text.emoji.pas` | Color emoji font discovery, cache, and BGRA rendering |
 | `Floria.Unicode.BiDi.Test` | `floria.unicode.bidi.test.pas` | BiDi unit tests |
 | `Floria.Text.HarfBuzz.Test` | `floria.text.harfbuzz.test.pas` | HarfBuzz shaper unit tests |
 | `Floria.Text.Paragraph.Test` | `floria.text.paragraph.test.pas` | Paragraph engine unit tests |

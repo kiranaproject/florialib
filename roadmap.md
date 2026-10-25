@@ -5,7 +5,7 @@
 The objective of this roadmap is to establish a clear, phased engineering strategy to evolve **`florialib`**'s rendering and typography foundations (`Floria.Canvas.*`, `Floria.Font.*`, `Floria.SVG.*`) and **Floria Toolkit (`ft`)** into an industrial-grade 2D graphics engine comparable in capabilities and performance to **Google Skia** (the engine powering Chromium, Android, Flutter, Firefox, and Avalonia).
 
 Today, `florialib` boasts a solid foundation:
-- **`AggPas:2.4.0`**: A mathematically rigorous, sub-pixel accurate CPU 2D vector rasterizer decoupled from legacy frameworks.
+- **AggPas (fpGUI's fork)**: A mathematically rigorous, sub-pixel accurate CPU 2D vector rasterizer supplied through `fpgui-framework`'s `extras/aggpas` package.
 - **Modern Typography Pipeline**: FreeType glyph caching, HarfBuzz text shaping (`Floria.Text.HarfBuzz`), and FriBidi bidirectional reordering (`Floria.Unicode.BiDi`).
 - **W3C CSS & SVG Engines**: Complete push tokenizers, AST, selector matching, cascade solvers, and SVG path rasterization.
 - **Hardware Presentation**: EGL 1.4/1.5 and OpenGL ES 2.0 streaming pipeline (`Ft.Backend.EGL`).
@@ -306,7 +306,7 @@ gantt
   - **GPU Batching & Mega-Shader Integration**:
     - Dedicated `gbtPathMesh` batch type in `TFloriaRenderBatch` with AOT precompiled `PATH_MESH_FRAG` shader.
     - Direct integration with `TFloriaGPURenderer`: intercepts `OnDrawLine` and `OnDrawPath` for hardware-accelerated direct vector tessellation with automatic fallback to texture atlas for complex SVG blobs.
-- Verified with 8 dedicated unit tests (573/573 passing in `florialib`, 48/48 in `ft`).
+- Verified with 8 dedicated unit tests and the full `florialib` suite passing.
 
 #### 3.3 Multi-Platform Backend Abstraction (`Floria.GPU.Context`) — [COMPLETED]
 - Implemented cross-platform presentation backend abstraction:
@@ -321,15 +321,15 @@ gantt
     - Connected `TFloriaGPURenderer` to `TFloriaGPUContext`, automating context binding on `BeginFrame` and buffer swapping on `EndFrame`.
   - **Extensible Platform Architecture**:
     - Abstract backend dispatch (`gbeEGL`, `gbeWGL`, `gbeCGL`, `gbeSoftware`) ready for future platform bindings.
-- Verified with 3 dedicated unit tests (576/576 passing in `florialib`, 48/48 in `ft`).
+- Verified with 3 dedicated unit tests and the full `florialib` suite passing.
 
-#### 3.4 Polymorphic GPU Canvas & Crisp Typography (`Floria.Canvas.GPU`) — [COMPLETED]
+#### 3.4 Polymorphic GPU Canvas & Crisp Typography (`Floria.Canvas.GL`) — [COMPLETED]
 - Implemented polymorphic hardware canvas integrating GPU batch rendering with standard canvas abstractions:
   - Polymorphic canvas operations: `DrawRect`, `DrawRoundedRect`, `DrawShadow`, `DrawText`, `PushClipRect`, `PopClipRect`.
   - Analytical clip falloff and expanded rounded-rect AA boundary skirts.
   - Corner radius clamping conforming to CSS3 corner overlap specification (§4.5), ensuring large-radius pill capsules (`border-radius: 9999px`) render flawlessly without SDF discard.
   - Sub-pixel glyph positioning and dynamic texture atlas integration for crisp typography.
-- Verified with unit tests and full toolkit regression tests (579/579 passing in `florialib`, 53/53 in `ft`).
+- Verified with unit tests and full toolkit regression tests; the complete `florialib` suite passes.
 
 ---
 
@@ -337,9 +337,9 @@ gantt
 
 ### Completed Milestones
 1. **Phase 1: High-End 2D CPU Parity** [100% Completed]
-   - 29 W3C/Skia blend modes (`Floria.Blend`).
+   - 29 W3C/Skia blend modes (`Floria.Canvas.Blend`).
    - Physical linear-light color pipeline, sRGB/Display P3/Rec.2020, and `TRgbaF16`/`TRgbaF32` pixels (`Floria.ColorSpace`).
-   - Composable non-destructive filter graph with Gaussian/Box/Dual-Kawase blur, ColorMatrix, DropShadow, Morphology, and DisplacementMap (`Floria.Filter.*`).
+   - Composable non-destructive filter graph with Gaussian/Box/Dual-Kawase blur, ColorMatrix, DropShadow, Morphology, and DisplacementMap (`Floria.Canvas.Filter`).
    - Pure Pascal Clipper2 engine and high-level `TFloriaPath` with boolean operations, inflation, and simplification (`Floria.Path.*`).
    - Rich multi-style paragraph layout with UAX #14 line breaking, bi-directional text flow, hit-testing, and selection bounding boxes (`Floria.Text.Paragraph`).
 2. **Phase 2: Retained Display Lists & Scene Graph Caching** [100% Completed]
@@ -351,7 +351,7 @@ gantt
    - High-throughput instanced quad batching and dynamic skyline texture atlas (`Floria.GPU.Batch`, `Floria.GPU.Atlas`).
    - 100% AOT precompiled shaders with SDF rounded rectangles, box shadows, and linear gradients (`Floria.GPU.Shaders`).
    - Native GPU stroke tessellation, ear-clipping polygon triangulation, and 1px analytic AA boundary skirts (`Floria.GPU.Tessellator`).
-   - Polymorphic GPU canvas abstraction (`Floria.Canvas.GPU`).
+   - Polymorphic GPU canvas abstraction (`Floria.Canvas.GL`).
 
 ### Future Initiatives
 1. **Vulkan Vector Backend**: Low-overhead explicit memory management and multi-threaded command recording (`Floria.GPU.Vulkan`).

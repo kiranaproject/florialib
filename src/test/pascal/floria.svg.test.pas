@@ -75,6 +75,22 @@ type
 
 implementation
 
+function TestScratchDir(): string;
+var
+  BaseDir: string;
+begin
+  BaseDir := ExtractFilePath(ParamStr(0));
+  if BaseDir = '' then
+    BaseDir := GetTempDir();
+
+  Result := IncludeTrailingPathDelimiter(BaseDir) + 'test-tmp';
+  if not ForceDirectories(Result) then
+  begin
+    Result := IncludeTrailingPathDelimiter(GetTempDir());
+    ForceDirectories(Result);
+  end;
+end;
+
 // ── TSVGTypesTest ────────────────────────────────────────────────────────────
 
 procedure TSVGTypesTest.TestMatrixIdentity();
@@ -807,7 +823,8 @@ begin
     Move(SvgXml[1], RawBytes[0], Length(SvgXml));
   GzBytes := GzipCompress(Pointer(RawBytes), Length(RawBytes));
 
-  TempFile := GetTempDir() + 'floria_test_svgz_' + IntToStr(GetProcessID()) + '.svgz';
+  TempFile := IncludeTrailingPathDelimiter(TestScratchDir()) +
+              'floria_test_svgz_' + IntToStr(GetProcessID()) + '.svgz';
   FS := TFileStream.Create(TempFile, fmCreate);
   try
     if Length(GzBytes) > 0 then

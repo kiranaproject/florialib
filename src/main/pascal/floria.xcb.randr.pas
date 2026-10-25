@@ -1041,7 +1041,18 @@ type
     rem: Integer;
     index: Integer;
   end;
-  xcb_randr_notify_data_t = record end; { TODO: C union of unknown size — placeholder, only valid through pointers }
+  // C union of the RandR notify payloads. All seven members are 28 bytes in
+  // the XCB ABI, so the union is 28 bytes and xcb_randr_notify_event_t is 32.
+  xcb_randr_notify_data_t = record
+    case Integer of
+      0: (cc: xcb_randr_crtc_change_t);
+      1: (oc: xcb_randr_output_change_t);
+      2: (op: xcb_randr_output_property_t);
+      3: (pc: xcb_randr_provider_change_t);
+      4: (pp: xcb_randr_provider_property_t);
+      5: (rc: xcb_randr_resource_change_t);
+      6: (ln: xcb_randr_lease_notify_t);
+  end;
   xcb_randr_notify_data_iterator_t = record
     data: Pxcb_randr_notify_data_t;
     rem: Integer;

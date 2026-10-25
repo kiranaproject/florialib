@@ -32,7 +32,16 @@ building a UI toolkit. It is developed by **Dio Affriza**, licensed under
 
 ---
 
-## 2. Directory Layout
+## 2. Dependencies
+
+- **`fpgui-framework:2.2.0-SNAPSHOT`** is the intended Pasbuild dependency. It supplies the AggPas units used by `Floria.Canvas.Agg`, `Floria.Image.Core`, and `Floria.Font`.
+- **AggPas is not a standalone dependency.** It comes from fpGUI's `extras/aggpas` fork (Lazarus package name `aggpas`). Never add a separate AggPas package or dependency.
+- Do **not** pursue the AggPas-to-Blaise port; that prototype was discarded.
+- Use `-p pic` for test/install builds so `-Cg` (Position-Independent Code) is enabled for downstream shared libraries.
+
+---
+
+## 3. Directory Layout
 
 ```
 florialib/
@@ -49,13 +58,15 @@ entry-point `TestRunner.pas`, FPCUnit runner flags `--all --format=plain`.
 
 ---
 
-## 3. Build & Test Workflow
+## 4. Build & Test Workflow
 
 ### Running tests
 
 ```bash
-pasbuild test
+pasbuild test -p pic
 ```
+
+The `pic` profile adds `-Cg`. Use it so installed units can be linked into downstream shared libraries.
 
 Success looks like:
 ```
@@ -68,7 +79,7 @@ Time:00.002  N:123  E:0  F:0  I:0
 ### Forced clean build
 
 ```bash
-rm -rf target && pasbuild test
+rm -rf target && pasbuild test -p pic
 ```
 
 Use this when stale `.ppu` / `.o` files cause spurious compile errors.
@@ -83,7 +94,7 @@ Use this when stale `.ppu` / `.o` files cause spurious compile errors.
 ### Installing to local repository
 
 ```bash
-pasbuild install
+pasbuild install -p pic
 ```
 
 Installs compiled units to `~/.pasbuild/repository/florialib/...` so dependent
@@ -92,7 +103,7 @@ this command whenever units in `florialib` are added, modified, or refactored.
 
 ---
 
-## 4. Test Framework (FPCUnit)
+## 5. Test Framework (FPCUnit)
 
 - Base class: `TTestCase` from `fpcunit`
 - Import: `uses fpcunit, testregistry`
@@ -103,7 +114,7 @@ this command whenever units in `florialib` are added, modified, or refactored.
 
 ---
 
-## 5. CSS Parser Pipeline Architecture
+## 6. CSS Parser Pipeline Architecture
 
 ### Unit dependency graph
 
@@ -167,7 +178,7 @@ same node instance to two lists.
 
 ---
 
-## 6. ICSSTokenListener — Implementation Pattern
+## 7. ICSSTokenListener — Implementation Pattern
 
 FPC on Linux uses **`cdecl`** calling convention for interface methods
 (not `stdcall`). Use the following pattern when implementing
@@ -200,7 +211,7 @@ virtual in FPC's `TInterfacedObject` and cannot be overridden.
 
 ---
 
-## 7. FPC-Specific Gotchas
+## 8. FPC-Specific Gotchas
 
 ### `TObjectList` lives in `Contnrs`, not `Classes`
 
@@ -255,7 +266,7 @@ When `florialib` compiled units (`.o`, `.ppu`) are consumed by shared libraries 
 
 ---
 
-## 8. Object Pascal Coding Style
+## 9. Object Pascal Coding Style
 
 These rules are **mandatory** for all code in this project. They are shared
 with the wider Floria family of projects.
@@ -411,7 +422,7 @@ Key rules:
 
 ---
 
-## 9. W3C CSS Syntax Level 3 Spec References
+## 10. W3C CSS Syntax Level 3 Spec References
 
 | Section | URL | Covers |
 |---|---|---|
@@ -425,7 +436,7 @@ and continue).
 
 ---
 
-## 10. Phase Roadmap
+## 11. Phase Roadmap
 
 | Phase | Unit(s) | Status |
 |---|---|---|
@@ -441,21 +452,23 @@ and continue).
 | 10 — Text Layout & Shaping | `Floria.Unicode.BiDi`, `Floria.Text.HarfBuzz` | ✅ Done — 14 tests |
 
 The CSS engine, XCB Window Manager, XML/SVG DOM, HTML parser, pure Pascal Image codecs,
-AggPas 2D Canvas, and BiDi + HarfBuzz text shaping subsystems in `florialib` provide full foundations for GUI, window management, internationalized text layout, and vector/raster graphics.
-Total test suite: 344 tests (all passing).
+AggPas 2D Canvas (supplied by fpGUI), and BiDi + HarfBuzz text shaping subsystems in `florialib` provide full foundations for GUI, window management, internationalized text layout, and vector/raster graphics.
+The phase-table counts above are historical per phase. Run `pasbuild test -p pic` for the current total; do not hardcode a suite-wide count in documentation.
 
 ---
 
-## 11. Adding a New Unit (Checklist)
+## 12. Adding a New Unit (Checklist)
 
 1. Create `src/main/pascal/Floria.<Subsystem>.<Role>.pas`.
 2. Start with `{$mode objfpc}{$H+}` and add `Contnrs` to `uses` if you need
    `TObjectList`.
 3. Use `//` for all comments; avoid `{ }` block comments containing `{`/`}`.
-4. Follow all coding style rules in §8 (casing, indentation, `()` on
+4. Follow all coding style rules in §9 (casing, indentation, `()` on
    zero-parameter routines, exception handling).
-5. Create a matching test unit `src/test/pascal/Floria.<Subsystem>.<Role>.Test.pas`.
-6. Add the test unit to `src/test/pascal/TestRunner.pas` `uses` clause.
-7. Run `pasbuild test` and confirm `E:0 F:0`.
-8. Run `pasbuild install` to publish the updated units to the local repository
-   for dependent projects.
+5. Add the unit to `src/main/pascal/florialib.pas` and `florialib.lpk`.
+6. Create a matching test unit `src/test/pascal/Floria.<Subsystem>.<Role>.Test.pas`.
+7. Add the test unit to `src/test/pascal/TestRunner.pas` `uses` clause.
+8. Run `pasbuild test -p pic` and confirm `E:0 F:0`.
+9. Run `python3 scripts/check-repo.py` to verify package/umbrella consistency.
+10. Run `pasbuild install -p pic` to publish the updated units to the local repository
+    for dependent projects.

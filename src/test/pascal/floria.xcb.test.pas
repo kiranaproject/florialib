@@ -35,6 +35,8 @@ type
     procedure TestCursorContext();
     procedure TestExtensionsQuery();
     procedure TestCompositeAndDamageConstants();
+    procedure TestRandRNotifyLayout();
+    procedure TestEnvironmentRequirements();
   end;
 
 implementation
@@ -281,6 +283,38 @@ begin
   AssertEquals('Damage report delta', 1, XCB_DAMAGE_REPORT_LEVEL_DELTA_RECTANGLES);
   AssertEquals('Damage report bounding box', 2, XCB_DAMAGE_REPORT_LEVEL_BOUNDING_BOX);
   AssertEquals('Damage report non-empty', 3, XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY);
+end;
+
+procedure TXCBTest.TestRandRNotifyLayout();
+begin
+  AssertEquals('crtc_change payload size', 28, SizeOf(xcb_randr_crtc_change_t));
+  AssertEquals('output_change payload size', 28, SizeOf(xcb_randr_output_change_t));
+  AssertEquals('output_property payload size', 28, SizeOf(xcb_randr_output_property_t));
+  AssertEquals('provider_change payload size', 28, SizeOf(xcb_randr_provider_change_t));
+  AssertEquals('provider_property payload size', 28, SizeOf(xcb_randr_provider_property_t));
+  AssertEquals('resource_change payload size', 28, SizeOf(xcb_randr_resource_change_t));
+  AssertEquals('lease_notify payload size', 28, SizeOf(xcb_randr_lease_notify_t));
+  AssertEquals('notify_data union size', 28, SizeOf(xcb_randr_notify_data_t));
+  AssertEquals('notify_event size', 32, SizeOf(xcb_randr_notify_event_t));
+end;
+
+procedure TXCBTest.TestEnvironmentRequirements();
+var
+  Conn: Pxcb_connection_t;
+  ScreenNum: Integer;
+begin
+  if GetEnvironmentVariable('FLORIA_REQUIRE_DISPLAY') = '' then Exit;
+
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  try
+    AssertNotNull('FLORIA_REQUIRE_DISPLAY is set but xcb_connect returned nil', Conn);
+    AssertEquals('FLORIA_REQUIRE_DISPLAY is set but no X display is available',
+      0, xcb_connection_has_error(Conn));
+  finally
+    if Conn <> nil then
+      xcb_disconnect(Conn);
+  end;
 end;
 
 initialization

@@ -117,6 +117,10 @@ type
 
 implementation
 
+uses
+  Floria.SVG.Parser,
+  Floria.SVG.Rasterizer;
+
 constructor TFloriaCanvasGL.Create(W, H: Integer; gl: TGLEngine = nil);
 begin
   inherited Create();
@@ -767,20 +771,59 @@ begin
 end;
 
 procedure TFloriaCanvasGL.DrawSVG(X, Y: Double; ADoc: TSVGDocument);
+var
+  W, H: Integer;
 begin
-  // Fallback or render via display list
+  if not Assigned(ADoc) or not Assigned(ADoc.Root) then Exit;
+
+  W := Round(SVGLengthToPixels(ADoc.Root.Width));
+  H := Round(SVGLengthToPixels(ADoc.Root.Height));
+  if W <= 0 then W := FWidth;
+  if H <= 0 then H := FHeight;
+  if (W <= 0) or (H <= 0) then Exit;
+
+  DrawSVGScaled(X, Y, W, H, ADoc);
 end;
 
 procedure TFloriaCanvasGL.DrawSVGScaled(X, Y, W, H: Double; ADoc: TSVGDocument);
+var
+  Img: TFloriaImage;
+  RenderW, RenderH: Integer;
 begin
+  if not Assigned(ADoc) or (W <= 0.0) or (H <= 0.0) then Exit;
+
+  RenderW := Max(1, Round(W));
+  RenderH := Max(1, Round(H));
+  Img := TFloriaSVGRenderer.RenderToImage(ADoc, RenderW, RenderH, True);
+  try
+    DrawImageScaled(X, Y, W, H, Img, 1.0);
+  finally
+    Img.Free();
+  end;
 end;
 
 procedure TFloriaCanvasGL.DrawSVGFile(X, Y, W, H: Double; const AFileName: string);
+var
+  Doc: TSVGDocument;
 begin
+  Doc := TSVGParser.ParseFile(AFileName);
+  try
+    DrawSVGScaled(X, Y, W, H, Doc);
+  finally
+    Doc.Free();
+  end;
 end;
 
 procedure TFloriaCanvasGL.DrawSVGString(X, Y, W, H: Double; const ASVGContent: string);
+var
+  Doc: TSVGDocument;
 begin
+  Doc := TSVGParser.ParseString(ASVGContent);
+  try
+    DrawSVGScaled(X, Y, W, H, Doc);
+  finally
+    Doc.Free();
+  end;
 end;
 
 procedure TFloriaCanvasGL.DrawText(X, Y: Double; const AText: string; ASize: Double; R, G, B: Double);

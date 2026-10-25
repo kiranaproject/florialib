@@ -6,7 +6,7 @@ Developed by **Dio Affriza** &bull; Licensed under the **Mozilla Public License 
 
 [![FPC](https://img.shields.io/badge/Language-Free%20Pascal%203.2%2B-blue.svg)](https://www.freepascal.org/)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Tests](https://img.shields.io/badge/Tests-579%20passed%20%7C%200%20errors-success.svg)](src/test/pascal/)
+[![Tests](https://img.shields.io/badge/Tests-full%20suite-success.svg)](src/test/pascal/)
 
 ---
 
@@ -103,7 +103,7 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 
 ---
 
-### 6. Extended Blend Modes & Physical Linear Color Pipeline (`Floria.Blend`, `Floria.ColorSpace`)
+### 6. Extended Blend Modes & Physical Linear Color Pipeline (`Floria.Canvas.Blend`, `Floria.ColorSpace`)
 
 - **29 W3C & Skia Blend Modes**:
   - 14 Porter-Duff & Arithmetic: `Clear`, `Src`, `Dst`, `SrcOver`, `DstOver`, `SrcIn`, `DstIn`, `SrcOut`, `DstOut`, `SrcATop`, `DstATop`, `Xor`, `Plus`, `Modulate`.
@@ -119,7 +119,7 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 
 ### 7. Composable Filter Graph (`Floria.Canvas.Filter`)
 
-- **Non-Destructive Filter Tree (`floria.filter.*`)**:
+- **Non-Destructive Filter Tree (`floria.canvas.filter.pas`)**:
   - `TBlurFilter`: Multi-algorithm blur supporting 3-pass Gaussian (Central Limit Theorem $O(1)$), fast Box blur, and Dual Kawase blur.
   - `TColorMatrixFilter`: $4 \times 5$ color matrix transforms with presets for Grayscale, Invert, Sepia, Saturation, Brightness, and Contrast.
   - `TDropShadowFilter`: Configurable offset, sigma blur, tint color, and composite mode.
@@ -159,7 +159,7 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 
 ---
 
-### 11. Hardware-Accelerated GPU Vector Core (`Floria.GL`, `Floria.GPU.*`, `Floria.Canvas.GPU`)
+### 11. Hardware-Accelerated GPU Vector Core (`Floria.GL`, `Floria.GPU.*`, `Floria.Canvas.GL`)
 
 - **Dynamic OpenGL / GLES Loader (`Floria.GL`)**: Pure Pascal dynamic loader via `dynlibs` (`libGLESv2.so.2` / `libGL.so.1`) and `eglGetProcAddress`.
 - **EGL Presentation Driver (`Floria.GPU.Context`)**: Native X11 EGL 1.4/1.5 context management, VSync synchronization (`eglSwapInterval`), and offscreen PBuffers.
@@ -167,7 +167,7 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 - **Instanced Quad & Vertex Batching (`Floria.GPU.Batch`)**: Draw-call coalescing streaming 64-byte std140-aligned vertices to GPU VBOs.
 - **AOT Precompiled Mega-Shaders (`Floria.GPU.Shaders`)**: Zero runtime JIT stutter; SDF analytical rounded rectangles, borders, box shadows, linear gradients, and in-shader clip chains.
 - **Native GPU Path Tessellation (`Floria.GPU.Tessellator`)**: Single-pass stroke extrusion with Miter/Round/Bevel joins, ear-clipping polygon triangulation, and 1px analytic AA boundary skirts.
-- **Polymorphic GPU Canvas (`Floria.Canvas.GPU`)**: Implements standard canvas operations backed directly by hardware acceleration.
+- **Polymorphic GPU Canvas (`Floria.Canvas.GL`)**: Implements standard canvas operations backed directly by hardware acceleration. SVG rendering falls back to an offscreen AggPas pass; GPU paragraph and layer playback currently raise `EFloriaNotSupported` rather than failing silently (see the canvas guide).
 
 ---
 
@@ -191,27 +191,32 @@ A complete Pascal binding suite for XCB with **zero dependencies on legacy Xlib*
 
 - **Free Pascal**: FPC 3.2.0+ (recommended: FPC 3.2.3+).
 - **Pasbuild**: Free Pascal build tool.
-- **System Libraries**: `libxcb`, `libxcb-render`, `libxcb-randr`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`, `libfreetype`, `libharfbuzz` (optional at runtime), `libEGL`, `libGLESv2` (optional at runtime for GPU acceleration).
+- **Pasbuild dependency**: `fpgui-framework:2.2.0-SNAPSHOT`. fpGUI supplies the AggPas units used by the canvas, image, and font subsystems. AggPas is **not** a standalone dependency; do not add a separate AggPas package.
+- **System Libraries**: `libxcb`, `libxcb-composite`, `libxcb-damage`, `libxcb-randr`, `libxcb-render`, `libxcb-shape`, `libxcb-shm`, `libxcb-xfixes`, `libxcb-cursor`, `libxcb-keysyms`, `libxcb-icccm`, `libxcb-ewmh`, `libxcb-xinerama`, `libfreetype`, `libharfbuzz` (optional at runtime), `libEGL`, `libGLESv2` (optional at runtime for GPU acceleration).
 
 ### Build Commands
 
 ```bash
-# Compile library
-pasbuild compile
+# Compile library with Position-Independent Code
+pasbuild compile -p pic
 
-# Run complete test suite (579 tests)
-pasbuild test
+# Run the complete test suite
+pasbuild test -p pic
 
 # Force clean build and run tests
-rm -rf target && pasbuild test
+rm -rf target && pasbuild test -p pic
 
 # Install to local package repository (~/.pasbuild/repository/)
-pasbuild install
+pasbuild install -p pic
 ```
+
+The `pic` profile adds `-Cg` (Position-Independent Code). Use it for both testing and installation so downstream shared libraries such as `libft.so` can link against the installed units.
 
 ### Lazarus Package
 
 Open [`src/main/pascal/florialib.lpk`](src/main/pascal/florialib.lpk) in Lazarus to compile and use `florialib` as a runtime package within Lazarus projects.
+
+The package requires fpGUI's `extras/aggpas/aggpas.lpk` (package name `aggpas`). Do not point it at a standalone AggPas port. Lazarus unit output is written to `target/lazarus/`.
 
 ---
 
@@ -220,15 +225,20 @@ Open [`src/main/pascal/florialib.lpk`](src/main/pascal/florialib.lpk) in Lazarus
 Comprehensive guides and API references are available in the [`docs/`](docs/) directory:
 
 - [**Documentation Overview**](docs/index.md)
+- [**Architecture Overview**](docs/architecture.md)
 - [**CSS Subsystem Documentation**](docs/css.md)
 - [**XML Subsystem Guide**](docs/xml.md)
+- [**HTML Subsystem Guide**](docs/html.md)
 - [**SVG Subsystem Guide**](docs/svg.md)
 - [**Image Subsystem Guide**](docs/image.md)
 - [**Canvas & 2D Graphics Guide**](docs/canvas.md)
 - [**Text Layout & Shaping Guide**](docs/text.md)
 - [**XCB & Window Manager Guide**](docs/xcb.md)
 - [**WM Framework Specification**](docs/wm.md)
+- [**Compression & Hashing**](docs/utilities.md)
+- [**Testing**](docs/testing.md)
 - [**Coding Standards & Development Guide**](docs/coding-style.md)
+- [**Third-Party Notices**](THIRD_PARTY_NOTICES.md)
 - [**Skia-Parity Graphics Architecture Roadmap**](roadmap.md)
 
 ---

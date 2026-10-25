@@ -4,13 +4,16 @@
 
 Whenever any source file in `src/main/pascal/` is added, modified, or refactored:
 
-1. **Run tests**: `pasbuild test` (all tests must pass with `E:0 F:0`).
-2. **Install to local repository**: **Always** run `pasbuild install` immediately after successful testing. This step publishes the compiled units (`.ppu`, `.o`) to the local package repository (`~/.pasbuild/repository/florialib/`), enabling downstream consumer projects (such as `floria-toolkit` and `wmsama`) to resolve and link against the updated `florialib`.
+1. **Run tests**: `pasbuild test -p pic` (all tests must pass with `E:0 F:0`).
+2. **Install to local repository**: **Always** run `pasbuild install -p pic` immediately after successful testing. This step publishes the compiled units (`.ppu`, `.o`) to the local package repository (`~/.pasbuild/repository/florialib/`), enabling downstream consumer projects (such as `floria-toolkit` and `wmsama`) to resolve and link against the updated `florialib`.
+
+The `pic` profile adds `-Cg` (Position-Independent Code). It must be used for both testing and installation so downstream shared libraries can link against the installed units.
 
 ## Dependencies
 
-- **`aggpas:2.4.0-SNAPSHOT`**: Independent 2D vector graphics rendering engine (decoupled from fpGUI).
-- **`fpgui-framework` is not used**. Do not add `fpgui-framework` as a dependency.
+- **`fpgui-framework:2.2.0-SNAPSHOT`** is the intended build dependency. It supplies the AggPas units used by `Floria.Canvas.Agg`, `Floria.Image.Core`, and `Floria.Font`.
+- **AggPas is not a standalone dependency.** It comes from fpGUI's `extras/aggpas` fork (Lazarus package name `aggpas`). Never add a separate AggPas package or dependency.
+- Do **not** pursue the AggPas-to-Blaise port; that prototype was discarded.
 
 ## Pasbuild Configuration File
 

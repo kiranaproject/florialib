@@ -40,12 +40,19 @@ type
     DrawPictureCount  : Integer;
     SaveLayerCount    : Integer;
     RestoreLayerCount : Integer;
+    LastTransform     : TFloriaMatrix2D;
+    LastAlpha         : Double;
+    FirstDrawTransform: TFloriaMatrix2D;
+    FirstDrawAlpha    : Double;
+    SecondDrawTransform: TFloriaMatrix2D;
+    SecondDrawAlpha   : Double;
 
     procedure OnSave(); override;
     procedure OnRestore(); override;
     procedure OnTransform(const AMatrix: TFloriaMatrix2D); override;
     procedure OnPushClipRect(const ARect: TRectD; AAntiAlias: Boolean); override;
     procedure OnPopClip(); override;
+    procedure OnSetAlpha(AAlpha: Double); override;
     procedure OnClear(const AColor: TBgraPixel); override;
     procedure OnDrawRect(const ARect: TRectD; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double); override;
     procedure OnDrawRoundedRect(const ARect: TRectD; ARadiusX, ARadiusY: Double; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double); override;
@@ -83,6 +90,7 @@ type
     procedure TestPictureClone();
     procedure TestDisplayListDump();
     procedure TestCustomReceiverDispatch();
+    procedure TestReceiverAbsoluteState();
   end;
 
 implementation
@@ -92,11 +100,29 @@ implementation
 // -----------------------------------------------------------------------------
 procedure TTestMockReceiver.OnSave(); begin Inc(SaveCount); end;
 procedure TTestMockReceiver.OnRestore(); begin Inc(RestoreCount); end;
-procedure TTestMockReceiver.OnTransform(const AMatrix: TFloriaMatrix2D); begin Inc(TransformCount); end;
+procedure TTestMockReceiver.OnTransform(const AMatrix: TFloriaMatrix2D);
+begin
+  LastTransform := AMatrix;
+  Inc(TransformCount);
+end;
 procedure TTestMockReceiver.OnPushClipRect(const ARect: TRectD; AAntiAlias: Boolean); begin Inc(PushClipCount); end;
 procedure TTestMockReceiver.OnPopClip(); begin Inc(PopClipCount); end;
+procedure TTestMockReceiver.OnSetAlpha(AAlpha: Double); begin LastAlpha := AAlpha; end;
 procedure TTestMockReceiver.OnClear(const AColor: TBgraPixel); begin Inc(ClearCount); end;
-procedure TTestMockReceiver.OnDrawRect(const ARect: TRectD; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double); begin Inc(DrawRectCount); end;
+procedure TTestMockReceiver.OnDrawRect(const ARect: TRectD; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double);
+begin
+  if DrawRectCount = 0 then
+  begin
+    FirstDrawTransform := LastTransform;
+    FirstDrawAlpha := LastAlpha;
+  end
+  else if DrawRectCount = 1 then
+  begin
+    SecondDrawTransform := LastTransform;
+    SecondDrawAlpha := LastAlpha;
+  end;
+  Inc(DrawRectCount);
+end;
 procedure TTestMockReceiver.OnDrawRoundedRect(const ARect: TRectD; ARadiusX, ARadiusY: Double; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double); begin Inc(DrawRRectCount); end;
 procedure TTestMockReceiver.OnDrawCircle(ACenterX, ACenterY, ARadius: Double; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double); begin Inc(DrawCircleCount); end;
 procedure TTestMockReceiver.OnDrawLine(AX1, AY1, AX2, AY2: Double; const AColor: TBgraPixel; AStrokeWidth: Double); begin Inc(DrawLineCount); end;
@@ -828,6 +854,47 @@ begin
         AssertEquals('DrawLine dispatched', 1, Receiver.DrawLineCount);
         AssertEquals('PopClip dispatched', 1, Receiver.PopClipCount);
         AssertEquals('Restore dispatched', 1, Receiver.RestoreCount);
+      finally
+        Picture.Free();
+      end;
+    finally
+      Recorder.Free();
+    end;
+  finally
+    Receiver.Free();
+  end;
+end;
+
+procedure TFloriaDisplayListTest.TestReceiverAbsoluteState();
+var
+  Recorder: TFloriaPictureRecorder;
+  Picture: TFloriaPicture;
+  Receiver: TTestMockReceiver;
+begin
+  Receiver := TTestMockReceiver.Create();
+  try
+    Recorder := TFloriaPictureRecorder.Create();
+    try
+      Recorder.BeginRecording(100.0, 100.0);
+      Recorder.Save();
+      Recorder.Translate(10.0, 20.0);
+      Recorder.PushAlpha(0.5);
+      Recorder.DrawRect(RectD(0.0, 0.0, 10.0, 10.0), BgraPixel(255, 0, 0, 255));
+      Recorder.PopAlpha();
+      Recorder.Restore();
+      Recorder.DrawRect(RectD(0.0, 0.0, 10.0, 10.0), BgraPixel(0, 255, 0, 255));
+
+      Picture := Recorder.EndRecording();
+      try
+        Picture.Playback(Receiver, TFloriaMatrix2D.Translation(5.0, 7.0), 0.25);
+
+        AssertEquals('first draw transform Tx', 15.0, Receiver.FirstDrawTransform.Tx, 1e-9);
+        AssertEquals('first draw transform Ty', 27.0, Receiver.FirstDrawTransform.Ty, 1e-9);
+        AssertEquals('first draw alpha', 0.125, Receiver.FirstDrawAlpha, 1e-9);
+
+        AssertEquals('second draw transform Tx', 5.0, Receiver.SecondDrawTransform.Tx, 1e-9);
+        AssertEquals('second draw transform Ty', 7.0, Receiver.SecondDrawTransform.Ty, 1e-9);
+        AssertEquals('second draw alpha', 0.25, Receiver.SecondDrawAlpha, 1e-9);
       finally
         Picture.Free();
       end;

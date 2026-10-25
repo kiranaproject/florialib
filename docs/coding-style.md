@@ -19,6 +19,8 @@ unit Floria.<Subsystem>.<Role>;
 - **Strings**: `{$H+}` enables long `AnsiString` by default.
 - **Advanced Records**: `{$modeswitch advancedrecords}` enables methods and constructors on `record` types.
 
+Vendored units (`floria.path.clipper.*`, derived from Clipper2) and generated bindings (`floria.xcb.*`, `floria.x11.keysym.pas`) are exceptions to this convention. Do not reformat them; keep their upstream headers and regeneration metadata intact.
+
 ---
 
 ## 2. Mandatory Empty Parentheses `()` on Zero-Parameter Routines
@@ -142,18 +144,24 @@ end;
 
 ## 6. Testing & Pasbuild Workflow
 
+### Dependencies
+- **`fpgui-framework:2.2.0-SNAPSHOT`** is the build dependency and supplies AggPas.
+- **AggPas is not standalone.** It comes from fpGUI's `extras/aggpas` fork (Lazarus package name `aggpas`). Do not add a separate AggPas dependency.
+
 ### Running Tests
-Execute the entire test suite with plain text reporting:
+Execute the entire test suite with plain text reporting and Position-Independent Code enabled:
 
 ```bash
-pasbuild test
+pasbuild test -p pic
 ```
+
+The `pic` profile adds `-Cg`. It is required when the compiled units will be linked into downstream shared libraries.
 
 ### Installing to Local Repository
 Publish compiled units so dependent projects (e.g. `floria-toolkit`) can link against `florialib`:
 
 ```bash
-pasbuild install
+pasbuild install -p pic
 ```
 
 ### Adding a New Unit
@@ -168,5 +176,6 @@ pasbuild install
    end.
    ```
 6. Add the test unit to `src/test/pascal/TestRunner.pas` `uses` clause.
-7. Run `pasbuild test` and ensure `E:0 F:0`.
-8. Run `pasbuild install` to publish the updated units to `~/.pasbuild/repository/`.
+7. Run `pasbuild test -p pic` and ensure `E:0 F:0`.
+8. Run `python3 scripts/check-repo.py` to verify package/umbrella consistency.
+9. Run `pasbuild install -p pic` to publish the updated units to `~/.pasbuild/repository/`.

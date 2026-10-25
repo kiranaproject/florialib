@@ -22,6 +22,7 @@ uses
   Floria.Font,
   Floria.Canvas.Blend,
   Floria.Canvas.Filter,
+  Floria.Errors,
   Floria.Path.Clipper.Core,
   Floria.Path.Ops,
   Floria.Text.Paragraph,
@@ -51,11 +52,23 @@ type
     FDirectTessellationEnabled: Boolean;
     FCurrentAlpha             : Double;
     FBlendMode                : TFloriaBlendMode;
+    FCurrentMatrix            : TFloriaMatrix2D;
+    FMatrixStack              : array of TFloriaMatrix2D;
+    FMatrixDepth              : Integer;
+    FAlphaStack               : array of Double;
+    FAlphaDepth               : Integer;
+    FBlendStack               : array of TFloriaBlendMode;
+    FBlendDepth               : Integer;
     FViewportW                : Integer;
     FViewportH                : Integer;
     FInFrame                  : Boolean;
 
     procedure ApplyBlendMode(AMode: TFloriaBlendMode);
+    function CurrentScale(): Double;
+    function TransformRect(const ARect: TRectD): TRectD;
+    function TransformPoint(const APt: TPointD): TPointD;
+    function TransformPath(APath: TFloriaPath): TFloriaPath;
+    function ApplyAlpha(const AColor: TBgraPixel): TBgraPixel;
   public
     constructor Create(gl: TGLEngine = nil); overload;
     constructor Create(AContext: TFloriaGPUContext); overload;
@@ -127,6 +140,13 @@ begin
   FDirectTessellationEnabled := True;
   FCurrentAlpha              := 1.0;
   FBlendMode                 := fbmSrcOver;
+  FCurrentMatrix             := TFloriaMatrix2D.Identity();
+  FMatrixDepth               := 0;
+  FAlphaDepth                := 0;
+  FBlendDepth                := 0;
+  SetLength(FMatrixStack, 16);
+  SetLength(FAlphaStack, 16);
+  SetLength(FBlendStack, 16);
   FViewportW                 := 0;
   FViewportH                 := 0;
   FInFrame                   := False;
@@ -161,6 +181,10 @@ begin
   FClipChain.Clear();
   FCurrentAlpha := 1.0;
   FBlendMode    := fbmSrcOver;
+  FCurrentMatrix := TFloriaMatrix2D.Identity();
+  FMatrixDepth  := 0;
+  FAlphaDepth   := 0;
+  FBlendDepth   := 0;
 
   if Assigned(FContext) and not FContext.IsCurrent() then
     FContext.MakeCurrent();
@@ -269,32 +293,133 @@ begin
   FBatch.Clear();
 end;
 
+function TFloriaGPURenderer.CurrentScale(): Double;
+var
+  Det: Double;
+begin
+  Det := FCurrentMatrix.Determinant();
+  Result := Sqrt(Abs(Det));
+  if Result < 1e-6 then
+    Result := 1.0;
+end;
+
+function TFloriaGPURenderer.TransformRect(const ARect: TRectD): TRectD;
+begin
+  Result := FCurrentMatrix.TransformRect(ARect);
+end;
+
+function TFloriaGPURenderer.TransformPoint(const APt: TPointD): TPointD;
+begin
+  Result := FCurrentMatrix.TransformPoint(APt);
+end;
+
+function TFloriaGPURenderer.TransformPath(APath: TFloriaPath): TFloriaPath;
+var
+  Paths: TPathsD;
+  I, J: Integer;
+begin
+  Result := nil;
+  if not Assigned(APath) then Exit;
+
+  Paths := APath.ToPathsD();
+  for I := 0 to High(Paths) do
+    for J := 0 to High(Paths[I]) do
+      Paths[I][J] := FCurrentMatrix.TransformPoint(Paths[I][J]);
+
+  Result := TFloriaPath.Create();
+  try
+    Result.FromPathsD(Paths);
+  except
+    Result.Free();
+    raise;
+  end;
+end;
+
+function TFloriaGPURenderer.ApplyAlpha(const AColor: TBgraPixel): TBgraPixel;
+var
+  A: Integer;
+begin
+  Result := AColor;
+  A := Round(AColor.A * FCurrentAlpha);
+  if A < 0 then A := 0;
+  if A > 255 then A := 255;
+  Result.A := Byte(A);
+end;
+
 procedure TFloriaGPURenderer.OnSave();
 begin
-  // Transforms and state managed via DisplayOp matrix flattening
+  if FMatrixDepth >= Length(FMatrixStack) then
+  begin
+    if Length(FMatrixStack) = 0 then
+      SetLength(FMatrixStack, 16)
+    else
+      SetLength(FMatrixStack, Length(FMatrixStack) * 2);
+  end;
+  FMatrixStack[FMatrixDepth] := FCurrentMatrix;
+  Inc(FMatrixDepth);
+
+  if FAlphaDepth >= Length(FAlphaStack) then
+  begin
+    if Length(FAlphaStack) = 0 then
+      SetLength(FAlphaStack, 16)
+    else
+      SetLength(FAlphaStack, Length(FAlphaStack) * 2);
+  end;
+  FAlphaStack[FAlphaDepth] := FCurrentAlpha;
+  Inc(FAlphaDepth);
+
+  if FBlendDepth >= Length(FBlendStack) then
+  begin
+    if Length(FBlendStack) = 0 then
+      SetLength(FBlendStack, 16)
+    else
+      SetLength(FBlendStack, Length(FBlendStack) * 2);
+  end;
+  FBlendStack[FBlendDepth] := FBlendMode;
+  Inc(FBlendDepth);
 end;
 
 procedure TFloriaGPURenderer.OnRestore();
 begin
+  if FMatrixDepth > 0 then
+  begin
+    Dec(FMatrixDepth);
+    FCurrentMatrix := FMatrixStack[FMatrixDepth];
+  end;
+
+  if FAlphaDepth > 0 then
+  begin
+    Dec(FAlphaDepth);
+    FCurrentAlpha := FAlphaStack[FAlphaDepth];
+  end;
+
+  if FBlendDepth > 0 then
+  begin
+    Dec(FBlendDepth);
+    FBlendMode := FBlendStack[FBlendDepth];
+  end;
 end;
 
 procedure TFloriaGPURenderer.OnTransform(const AMatrix: TFloriaMatrix2D);
 begin
+  FCurrentMatrix := AMatrix;
 end;
 
 procedure TFloriaGPURenderer.OnPushClipRect(const ARect: TRectD; AAntiAlias: Boolean);
 begin
-  FClipChain.PushClipRect(ARect, AAntiAlias);
+  FClipChain.PushClipRect(ARect, FCurrentMatrix, AAntiAlias);
 end;
 
 procedure TFloriaGPURenderer.OnPushClipRoundedRect(const ARect: TRectD; ARadiusX, ARadiusY: Double; AAntiAlias: Boolean);
 begin
-  FClipChain.PushClipRoundedRect(ARect, ARadiusX, ARadiusY, AAntiAlias);
+  FClipChain.PushClipRoundedRect(ARect,
+    TFloriaClipCornerRadii.Rounded(ARadiusX, ARadiusY),
+    FCurrentMatrix, AAntiAlias);
 end;
 
 procedure TFloriaGPURenderer.OnPushClipRoundedRect(const ARect: TRectD; const ARadii: TFloriaClipCornerRadii; AAntiAlias: Boolean);
 begin
-  FClipChain.PushClipRoundedRect(ARect, ARadii, TFloriaMatrix2D.Identity(), AAntiAlias);
+  FClipChain.PushClipRoundedRect(ARect, ARadii, FCurrentMatrix, AAntiAlias);
 end;
 
 procedure TFloriaGPURenderer.OnPopClip();
@@ -322,35 +447,67 @@ begin
 end;
 
 procedure TFloriaGPURenderer.OnDrawRect(const ARect: TRectD; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double);
+var
+  R: TRectD;
+  FillColor, StrokeColor: TBgraPixel;
+  Scale: Double;
 begin
-  if (AStrokeWidth <= 0.0) or (AStrokeColor.A = 0) then
-    FBatch.EmitSolidRect(ARect, AFillColor, FBlendMode, FClipChain.CurrentNode)
+  R := TransformRect(ARect);
+  FillColor := ApplyAlpha(AFillColor);
+  StrokeColor := ApplyAlpha(AStrokeColor);
+  Scale := CurrentScale();
+
+  if (AStrokeWidth <= 0.0) or (StrokeColor.A = 0) then
+    FBatch.EmitSolidRect(R, FillColor, FBlendMode, FClipChain.CurrentNode)
   else
-    FBatch.EmitRoundedRect(ARect, TFloriaClipCornerRadii.Zero(), AFillColor, AStrokeColor, AStrokeWidth, FBlendMode, FClipChain.CurrentNode);
+    FBatch.EmitRoundedRect(R, TFloriaClipCornerRadii.Zero(),
+      FillColor, StrokeColor, AStrokeWidth * Scale,
+      FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawRoundedRect(const ARect: TRectD; ARadiusX, ARadiusY: Double; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double);
+var
+  R: TRectD;
+  Scale: Double;
 begin
-  FBatch.EmitRoundedRect(ARect, TFloriaClipCornerRadii.Rounded(ARadiusX, ARadiusY), AFillColor, AStrokeColor, AStrokeWidth, FBlendMode, FClipChain.CurrentNode);
+  R := TransformRect(ARect);
+  Scale := CurrentScale();
+  FBatch.EmitRoundedRect(R,
+    TFloriaClipCornerRadii.Rounded(ARadiusX * Scale, ARadiusY * Scale),
+    ApplyAlpha(AFillColor), ApplyAlpha(AStrokeColor), AStrokeWidth * Scale,
+    FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawCircle(ACenterX, ACenterY, ARadius: Double; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double);
 var
   R: TRectD;
+  Scale: Double;
 begin
-  R.Left   := ACenterX - ARadius;
-  R.Top    := ACenterY - ARadius;
-  R.Right  := ACenterX + ARadius;
-  R.Bottom := ACenterY + ARadius;
-  FBatch.EmitRoundedRect(R, TFloriaClipCornerRadii.Uniform(ARadius), AFillColor, AStrokeColor, AStrokeWidth, FBlendMode, FClipChain.CurrentNode);
+  R := TransformRect(RectD(ACenterX - ARadius, ACenterY - ARadius,
+                           ACenterX + ARadius, ACenterY + ARadius));
+  Scale := CurrentScale();
+  FBatch.EmitRoundedRect(R,
+    TFloriaClipCornerRadii.Uniform(ARadius * Scale),
+    ApplyAlpha(AFillColor), ApplyAlpha(AStrokeColor), AStrokeWidth * Scale,
+    FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawLine(AX1, AY1, AX2, AY2: Double; const AColor: TBgraPixel; AStrokeWidth: Double);
+var
+  P1, P2: TPointD;
+  Color: TBgraPixel;
+  Scale: Double;
 begin
-  if (AColor.A = 0) or (AStrokeWidth <= 0.0) then Exit;
+  Color := ApplyAlpha(AColor);
+  if (Color.A = 0) or (AStrokeWidth <= 0.0) then Exit;
 
-  // Use analytical SDF capsule line rendering for subpixel antialiasing and round caps
-  FBatch.EmitCapsuleLine(PointD(AX1, AY1), PointD(AX2, AY2), AStrokeWidth, AColor, FBlendMode, FClipChain.CurrentNode);
+  P1 := TransformPoint(PointD(AX1, AY1));
+  P2 := TransformPoint(PointD(AX2, AY2));
+  Scale := CurrentScale();
+
+  // Analytical SDF capsule line with subpixel antialiasing and round caps.
+  FBatch.EmitCapsuleLine(P1, P2, AStrokeWidth * Scale, Color,
+    FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawPath(APath: TFloriaPath; const AFillColor, AStrokeColor: TBgraPixel; AStrokeWidth: Double; AFillRule: TFillRule);
@@ -358,63 +515,112 @@ var
   Alloc: TFloriaAtlasAlloc;
   TexRect: TRectD;
   FillMesh, StrokeMesh: TFloriaTessMesh;
-  Handled: Boolean;
+  Handled, OwnsPath: Boolean;
+  DrawPath: TFloriaPath;
+  FillColor, StrokeColor: TBgraPixel;
+  Scale: Double;
 begin
   if not Assigned(APath) or APath.IsEmpty then Exit;
 
-  Handled := False;
-
-  if FDirectTessellationEnabled then
+  DrawPath := APath;
+  OwnsPath := False;
+  if not FCurrentMatrix.IsIdentity() then
   begin
-    // 1. Direct GPU Fill Tessellation
-    if AFillColor.A > 0 then
-    begin
-      FillMesh.Clear();
-      FTessellator.TessellateFill(APath, FillMesh, fpfrNonZero, True);
-      if FillMesh.IndexCount > 0 then
-      begin
-        FBatch.EmitPathMesh(FillMesh, AFillColor, FBlendMode, FClipChain.CurrentNode);
-        Handled := True;
-      end;
-    end;
-
-    // 2. Direct GPU Stroke Tessellation
-    if (AStrokeColor.A > 0) and (AStrokeWidth > 0.0) then
-    begin
-      StrokeMesh.Clear();
-      FTessellator.TessellateStroke(APath, AStrokeWidth, StrokeMesh, fpjtRound, fpetRound, 4.0, True);
-      if StrokeMesh.IndexCount > 0 then
-      begin
-        FBatch.EmitPathMesh(StrokeMesh, AStrokeColor, FBlendMode, FClipChain.CurrentNode);
-        Handled := True;
-      end;
-    end;
+    DrawPath := TransformPath(APath);
+    OwnsPath := True;
   end;
 
-  if not Handled then
-  begin
-    // Fallback Blob Rasterizer: renders path into GPU texture atlas via AggPas
-    if FAtlas.RasterizePath(APath, AFillColor, AStrokeColor, AStrokeWidth, AFillRule, Alloc) then
+  try
+    FillColor := ApplyAlpha(AFillColor);
+    StrokeColor := ApplyAlpha(AStrokeColor);
+    Scale := CurrentScale();
+    Handled := False;
+
+    if FDirectTessellationEnabled then
     begin
-      TexRect.Left   := Alloc.U1;
-      TexRect.Top    := Alloc.V1;
-      TexRect.Right  := Alloc.U2;
-      TexRect.Bottom := Alloc.V2;
-      FBatch.EmitTexturedRect(APath.Bounds, TexRect, FAtlas.Pages[Alloc.PageIndex].TextureID, FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
+      // 1. Direct GPU Fill Tessellation
+      if FillColor.A > 0 then
+      begin
+        FillMesh.Clear();
+        FTessellator.TessellateFill(DrawPath, FillMesh, fpfrNonZero, True);
+        if FillMesh.IndexCount > 0 then
+        begin
+          FBatch.EmitPathMesh(FillMesh, FillColor, FBlendMode, FClipChain.CurrentNode);
+          Handled := True;
+        end;
+      end;
+
+      // 2. Direct GPU Stroke Tessellation
+      if (StrokeColor.A > 0) and (AStrokeWidth > 0.0) then
+      begin
+        StrokeMesh.Clear();
+        FTessellator.TessellateStroke(DrawPath, AStrokeWidth * Scale, StrokeMesh, fpjtRound, fpetRound, 4.0, True);
+        if StrokeMesh.IndexCount > 0 then
+        begin
+          FBatch.EmitPathMesh(StrokeMesh, StrokeColor, FBlendMode, FClipChain.CurrentNode);
+          Handled := True;
+        end;
+      end;
     end;
+
+    if not Handled then
+    begin
+      // Fallback Blob Rasterizer: renders path into GPU texture atlas via AggPas
+      if FAtlas.RasterizePath(DrawPath, FillColor, StrokeColor, AStrokeWidth * Scale, AFillRule, Alloc) then
+      begin
+        TexRect.Left   := Alloc.U1;
+        TexRect.Top    := Alloc.V1;
+        TexRect.Right  := Alloc.U2;
+        TexRect.Bottom := Alloc.V2;
+        FBatch.EmitTexturedRect(DrawPath.Bounds, TexRect, FAtlas.Pages[Alloc.PageIndex].TextureID,
+          1.0, FBlendMode, FClipChain.CurrentNode);
+      end;
+    end;
+  finally
+    if OwnsPath then
+      DrawPath.Free();
   end;
 end;
 
 procedure TFloriaGPURenderer.OnDrawShadow(const ARect: TRectD; ARadius: Double; const AParams: TFloriaShadowParams);
+var
+  R: TRectD;
+  Params: TFloriaShadowParams;
+  Scale: Double;
 begin
-  FBatch.EmitBoxShadow(ARect, ARadius, AParams, FBlendMode, FClipChain.CurrentNode);
+  R := TransformRect(ARect);
+  Scale := CurrentScale();
+  Params := AParams;
+  Params.OffsetX := Params.OffsetX * Scale;
+  Params.OffsetY := Params.OffsetY * Scale;
+  Params.BlurRadius := Params.BlurRadius * Scale;
+  Params.SpreadRadius := Params.SpreadRadius * Scale;
+  Params.Color := ApplyAlpha(Params.Color);
+  FBatch.EmitBoxShadow(R, ARadius * Scale, Params, FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawBorder(const ARect: TRectD; const AParams: TFloriaBorderParams);
+var
+  R: TRectD;
+  Params: TFloriaBorderParams;
+  Scale: Double;
 begin
-  FBatch.EmitRoundedRect(ARect, TFloriaClipCornerRadii.Rounded(AParams.RadiusX, AParams.RadiusY),
-                         BgraPixel(0, 0, 0, 0), AParams.Top.Color, AParams.Top.Width,
-                         FBlendMode, FClipChain.CurrentNode);
+  R := TransformRect(ARect);
+  Scale := CurrentScale();
+  Params := AParams;
+  Params.RadiusX := Params.RadiusX * Scale;
+  Params.RadiusY := Params.RadiusY * Scale;
+  Params.Top.Width := Params.Top.Width * Scale;
+  Params.Right.Width := Params.Right.Width * Scale;
+  Params.Bottom.Width := Params.Bottom.Width * Scale;
+  Params.Left.Width := Params.Left.Width * Scale;
+  Params.Top.Color := ApplyAlpha(Params.Top.Color);
+  Params.Right.Color := ApplyAlpha(Params.Right.Color);
+  Params.Bottom.Color := ApplyAlpha(Params.Bottom.Color);
+  Params.Left.Color := ApplyAlpha(Params.Left.Color);
+  FBatch.EmitRoundedRect(R, TFloriaClipCornerRadii.Rounded(Params.RadiusX, Params.RadiusY),
+    BgraPixel(0, 0, 0, 0), Params.Top.Color, Params.Top.Width,
+    FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawLinearGradient(const ARect: TRectD; const AP1, AP2: TPointD; const AStops: TFloriaGradientStopArray);
@@ -422,6 +628,8 @@ var
   C1, C2: TBgraPixel;
   AngleDeg: Double;
   DX, DY: Double;
+  R: TRectD;
+  P1, P2: TPointD;
 begin
   if Length(AStops) >= 2 then
   begin
@@ -434,11 +642,17 @@ begin
     C2 := BgraPixel(0, 0, 0, 255);
   end;
 
-  DX := AP2.X - AP1.X;
-  DY := AP2.Y - AP1.Y;
+  R := TransformRect(ARect);
+  P1 := TransformPoint(AP1);
+  P2 := TransformPoint(AP2);
+  C1 := ApplyAlpha(C1);
+  C2 := ApplyAlpha(C2);
+
+  DX := P2.X - P1.X;
+  DY := P2.Y - P1.Y;
   AngleDeg := RadToDeg(ArcTan2(DY, DX));
 
-  FBatch.EmitLinearGradient(ARect, C1, C2, AngleDeg, FBlendMode, FClipChain.CurrentNode);
+  FBatch.EmitLinearGradient(R, C1, C2, AngleDeg, FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawText(const AText: string; AX, AY: Double; AFont: TFloriaFont; AFontSize: Double; const AColor: TBgraPixel);
@@ -467,6 +681,7 @@ begin
     DstRect.Top    := Round(AY) - Round(Font.Ascent) - 2.0;
     DstRect.Right  := DstRect.Left + Alloc.Rect.Width;
     DstRect.Bottom := DstRect.Top + Alloc.Rect.Height;
+    DstRect := TransformRect(DstRect);
 
     FBatch.EmitGlyphRect(DstRect, TexRect, Page.TextureID,
                          AColor, FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
@@ -480,6 +695,7 @@ var
   Font: TFloriaFont;
   Page: TFloriaAtlasPage;
   PivX, PivY: Double;
+  P: TPointD;
 begin
   if (AText = '') or (AColor.A = 0) then Exit;
   Font := AFont;
@@ -509,6 +725,10 @@ begin
     DstRect.Top    := PivY - Round(Font.Ascent) - 2.0;
     DstRect.Right  := DstRect.Left + Alloc.Rect.Width;
     DstRect.Bottom := DstRect.Top + Alloc.Rect.Height;
+    DstRect := TransformRect(DstRect);
+    P := TransformPoint(PointD(PivX, PivY));
+    PivX := P.X;
+    PivY := P.Y;
 
     FBatch.EmitGlyphRectRotated(DstRect, TexRect, PivX, PivY, AAngleDeg, Page.TextureID,
                                 AColor, FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
@@ -517,12 +737,16 @@ end;
 
 procedure TFloriaGPURenderer.OnDrawParagraph(AParagraph: TFloriaParagraph; AX, AY: Double);
 begin
+  if not Assigned(AParagraph) then Exit;
+  raise EFloriaNotSupported.Create(
+    'TFloriaGPURenderer does not support paragraph playback yet; ' +
+    'use TFloriaCanvasAgg or draw the paragraph runs as text operations');
 end;
 
 procedure TFloriaGPURenderer.OnDrawImage(AImage: TFloriaImage; const ADstRect, ASrcRect: TRectD; AOpacity: Double);
 var
   Alloc: TFloriaAtlasAlloc;
-  TexRect: TRectD;
+  TexRect, DstRect: TRectD;
   Page: TFloriaAtlasPage;
 begin
   if not Assigned(AImage) then Exit;
@@ -537,23 +761,46 @@ begin
     TexRect.Top    := Alloc.V1;
     TexRect.Right  := Alloc.U2;
     TexRect.Bottom := Alloc.V2;
-    FBatch.EmitTexturedRect(ADstRect, TexRect, Page.TextureID,
+    DstRect := TransformRect(ADstRect);
+    FBatch.EmitTexturedRect(DstRect, TexRect, Page.TextureID,
                             AOpacity * FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
   end;
 end;
 
 procedure TFloriaGPURenderer.OnDrawPicture(APicture: TFloriaPicture; AX, AY: Double);
+var
+  SavedMatrix: TFloriaMatrix2D;
+  SavedAlpha: Double;
+  SavedBlend: TFloriaBlendMode;
+  NestedMatrix: TFloriaMatrix2D;
 begin
-  if Assigned(APicture) then
-    APicture.Playback(Self);
+  if not Assigned(APicture) then Exit;
+
+  SavedMatrix := FCurrentMatrix;
+  SavedAlpha := FCurrentAlpha;
+  SavedBlend := FBlendMode;
+  NestedMatrix := FCurrentMatrix.Multiply(TFloriaMatrix2D.Translation(AX, AY));
+
+  try
+    APicture.Playback(Self, NestedMatrix, SavedAlpha);
+  finally
+    FCurrentMatrix := SavedMatrix;
+    FCurrentAlpha := SavedAlpha;
+    FBlendMode := SavedBlend;
+  end;
 end;
 
 procedure TFloriaGPURenderer.OnSaveLayer(const ABounds: TRectD; AOpacity: Double; AFilter: TFloriaImageFilter; ABlendMode: TFloriaBlendMode);
 begin
+  raise EFloriaNotSupported.Create(
+    'TFloriaGPURenderer does not support save/restore layers yet; ' +
+    'render the layer through TFloriaCanvasAgg until the offscreen path is implemented');
 end;
 
 procedure TFloriaGPURenderer.OnRestoreLayer();
 begin
+  raise EFloriaNotSupported.Create(
+    'TFloriaGPURenderer does not support save/restore layers yet');
 end;
 
 end.

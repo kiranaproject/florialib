@@ -10,17 +10,23 @@ Designed specifically to avoid the thread-safety issues, synchronous round-trips
 
 | Unit | Underlying Library | Purpose |
 |---|---|---|
-| [`Floria.XCB`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.pas) | `libxcb` | Core X11 protocol: connections, windows, drawables, GC, atoms, event loop, errors. |
-| [`Floria.XCB.ICCCM`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.ICCCM.pas) | `libxcb-icccm` | Standard ICCCM 2.0 protocols (`WM_NAME`, `WM_HINTS`, `WM_NORMAL_HINTS`, `WM_PROTOCOLS`, `WM_DELETE_WINDOW`). |
-| [`Floria.XCB.EWMH`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.EWMH.pas) | `libxcb-ewmh` | Extended Window Manager Hints (`_NET_SUPPORTED`, `_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW`, window types/states/struts). |
-| [`Floria.XCB.RandR`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.RandR.pas) | `libxcb-randr` | Multi-monitor display management: screen resources, CRTCs, outputs, resolutions, refresh rates. |
-| [`Floria.XCB.Render`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.Render.pas) | `libxcb-render` | Hardware-accelerated 2D compositing, alpha blending, picture formats, transforms, and glyph sets. |
-| [`Floria.XCB.SHM`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.SHM.pas) | `libxcb-shm` | Shared memory extension for ultra-fast software framebuffers and CPU-side blitting. |
-| [`Floria.XCB.Shape`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.Shape.pas) | `libxcb-shape` | Non-rectangular window masks (rounded corners, shaped titlebars, custom shadows). |
-| [`Floria.XCB.XFixes`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.XFixes.pas) | `libxcb-xfixes` | Modern X11 fixes: invisible cursor, cursor tracking, server-side region manipulation. |
-| [`Floria.XCB.Cursor`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.Cursor.pas) | `libxcb-cursor` | Themeable cursor context and shape loading from standard X11 cursor themes. |
-| [`Floria.XCB.Keysyms`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.XCB.Keysyms.pas) | `libxcb-keysyms` | Translation between hardware keycodes and X11 KeySyms. |
-| [`Floria.X11.KeySym`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.X11.KeySym.pas) | Header Constants | Comprehensive catalog of X11 KeySym constants (Latin, function keys, keypad, multimedia). |
+| [`Floria.XCB`](../src/main/pascal/floria.xcb.pas) | `libxcb` | Core X11 protocol: connections, windows, drawables, GC, atoms, event loop, errors. |
+| [`Floria.XCB.ICCCM`](../src/main/pascal/floria.xcb.icccm.pas) | `libxcb-icccm` | Standard ICCCM 2.0 protocols (`WM_NAME`, `WM_HINTS`, `WM_NORMAL_HINTS`, `WM_PROTOCOLS`, `WM_DELETE_WINDOW`). |
+| [`Floria.XCB.EWMH`](../src/main/pascal/floria.xcb.ewmh.pas) | `libxcb-ewmh` | Extended Window Manager Hints (`_NET_SUPPORTED`, `_NET_CLIENT_LIST`, `_NET_ACTIVE_WINDOW`, window types/states/struts). |
+| [`Floria.XCB.RandR`](../src/main/pascal/floria.xcb.randr.pas) | `libxcb-randr` | Multi-monitor display management: screen resources, CRTCs, outputs, resolutions, refresh rates. |
+| [`Floria.XCB.Render`](../src/main/pascal/floria.xcb.render.pas) | `libxcb-render` | Hardware-accelerated 2D compositing, alpha blending, picture formats, transforms, and glyph sets. |
+| [`Floria.XCB.SHM`](../src/main/pascal/floria.xcb.shm.pas) | `libxcb-shm` | Shared memory extension for ultra-fast software framebuffers and CPU-side blitting. |
+| [`Floria.XCB.Shape`](../src/main/pascal/floria.xcb.shape.pas) | `libxcb-shape` | Non-rectangular window masks (rounded corners, shaped titlebars, custom shadows). |
+| [`Floria.XCB.XFixes`](../src/main/pascal/floria.xcb.xfixes.pas) | `libxcb-xfixes` | Modern X11 fixes: invisible cursor, cursor tracking, server-side region manipulation. |
+| [`Floria.XCB.Composite`](../src/main/pascal/floria.xcb.composite.pas) | `libxcb-composite` | Composite extension: redirect windows to offscreen pixmaps for compositing. |
+| [`Floria.XCB.Damage`](../src/main/pascal/floria.xcb.damage.pas) | `libxcb-damage` | Damage tracking for repaint regions and compositor invalidation. |
+| [`Floria.XCB.WM`](../src/main/pascal/floria.xcb.wm.pas) | `libxcb`, ICCCM, EWMH, RandR | Reparenting window manager, workspaces, struts, monitor topology, and client lifecycle. |
+| [`Floria.XCB.WM.Compositor`](../src/main/pascal/floria.xcb.wm.compositor.pas) | `libxcb-composite`, `libxcb-damage` | Compositor integration for the window manager. |
+| [`Floria.XCB.Cursor`](../src/main/pascal/floria.xcb.cursor.pas) | `libxcb-cursor` | Themeable cursor context and shape loading from standard X11 cursor themes. |
+| [`Floria.XCB.Keysyms`](../src/main/pascal/floria.xcb.keysyms.pas) | `libxcb-keysyms` | Translation between hardware keycodes and X11 KeySyms. |
+| [`Floria.X11.KeySym`](../src/main/pascal/floria.x11.keysym.pas) | Header Constants | Comprehensive catalog of X11 KeySym constants (Latin, function keys, keypad, multimedia). |
+
+Native libraries required by this subsystem: `libxcb`, `libxcb-icccm`, `libxcb-ewmh`, `libxcb-randr`, `libxcb-render`, `libxcb-shm`, `libxcb-shape`, `libxcb-xfixes`, `libxcb-composite`, `libxcb-damage`, `libxcb-cursor`, `libxcb-keysyms`, and `libxcb-xinerama`. Xinerama queries used as a legacy multi-head fallback are declared inline in `floria.xcb.wm.pas`; add `libxcb-xinerama` to the build environment if that fallback is used.
 
 ---
 

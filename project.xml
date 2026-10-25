@@ -23,4 +23,15 @@
       <version>2.2.0-SNAPSHOT</version>
     </dependency>
   </dependencies>
+
+  <!-- AggPas is supplied by fpGUI's extras/aggpas package.
+       Do not add a standalone AggPas dependency. -->
+  <profiles>
+    <profile>
+      <id>pic</id>
+      <compilerOptions>
+        <option>-Cg</option>
+      </compilerOptions>
+    </profile>
+  </profiles>
 </project>

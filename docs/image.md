@@ -31,10 +31,10 @@ This architecture supports the migration toward **Blaise** and ensures that `flo
 
 | Unit | Role | Key Classes / Types |
 |---|---|---|
-| [`Floria.Image.Core`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.Image.Core.pas) | Core raster buffer, color types, scaling, and codec registry | `TFloriaImage`, `TBgraPixel`, `TRgbaPixel`, `TFloriaPixelFormat`, `TFloriaImageReader`, `TFloriaImageWriter` |
-| [`Floria.Image.BMP`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.Image.BMP.pas) | Pure Pascal BMP encoder and decoder | `TFloriaBMPReader`, `TFloriaBMPWriter` |
-| [`Floria.Image.PNG`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.Image.PNG.pas) | Pure Pascal PNG encoder and decoder (with pure Pascal Deflate/Inflate) | `TFloriaPNGReader`, `TFloriaPNGWriter` |
-| [`Floria.Image.JPEG`](file:///home/afumi/Documents/projects/kirana/florialib/src/main/pascal/Floria.Image.JPEG.pas) | Pure Pascal baseline JPEG decoder | `TFloriaJPEGReader` |
+| [`Floria.Image.Core`](../src/main/pascal/floria.image.core.pas) | Core raster buffer, color types, scaling, and codec registry | `TFloriaImage`, `TBgraPixel`, `TRgbaPixel`, `TFloriaPixelFormat`, `TFloriaImageReader`, `TFloriaImageWriter` |
+| [`Floria.Image.BMP`](../src/main/pascal/floria.image.bmp.pas) | Pure Pascal BMP encoder and decoder | `TFloriaBMPReader`, `TFloriaBMPWriter` |
+| [`Floria.Image.PNG`](../src/main/pascal/floria.image.png.pas) | Pure Pascal PNG encoder and decoder (with pure Pascal Deflate/Inflate) | `TFloriaPNGReader`, `TFloriaPNGWriter` |
+| [`Floria.Image.JPEG`](../src/main/pascal/floria.image.jpeg.pas) | Pure Pascal baseline JPEG decoder | `TFloriaJPEGReader` |
 
 ---
 

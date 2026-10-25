@@ -116,7 +116,7 @@ end;
 
 ## 4. Extended 29 W3C & Skia Blend Modes
 
-`Floria.Blend` implements the full complement of 29 standard 2D blend modes:
+`Floria.Canvas.Blend` implements the full complement of 29 standard 2D blend modes:
 - **Porter-Duff & Arithmetic (14)**: `fbmClear`, `fbmSrc`, `fbmDst`, `fbmSrcOver`, `fbmDstOver`, `fbmSrcIn`, `fbmDstIn`, `fbmSrcOut`, `fbmDstOut`, `fbmSrcATop`, `fbmDstATop`, `fbmXor`, `fbmPlus`, `fbmModulate`.
 - **Separable Color (11)**: `fbmMultiply`, `fbmScreen`, `fbmOverlay`, `fbmDarken`, `fbmLighten`, `fbmColorDodge`, `fbmColorBurn`, `fbmHardLight`, `fbmSoftLight`, `fbmDifference`, `fbmExclusion`.
 - **Non-Separable HSL (4)**: `fbmHue`, `fbmSaturation`, `fbmColor`, `fbmLuminosity`.
@@ -143,7 +143,7 @@ Canvas.SetBlendMode(fbmSrcOver); // Reset to default
 
 ## 6. Composable Filter Graph
 
-`Floria.Filter` allows non-destructive image filter pipelining:
+`Floria.Canvas.Filter` allows non-destructive image filter pipelining:
 - **`TBlurFilter`**: Gaussian blur (3-pass Central Limit Theorem $O(1)$), fast box blur, or Dual Kawase blur.
 - **`TColorMatrixFilter`**: $4 \times 5$ color transformation matrix with presets (`fcmGrayscale`, `fcmInvert`, `fcmSepia`, `fcmSaturation`).
 - **`TDropShadowFilter`**: Configurable offset $(DX, DY)$, blur sigma, and shadow color.
@@ -172,7 +172,7 @@ end;
 
 ## 7. Vector Path & Boolean Operations
 
-`Floria.Path` provides Angus Johnson's Clipper2 engine and high-level `TFloriaPath`:
+`Floria.Path.Ops` provides Angus Johnson's Clipper2 engine and high-level `TFloriaPath`:
 - **Path Operations**: `Union`, `Difference`, `Intersect`, `XorOp`.
 - **Contour Offsetting**: `Inflate` with Miter, Round, Bevel joins and Butt, Square, Round caps.
 - **Simplification**: Douglas-Peucker contour reduction.
@@ -189,11 +189,17 @@ end;
 
 ---
 
-## 9. Hardware-Accelerated GPU Canvas (`Floria.Canvas.GPU`)
+## 9. Hardware-Accelerated GPU Canvas (`Floria.Canvas.GL`)
 
-`Floria.Canvas.GPU` provides polymorphic hardware acceleration matching the software canvas:
+`Floria.Canvas.GL` provides polymorphic hardware acceleration matching the software canvas:
 - Native X11 EGL 1.4/1.5 context management and VSync synchronization.
 - High-throughput instanced quad batching (`TFloriaRenderBatch`) and dynamic skyline texture atlas (`TFloriaGPUAtlas`).
 - AOT precompiled GLSL shaders with SDF rounded rectangles, borders, box shadows, and linear gradients.
 - Native stroke tessellation with AA boundary skirts and ear-clipping triangulation.
-- Automatic fallback to AggPas for arbitrary complex SVG vector paths.
+- Affine transform state applied to shapes, paths, images, clips, and text positions.
+- SVG rendering uses a CPU fallback: `DrawSVG`/`DrawSVGScaled`/`DrawSVGFile`/`DrawSVGString` rasterize the document through `TFloriaSVGRenderer` and upload it as a texture.
+
+Current GPU limitations (documented so callers are not surprised):
+- Paragraph playback (`OnDrawParagraph`) raises `EFloriaNotSupported`; use `TFloriaCanvasAgg` or draw paragraph runs as text operations.
+- Layer compositing (`SaveLayer`/`RestoreLayer`) raises `EFloriaNotSupported` until the offscreen FBO path is implemented.
+- Arbitrary affine rotation of rounded rectangles and glyph quads is approximated by transforming their bounding rectangles; translation and scaling are exact.
