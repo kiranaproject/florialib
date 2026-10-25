@@ -6,10 +6,10 @@ unit Floria.Path.Engine.Native;
 // third-party clipping library.
 //
 // Native today:
-//   - SimplifyPaths  (Douglas-Peucker style vertex reduction)
+//   - BooleanOp / UnionSelf  (planar-arrangement clipping)
+//   - SimplifyPaths          (Douglas-Peucker style vertex reduction)
 //
 // Delegated to a fallback engine:
-//   - BooleanOp / UnionSelf  (boolean clipping, not yet reimplemented)
 //   - OffsetPaths
 //
 // Bounds, area, and point-in-polygon never reach the engine at all; they are
@@ -69,6 +69,7 @@ const
 implementation
 
 uses
+  Floria.Path.Engine.Boolean,
   Floria.Path.Engine.Clipper2;
 
 type
@@ -259,19 +260,13 @@ function TFloriaNativeEngine.BooleanOp(AOp: TPathBooleanOp;
   const ASubject, AClip: TPathsD; AFillRule: TFillRule;
   APrecision: Integer): TPathsD;
 begin
-  if FFallback = nil then
-    raise EFloriaNotSupported.Create(
-      'the native path engine does not implement boolean operations yet');
-  Result := FFallback.BooleanOp(AOp, ASubject, AClip, AFillRule, APrecision);
+  Result := FloriaBooleanOp(AOp, ASubject, AClip, AFillRule, APrecision);
 end;
 
 function TFloriaNativeEngine.UnionSelf(const ASubject: TPathsD;
   AFillRule: TFillRule; APrecision: Integer): TPathsD;
 begin
-  if FFallback = nil then
-    raise EFloriaNotSupported.Create(
-      'the native path engine does not implement boolean operations yet');
-  Result := FFallback.UnionSelf(ASubject, AFillRule, APrecision);
+  Result := FloriaNormalizePaths(ASubject, AFillRule, APrecision);
 end;
 
 function TFloriaNativeEngine.OffsetPaths(const APaths: TPathsD; ADelta: Double;

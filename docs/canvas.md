@@ -190,9 +190,16 @@ current default is the vendored Clipper2 port behind
 implementation section, so callers do not inherit a dependency on any specific
 clipping library.
 
-The default backend is `Floria.Path.Engine.Native`, which implements
-simplification first-party. It holds the Clipper2 adapter as a fallback and
-forwards boolean and offset operations to it until those are reimplemented.
+The default backend is `Floria.Path.Engine.Native`, which implements boolean
+operations and simplification first-party. It holds the Clipper2 adapter as a
+fallback and forwards offsetting to it until that is reimplemented.
+
+Boolean work is a planar arrangement: inputs are snapped to an integer grid,
+edges are split at every intersection, each piece is classified by sampling the
+fill rule on both sides, and the surviving boundary is chained into contours.
+Classification samples the *original* contours, so winding stays exact
+regardless of how edges were split. Cost is O(n^2) in edge count — simple
+enough to verify, and adequate for UI-scale paths.
 
 - `FloriaPathEngine()` returns the active backend and raises
   `EPathEngineError` if none is registered.
