@@ -172,11 +172,34 @@ end;
 
 ## 7. Vector Path & Boolean Operations
 
-`Floria.Path.Ops` provides Angus Johnson's Clipper2 engine and high-level `TFloriaPath`:
+`Floria.Path.Ops` provides high-level `TFloriaPath`:
 - **Path Operations**: `Union`, `Difference`, `Intersect`, `XorOp`.
 - **Contour Offsetting**: `Inflate` with Miter, Round, Bevel joins and Butt, Square, Round caps.
 - **Simplification**: Douglas-Peucker contour reduction.
 - **Bézier Curves**: Adaptive de Casteljau quadratic and cubic curves with chord error tolerance.
+
+The geometry types (`TPointD`, `TRectD`, `TPathD`, `TPathsD`, `TFillRule`) live
+in `Floria.Geometry`, not in the clipping engine.
+
+### Clipping backend
+
+`Floria.Path.Ops` delegates boolean and offset work to
+`Floria.Path.Engine`. A backend registers itself at unit initialization; the
+current default is the vendored Clipper2 port behind
+`Floria.Path.Engine.Clipper2`. `Path.Ops` links that adapter from its
+implementation section, so callers do not inherit a dependency on any specific
+clipping library.
+
+- `FloriaPathEngine()` returns the active backend and raises
+  `EPathEngineError` if none is registered.
+- `SetFloriaPathEngine(Engine, Owns)` swaps the backend; `UseFloriaPathEngine(Name)`
+  selects a registered one.
+- Inputs are never modified and every result is caller-owned.
+- The registry is single-threaded — swap backends before spawning workers.
+
+This seam exists so the clipping implementation can be replaced without
+touching callers, and so two implementations can be compared against each other
+during migration.
 
 ---
 

@@ -29,38 +29,35 @@ uses
   Floria.SVG.Types,
   Floria.SVG.Path,
   Floria.Geometry,
-  Floria.Path.Clipper.Core,
-  Floria.Path.Clipper.Engine,
-  Floria.Path.Clipper.Offset,
-  Floria.Path.Clipper.RectClip,
-  Floria.Path.Clipper;
+  Floria.Errors,
+  Floria.Path.Engine;
 
 type
-  // Fill & winding rules
-  TFloriaPathFillRule = (
-    fpfrNonZero, // Standard non-zero winding rule
-    fpfrEvenOdd, // Alternating even-odd rule
-    fpfrPositive,// Positive winding count > 0
-    fpfrNegative // Negative winding count < 0
-  );
+  // Fill & winding rules. Aliases of the engine enums so callers keep the
+  // historical Floria names while the backend only ever sees TFillRule and
+  // the engine join/end enums.
+  TFloriaPathFillRule = TFillRule;
+  TFloriaPathJoinType = TPathJoinType;
+  TFloriaPathEndType  = TPathEndType;
 
-  // Line join styles for polygon offsetting
-  TFloriaPathJoinType = (
-    fpjtRound,   // Rounded corners
-    fpjtMiter,   // Sharp mitered corners up to MiterLimit
-    fpjtSquare,  // Squared bevels at offset distance
-    fpjtBevel    // Flat beveled corners
-  );
+const
+  fpfrNonZero  = frNonZero;
+  fpfrEvenOdd  = frEvenOdd;
+  fpfrPositive = frPositive;
+  fpfrNegative = frNegative;
 
-  // Path end styles for stroke expansion
-  TFloriaPathEndType = (
-    fpetPolygon, // Closed polygon (offset exterior / interior)
-    fpetJoined,  // Closed path offset both sides
-    fpetButt,    // Open path, flat ends at line endpoints
-    fpetSquare,  // Open path, extended square ends
-    fpetRound    // Open path, rounded semi-circle caps
-  );
+  fpjtMiter  = pjtMiter;
+  fpjtSquare = pjtSquare;
+  fpjtBevel  = pjtBevel;
+  fpjtRound  = pjtRound;
 
+  fpetPolygon = petPolygon;
+  fpetJoined  = petJoined;
+  fpetButt    = petButt;
+  fpetSquare  = petSquare;
+  fpetRound   = petRound;
+
+type
   // Forward declaration
   TFloriaPath = class;
 
@@ -164,46 +161,11 @@ type
 
 implementation
 
-// ---------------------------------------------------------------------------
-// Conversion Helpers for Clipper Enums
-// ---------------------------------------------------------------------------
-
-function ToClipperFillRule(FR: TFloriaPathFillRule): TFillRule; inline;
-begin
-  case FR of
-    fpfrNonZero:  Result := frNonZero;
-    fpfrEvenOdd:  Result := frEvenOdd;
-    fpfrPositive: Result := frPositive;
-    fpfrNegative: Result := frNegative;
-  else
-    Result := frNonZero;
-  end;
-end;
-
-function ToClipperJoinType(JT: TFloriaPathJoinType): TJoinType; inline;
-begin
-  case JT of
-    fpjtRound:  Result := jtRound;
-    fpjtMiter:  Result := jtMiter;
-    fpjtSquare: Result := jtSquare;
-    fpjtBevel:  Result := jtBevel;
-  else
-    Result := jtRound;
-  end;
-end;
-
-function ToClipperEndType(ET: TFloriaPathEndType): TEndType; inline;
-begin
-  case ET of
-    fpetPolygon: Result := etPolygon;
-    fpetJoined:  Result := etJoined;
-    fpetButt:    Result := etButt;
-    fpetSquare:  Result := etSquare;
-    fpetRound:   Result := etRound;
-  else
-    Result := etPolygon;
-  end;
-end;
+// The backend is linked here rather than in the interface so that callers do
+// not inherit a dependency on any specific clipping library. Its unit
+// initialization registers the backend before Path.Ops is used.
+uses
+  Floria.Path.Engine.Clipper2;
 
 // ---------------------------------------------------------------------------
 // Adaptive de Casteljau Subdivision for Bézier Curves
@@ -625,11 +587,11 @@ begin
   begin
     AOther.FlushCurrentSubpath();
     Clip := AOther.FPaths;
-    Sol := Floria.Path.Clipper.Union(Subj, Clip, ToClipperFillRule(AFillRule));
+    Sol := FloriaPathEngine().BooleanOp(pboUnion, Subj, Clip, AFillRule);
   end
   else
   begin
-    Sol := Floria.Path.Clipper.Union(Subj, ToClipperFillRule(AFillRule));
+    Sol := FloriaPathEngine().UnionSelf(Subj, AFillRule);
   end;
 
   Result := TFloriaPath.Create();
@@ -646,7 +608,7 @@ begin
   begin
     AOther.FlushCurrentSubpath();
     Clip := AOther.FPaths;
-    Sol := Floria.Path.Clipper.Difference(Subj, Clip, ToClipperFillRule(AFillRule));
+    Sol := FloriaPathEngine().BooleanOp(pboDifference, Subj, Clip, AFillRule);
   end
   else
     Sol := Copy(Subj);
@@ -665,7 +627,7 @@ begin
   begin
     AOther.FlushCurrentSubpath();
     Clip := AOther.FPaths;
-    Sol := Floria.Path.Clipper.Intersect(Subj, Clip, ToClipperFillRule(AFillRule));
+    Sol := FloriaPathEngine().BooleanOp(pboIntersect, Subj, Clip, AFillRule);
   end
   else
     SetLength(Sol, 0);
@@ -684,7 +646,7 @@ begin
   begin
     AOther.FlushCurrentSubpath();
     Clip := AOther.FPaths;
-    Sol := Floria.Path.Clipper.XOR_(Subj, Clip, ToClipperFillRule(AFillRule));
+    Sol := FloriaPathEngine().BooleanOp(pboXor, Subj, Clip, AFillRule);
   end
   else
     Sol := Copy(Subj);
@@ -702,9 +664,8 @@ var
   Sol: TPathsD;
 begin
   FlushCurrentSubpath();
-  Sol := Floria.Path.Clipper.InflatePaths(FPaths, ADelta,
-           ToClipperJoinType(AJoinType), ToClipperEndType(AEndType),
-           MiterLimit, 2, ArcTolerance);
+  Sol := FloriaPathEngine().OffsetPaths(FPaths, ADelta,
+           AJoinType, AEndType, MiterLimit, ArcTolerance);
 
   Result := TFloriaPath.Create();
   Result.FromPathsD(Sol);
@@ -715,7 +676,7 @@ var
   Sol: TPathsD;
 begin
   FlushCurrentSubpath();
-  Sol := Floria.Path.Clipper.SimplifyPaths(FPaths, ATolerance, True);
+  Sol := FloriaPathEngine().SimplifyPaths(FPaths, ATolerance, True);
 
   Result := TFloriaPath.Create();
   Result.FromPathsD(Sol);

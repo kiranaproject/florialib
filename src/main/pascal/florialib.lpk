@@ -290,6 +290,14 @@
         <UnitName Value="Floria.Path.Clipper.RectClip"/>
       </Item>
       <Item>
+        <Filename Value="floria.path.engine.pas"/>
+        <UnitName Value="Floria.Path.Engine"/>
+      </Item>
+      <Item>
+        <Filename Value="floria.path.engine.clipper2.pas"/>
+        <UnitName Value="Floria.Path.Engine.Clipper2"/>
+      </Item>
+      <Item>
         <Filename Value="floria.path.ops.pas"/>
         <UnitName Value="Floria.Path.Ops"/>
       </Item>
