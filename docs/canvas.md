@@ -191,8 +191,17 @@ implementation section, so callers do not inherit a dependency on any specific
 clipping library.
 
 The default backend is `Floria.Path.Engine.Native`, which implements boolean
-operations and simplification first-party. It holds the Clipper2 adapter as a
-fallback and forwards offsetting to it until that is reimplemented.
+operations, offsetting, and simplification first-party. The Clipper2 adapter
+remains registered as a reference implementation for comparison.
+
+Offsetting builds raw offset geometry (edge normals plus per-corner join
+geometry), then unions it to remove the self-overlaps that appear wherever the
+offset distance exceeds the local feature size. Open paths are stroked by
+walking one side out, adding an end cap, walking back, and adding a start cap.
+
+Deflate collapse is detected geometrically: a valid deflated contour must stay
+at least `|delta|` from the original boundary, so a contour that folds through
+itself is dropped rather than left as a spurious island.
 
 Boolean work is a planar arrangement: inputs are snapped to an integer grid,
 edges are split at every intersection, each piece is classified by sampling the

@@ -302,6 +302,10 @@
         <UnitName Value="Floria.Path.Engine.Boolean"/>
       </Item>
       <Item>
+        <Filename Value="floria.path.engine.offset.pas"/>
+        <UnitName Value="Floria.Path.Engine.Offset"/>
+      </Item>
+      <Item>
         <Filename Value="floria.path.engine.native.pas"/>
         <UnitName Value="Floria.Path.Engine.Native"/>
       </Item>

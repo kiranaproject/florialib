@@ -7,10 +7,8 @@ unit Floria.Path.Engine.Native;
 //
 // Native today:
 //   - BooleanOp / UnionSelf  (planar-arrangement clipping)
+//   - OffsetPaths            (inflate/deflate and open-path stroking)
 //   - SimplifyPaths          (Douglas-Peucker style vertex reduction)
-//
-// Delegated to a fallback engine:
-//   - OffsetPaths
 //
 // Bounds, area, and point-in-polygon never reach the engine at all; they are
 // first-party functions in Floria.Geometry.
@@ -70,6 +68,7 @@ implementation
 
 uses
   Floria.Path.Engine.Boolean,
+  Floria.Path.Engine.Offset,
   Floria.Path.Engine.Clipper2;
 
 type
@@ -273,10 +272,7 @@ function TFloriaNativeEngine.OffsetPaths(const APaths: TPathsD; ADelta: Double;
   AJoinType: TPathJoinType; AEndType: TPathEndType;
   AMiterLimit: Double; AArcTolerance: Double; APrecision: Integer): TPathsD;
 begin
-  if FFallback = nil then
-    raise EFloriaNotSupported.Create(
-      'the native path engine does not implement path offsetting yet');
-  Result := FFallback.OffsetPaths(APaths, ADelta, AJoinType, AEndType,
+  Result := FloriaOffsetPaths(APaths, ADelta, AJoinType, AEndType,
     AMiterLimit, AArcTolerance, APrecision);
 end;
 

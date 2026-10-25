@@ -253,6 +253,67 @@ begin
   Result := InsideByRule(W, C, ARule);
 end;
 
+// Same accumulation as WindingOf, but the query point may lie between grid
+// coordinates. Classification samples must not be rounded onto the integer
+// grid: a rounded sample can leave a thin feature and drop it from the result.
+procedure WindingOfPoint(const APaths: TGridPaths; const APtX, APtY: Double;
+  out AWinding, ACrossings: Integer);
+var
+  I, J, N, Prev: Integer;
+  A, B: TGridPt;
+  XIntersect, Side: Double;
+begin
+  AWinding := 0;
+  ACrossings := 0;
+
+  for I := 0 to High(APaths) do
+  begin
+    N := Length(APaths[I]);
+    if N < 3 then
+      Continue;
+
+    Prev := N - 1;
+    for J := 0 to N - 1 do
+    begin
+      A := APaths[I][Prev];
+      B := APaths[I][J];
+
+      if ((A.Y <= APtY) and (B.Y > APtY)) or
+         ((B.Y <= APtY) and (A.Y > APtY)) then
+      begin
+        XIntersect := A.X + (APtY - A.Y) * (B.X - A.X) / (B.Y - A.Y);
+        if XIntersect > APtX then
+          Inc(ACrossings);
+      end;
+
+      Side := (B.X - A.X) * (APtY - A.Y) - (APtX - A.X) * (B.Y - A.Y);
+
+      if A.Y <= APtY then
+      begin
+        if (B.Y > APtY) and (Side > 0) then
+          Inc(AWinding);
+      end
+      else
+      begin
+        if (B.Y <= APtY) and (Side < 0) then
+          Dec(AWinding);
+      end;
+
+      Prev := J;
+    end;
+  end;
+end;
+
+function IsInsidePoint(const APaths: TGridPaths; APtX, APtY: Double;
+  ARule: TFillRule): Boolean;
+var
+  W, C: Integer;
+begin
+  WindingOfPoint(APaths, APtX, APtY, W, C);
+  Result := InsideByRule(W, C, ARule);
+end;
+
+
 // ---------------------------------------------------------------------------
 // Intersections
 // ---------------------------------------------------------------------------
@@ -537,8 +598,7 @@ var
   SplitCount, I, J, K: Integer;
   Boundary: TSegmentArray;
   BoundaryCount: Integer;
-  Mid, SampleLeft, SampleRight: TGridPt;
-  NX, NY, Len: Double;
+  MidX, MidY, NX, NY, Len: Double;
   InSubjL, InClipL, InSubjR, InClipR: Boolean;
   InsideL, InsideR: Boolean;
   Found: Boolean;
@@ -615,8 +675,8 @@ begin
     if Found then
       Continue;
 
-    Mid.X := (SplitSegments[I].A.X + SplitSegments[I].B.X) div 2;
-    Mid.Y := (SplitSegments[I].A.Y + SplitSegments[I].B.Y) div 2;
+    MidX := (SplitSegments[I].A.X + SplitSegments[I].B.X) * 0.5;
+    MidY := (SplitSegments[I].A.Y + SplitSegments[I].B.Y) * 0.5;
 
     NX := -(SplitSegments[I].B.Y - SplitSegments[I].A.Y);
     NY :=  (SplitSegments[I].B.X - SplitSegments[I].A.X);
@@ -626,29 +686,12 @@ begin
     NX := NX / Len * BOOLEAN_SAMPLE_OFFSET;
     NY := NY / Len * BOOLEAN_SAMPLE_OFFSET;
 
-    SampleLeft.X := Round(Mid.X + NX);
-    SampleLeft.Y := Round(Mid.Y + NY);
-    SampleRight.X := Round(Mid.X - NX);
-    SampleRight.Y := Round(Mid.Y - NY);
-
-    // A rounded sample can land on the segment itself; nudge it outwards.
-    if (SampleLeft.X = Mid.X) and (SampleLeft.Y = Mid.Y) then
-    begin
-      SampleLeft.X := Round(Mid.X + NX * 2);
-      SampleLeft.Y := Round(Mid.Y + NY * 2);
-    end;
-    if (SampleRight.X = Mid.X) and (SampleRight.Y = Mid.Y) then
-    begin
-      SampleRight.X := Round(Mid.X - NX * 2);
-      SampleRight.Y := Round(Mid.Y - NY * 2);
-    end;
-
-    InSubjL := IsInside(SubjGrid, SampleLeft, AFillRule);
-    InClipL := IsInside(ClipGrid, SampleLeft, AFillRule);
+    InSubjL := IsInsidePoint(SubjGrid, MidX + NX, MidY + NY, AFillRule);
+    InClipL := IsInsidePoint(ClipGrid, MidX + NX, MidY + NY, AFillRule);
     InsideL := Pred(InSubjL, InClipL);
 
-    InSubjR := IsInside(SubjGrid, SampleRight, AFillRule);
-    InClipR := IsInside(ClipGrid, SampleRight, AFillRule);
+    InSubjR := IsInsidePoint(SubjGrid, MidX - NX, MidY - NY, AFillRule);
+    InClipR := IsInsidePoint(ClipGrid, MidX - NX, MidY - NY, AFillRule);
     InsideR := Pred(InSubjR, InClipR);
 
     if InsideL = InsideR then

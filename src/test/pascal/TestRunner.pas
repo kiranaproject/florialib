@@ -25,6 +25,7 @@ uses
   Floria.Path.Engine.Test,
   Floria.Path.Engine.Native.Test,
   Floria.Path.Engine.Boolean.Test,
+  Floria.Path.Engine.Offset.Test,
   Floria.Path.Ops.Test,
   Floria.Text.Paragraph.Test,
   Floria.Text.Emoji.Test,
