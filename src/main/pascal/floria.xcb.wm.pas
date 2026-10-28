@@ -15,7 +15,7 @@ unit Floria.XCB.WM;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, Math,
+  Classes, SysUtils, Contnrs, Math, BaseUnix,
   Floria.XCB,
   Floria.XCB.Cursor,
   Floria.XCB.EWMH,
@@ -234,6 +234,10 @@ type
     dmResizeBottomRight
   );
 
+  // Invoked when xcb_grab_pointer refuses a drag, with the XCB_GRAB_STATUS_*
+  // value (255 when no reply was received). Lets the shell log or fall back.
+  TXCBDragGrabFailureEvent = procedure(const AStatus: Byte) of object;
+
   // Frame painting delegate
   TXCBFramePaintEvent = procedure(ASender: TObject; AClient: TXCBWMClient; const ARect: TXCBRect) of object;
 
@@ -392,6 +396,10 @@ type
     FCurrentDesktop    : Integer;
     FDesktopNames      : TStringList;
     FIsRunning         : Boolean;
+    FShutdownRequested : Boolean;
+    FWakeupPipe        : array[0..1] of cint;
+    FWakeupPipeValid   : Boolean;
+    FTickIntervalMs    : Integer;
     FWorkarea          : TXCBRect;
     FMonitors          : TObjectList;
     FPrimaryMonitor    : TXCBMonitor;
@@ -413,6 +421,7 @@ type
     FDragMode          : TXCBDragMode;
     FDragStartPointer  : TXCBPoint;
     FDragStartRect     : TXCBRect;
+    FDragGrabFailureHook : TXCBDragGrabFailureEvent;
 
     // Cursors
     FCursorCtx         : Pxcb_cursor_context_t;
@@ -468,6 +477,19 @@ type
     function ProcessEvent(const AEvent: Pxcb_generic_event_t): Boolean; virtual;
     procedure Run(); virtual;
     procedure Stop();
+    // Shutdown plumbing. RequestShutdown is async-signal-safe: it only sets a flag
+    // and writes one byte to a self-pipe, so it may be called from a signal handler.
+    procedure RequestShutdown();
+    procedure CreateWakeupPipe();
+    procedure CloseWakeupPipe();
+    procedure DrainWakeupPipe();
+    // One select + drain cycle. Returns True when at least one event was handled.
+    function PumpEventsOnce(const ATimeoutMs: Integer): Boolean;
+    // Called after each pump cycle, whether or not events arrived. Override for
+    // animation ticks and deferred presentation.
+    procedure DoOnTick(const AElapsedMs: Integer); virtual;
+    property ShutdownRequested : Boolean read FShutdownRequested;
+    property TickIntervalMs    : Integer read FTickIntervalMs write FTickIntervalMs;
 
     procedure SwitchDesktop(const ANewDesktop: Integer);
     procedure SetDesktopCount(const ACount: Integer);
@@ -497,6 +519,7 @@ type
     procedure UpdateDrag(const ARootX, ARootY: Integer); virtual;
     procedure UpdateDragOrigin(const ARootX, ARootY: Integer; const ARect: TXCBRect);
     procedure EndDrag(); virtual;
+    property OnDragGrabFailed  : TXCBDragGrabFailureEvent read FDragGrabFailureHook write FDragGrabFailureHook;
 
     // Cursors
     function CursorForDragMode(const AMode: TXCBDragMode): xcb_cursor_t; virtual;
@@ -1656,6 +1679,11 @@ begin
   FDesktopNames.Add('3');
   FDesktopNames.Add('4');
   FIsRunning := False;
+  FShutdownRequested := False;
+  FWakeupPipe[0] := -1;
+  FWakeupPipe[1] := -1;
+  FWakeupPipeValid := False;
+  FTickIntervalMs := 16;
   FWorkarea := TXCBRect.Create(0, 0, 1920, 1080);
   FAtomWMDeleteWindow := 0;
   FAtomWMTakeFocus := 0;
@@ -1668,6 +1696,7 @@ begin
   FDragMode := dmNone;
   FDragStartPointer := TXCBPoint.Create(0, 0);
   FDragStartRect := TXCBRect.Create(0, 0, 0, 0);
+  FDragGrabFailureHook := nil;
   FOnFramePaint := nil;
 
   FCursorCtx := nil;
@@ -1722,7 +1751,40 @@ begin
 end;
 
 destructor TXCBWindowManager.Destroy();
+var
+  I: Integer;
+  Cli: TXCBWMClient;
+  SyncReply: Pxcb_get_input_focus_reply_t;
 begin
+  // Hand clients back to the root window before tearing anything down. Frame
+  // windows are children of root and belong to this connection, so letting the
+  // server reap them destroys every application reparented inside them. A window
+  // manager must be restartable without taking the user's session with it.
+  if (FConn <> nil) and (FClients <> nil) then
+  begin
+    for I := 0 to FClients.Count - 1 do
+    begin
+      Cli := TXCBWMClient(FClients[I]);
+      if (Cli <> nil) and Cli.IsReparented then
+      begin
+        UnparentClient(Cli);
+        // Minimized clients stay unmapped; everything else is visible again.
+        if not (wsMinimized in Cli.State) then
+          xcb_map_window(FConn, Cli.ClientWindow);
+      end;
+    end;
+
+    // Force the server to process every teardown request before this connection
+    // closes. Without the round-trip the reparents can still be sitting in the
+    // outgoing buffer when xcb_disconnect runs; the server then frees the
+    // connection-owned frame windows with the clients still inside them, killing
+    // every application. The round-trip is the whole point, not a formality.
+    xcb_flush(FConn);
+    SyncReply := xcb_get_input_focus_reply(FConn, xcb_get_input_focus(FConn), nil);
+    if SyncReply <> nil then
+      xcb_free(SyncReply);
+  end;
+
   if FCursorCtx <> nil then
   begin
     xcb_cursor_context_free(FCursorCtx);
@@ -4411,29 +4473,188 @@ begin
   end;
 end;
 
-procedure TXCBWindowManager.Run();
+// Create the self-pipe used to wake the event pump from a signal handler.
+// Non-blocking on both ends so a signal storm can never stall the handler.
+procedure TXCBWindowManager.CreateWakeupPipe();
+var
+  fds: array[0..1] of cint;
+begin
+  if FWakeupPipeValid then Exit;
+
+  if fpPipe(fds) <> 0 then
+  begin
+    FWakeupPipe[0] := -1;
+    FWakeupPipe[1] := -1;
+    FWakeupPipeValid := False;
+    Exit;
+  end;
+
+  FWakeupPipe[0] := fds[0];
+  FWakeupPipe[1] := fds[1];
+  fpFcntl(FWakeupPipe[0], F_SETFL, O_NONBLOCK);
+  fpFcntl(FWakeupPipe[1], F_SETFL, O_NONBLOCK);
+  FWakeupPipeValid := True;
+end;
+
+procedure TXCBWindowManager.CloseWakeupPipe();
+begin
+  if not FWakeupPipeValid then Exit;
+  if FWakeupPipe[0] >= 0 then fpClose(FWakeupPipe[0]);
+  if FWakeupPipe[1] >= 0 then fpClose(FWakeupPipe[1]);
+  FWakeupPipe[0] := -1;
+  FWakeupPipe[1] := -1;
+  FWakeupPipeValid := False;
+end;
+
+// Async-signal-safe: only sets flags and writes a single byte. No allocation,
+// no stdio, no locks — the previous implementation called WriteLn and Halt from
+// the handler, both of which are unsafe while blocked in the event pump.
+procedure TXCBWindowManager.RequestShutdown();
+var
+  b: Byte;
+begin
+  FShutdownRequested := True;
+  FIsRunning := False;
+  if FWakeupPipeValid then
+  begin
+    b := 1;
+    fpWrite(FWakeupPipe[1], b, 1);
+  end;
+end;
+
+procedure TXCBWindowManager.DrainWakeupPipe();
+var
+  buf: array[0..63] of Byte;
+  n: ssize_t;
+begin
+  if not FWakeupPipeValid then Exit;
+  repeat
+    n := fpRead(FWakeupPipe[0], buf[0], SizeOf(buf));
+  until n <= 0;
+end;
+
+// One pump cycle: drain already-queued events, then select() on the X socket and
+// the wakeup pipe. Returns True when at least one event was processed.
+function TXCBWindowManager.PumpEventsOnce(const ATimeoutMs: Integer): Boolean;
 var
   Event: Pxcb_generic_event_t;
+  xcbFd: cint;
+  readSet: TFDSet;
+  timeval: TTimeVal;
+  maxFd: cint;
+  n: cint;
 begin
+  Result := False;
   if FConn = nil then Exit;
-  FIsRunning := True;
-  while FIsRunning do
-  begin
-    Event := xcb_wait_for_event(FConn);
-    if Event = nil then
-      Break;
+
+  // 1. Events already sitting in xcb's internal queue. Checking this before
+  //    select() is essential: xcb may hold events while the socket is drained,
+  //    and select() would then block despite work being pending.
+  repeat
+    Event := xcb_poll_for_queued_event(FConn);
+    if Event = nil then Break;
     try
       ProcessEvent(Event);
+      Result := True;
     finally
       xcb_free(Event);
     end;
+  until False;
+
+  if Result then Exit;
+
+  // 2. Wait for X input or a shutdown wakeup.
+  xcbFd := xcb_get_file_descriptor(FConn);
+  fpFD_ZERO(readSet);
+  maxFd := -1;
+  if xcbFd >= 0 then
+  begin
+    fpFD_SET(xcbFd, readSet);
+    maxFd := xcbFd;
   end;
-  FIsRunning := False;
+  if FWakeupPipeValid and (FWakeupPipe[0] >= 0) then
+  begin
+    fpFD_SET(FWakeupPipe[0], readSet);
+    if FWakeupPipe[0] > maxFd then
+      maxFd := FWakeupPipe[0];
+  end;
+
+  timeval.tv_sec := ATimeoutMs div 1000;
+  timeval.tv_usec := (ATimeoutMs mod 1000) * 1000;
+
+  n := fpSelect(maxFd + 1, @readSet, nil, nil, @timeval);
+  if n < 0 then
+  begin
+    // EINTR is normal (a signal arrived); the loop re-checks the flag next pass.
+    Exit;
+  end;
+  if n = 0 then Exit;
+
+  // 3. Shutdown wakeup?
+  if FWakeupPipeValid and (FWakeupPipe[0] >= 0) and (fpFD_ISSET(FWakeupPipe[0], readSet) <> 0) then
+  begin
+    DrainWakeupPipe();
+    if FShutdownRequested then
+    begin
+      FIsRunning := False;
+      Exit;
+    end;
+  end;
+
+  // 4. Drain X events.
+  if (xcbFd >= 0) and (fpFD_ISSET(xcbFd, readSet) <> 0) then
+  begin
+    repeat
+      Event := xcb_poll_for_event(FConn);
+      if Event = nil then Break;
+      try
+        ProcessEvent(Event);
+        Result := True;
+      finally
+        xcb_free(Event);
+      end;
+    until False;
+  end;
+end;
+
+procedure TXCBWindowManager.DoOnTick(const AElapsedMs: Integer);
+begin
+  // Default: no periodic work.
+end;
+
+procedure TXCBWindowManager.Run();
+var
+  started: QWord;
+  elapsed: Integer;
+begin
+  if FConn = nil then Exit;
+
+  CreateWakeupPipe();
+  FShutdownRequested := False;
+  FIsRunning := True;
+  started := GetTickCount64();
+
+  try
+    while FIsRunning do
+    begin
+      PumpEventsOnce(FTickIntervalMs);
+
+      elapsed := Integer(GetTickCount64() - started);
+      started := GetTickCount64();
+      if FIsRunning then
+        DoOnTick(elapsed);
+    end;
+  finally
+    FIsRunning := False;
+    CloseWakeupPipe();
+  end;
 end;
 
 procedure TXCBWindowManager.Stop();
 begin
-  FIsRunning := False;
+  // Stop() may be called from another thread or from a timer callback, so it must
+  // wake the pump rather than merely clearing a flag the pump never re-reads.
+  RequestShutdown();
 end;
 
 procedure TXCBWindowManager.SwitchDesktop(const ANewDesktop: Integer);
@@ -4518,19 +4739,22 @@ var
   Cookie: xcb_grab_pointer_cookie_t;
   Reply: Pxcb_grab_pointer_reply_t;
   dragCursor: xcb_cursor_t;
+  grabStatus: Byte;
+  grabbed: Boolean;
 begin
   if (AClient = nil) or (AMode = dmNone) then Exit;
   if AClient.WindowType in [wtDesktop, wtDock] then Exit;
   if (AMode <> dmMove) and (not AClient.CanResize) then Exit;
 
-  FDragClient := AClient;
-  FDragMode := AMode;
-  FDragStartPointer := TXCBPoint.Create(ARootX, ARootY);
-  FDragStartRect := AClient.CurrentRect;
-
   dragCursor := CursorForDragMode(AMode);
   if dragCursor = 0 then dragCursor := XCB_NONE;
 
+  // The grab must succeed *before* we enter drag state. Committing FDragClient /
+  // FDragMode first meant a refused grab (AlreadyGrabbed after a lost release,
+  // or a client already holding the pointer via _NET_WM_MOVERESIZE) left the WM
+  // convinced it was dragging while owning nothing — the window then followed the
+  // cursor until the next click.
+  grabbed := True;
   if FConn <> nil then
   begin
     Cookie := xcb_grab_pointer(
@@ -4545,10 +4769,45 @@ begin
       XCB_CURRENT_TIME
     );
     Reply := xcb_grab_pointer_reply(FConn, Cookie, nil);
+    grabbed := False;
     if Reply <> nil then
-      xcb_free(Reply);
-    xcb_flush(FConn);
+    begin
+      try
+        grabStatus := Reply^.status;
+      finally
+        xcb_free(Reply);
+      end;
+
+      if grabStatus <> XCB_GRAB_STATUS_SUCCESS then
+      begin
+        if FDragGrabFailureHook <> nil then
+          FDragGrabFailureHook(grabStatus);
+        // Do not leave a stale grab behind if the server thinks one exists.
+        if grabStatus = XCB_GRAB_STATUS_ALREADY_GRABBED then
+          xcb_ungrab_pointer(FConn, XCB_CURRENT_TIME);
+        xcb_flush(FConn);
+        Exit;
+      end;
+      grabbed := True;
+    end
+    else
+    begin
+      // No reply means the request could not be completed (connection gone).
+      if FDragGrabFailureHook <> nil then
+        FDragGrabFailureHook(255);
+      Exit;
+    end;
   end;
+
+  if not grabbed then Exit;
+
+  FDragClient := AClient;
+  FDragMode := AMode;
+  FDragStartPointer := TXCBPoint.Create(ARootX, ARootY);
+  FDragStartRect := AClient.CurrentRect;
+
+  if FConn <> nil then
+    xcb_flush(FConn);
 end;
 
 procedure TXCBWindowManager.UpdateDrag(const ARootX, ARootY: Integer);

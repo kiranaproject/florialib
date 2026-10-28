@@ -44,6 +44,11 @@ type
     procedure TestWindowCapabilitiesAndFixedSize();
     procedure TestTransientDialogPlacementAndLifecycle();
     procedure TestDesktopWindowPolicy();
+    procedure TestShutdownRequestSetsFlags();
+    procedure TestWakeupPipeLifecycle();
+    procedure TestPumpWithoutConnection();
+    procedure TestDragGrabFailureDoesNotCommitDrag();
+    procedure TestClientsSurviveManagerShutdown();
   end;
 
 implementation
@@ -1240,6 +1245,219 @@ begin
     AssertNull('Desktop window cannot be resized', Mgr.DragClient);
   finally
     Mgr.Free();
+  end;
+end;
+
+// WM-04: RequestShutdown must be callable from a signal handler, so it may only
+// set flags and poke the self-pipe — never allocate or write to stdout.
+procedure TXCBWMTest.TestShutdownRequestSetsFlags();
+var
+  Mgr: TXCBWindowManager;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    AssertFalse('Not shutting down initially', Mgr.ShutdownRequested);
+    Mgr.RequestShutdown();
+    AssertTrue('Shutdown requested', Mgr.ShutdownRequested);
+    AssertFalse('Loop marked stopped', Mgr.IsRunning);
+
+    // Idempotent: a second signal must not misbehave.
+    Mgr.RequestShutdown();
+    AssertTrue('Still requested', Mgr.ShutdownRequested);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+// WM-04: the self-pipe must be non-blocking on both ends and safe to drain when
+// empty, otherwise a signal storm would stall the handler.
+procedure TXCBWMTest.TestWakeupPipeLifecycle();
+var
+  Mgr: TXCBWindowManager;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Mgr.CreateWakeupPipe();
+    // Draining an empty pipe must return immediately (non-blocking read).
+    Mgr.DrainWakeupPipe();
+
+    // A wakeup write followed by a drain must not block either.
+    Mgr.RequestShutdown();
+    Mgr.DrainWakeupPipe();
+
+    Mgr.CloseWakeupPipe();
+    Mgr.CloseWakeupPipe(); // idempotent
+    Mgr.DrainWakeupPipe(); // safe when no pipe exists
+  finally
+    Mgr.Free();
+  end;
+end;
+
+// WM-04: with no connection the pump must not spin or block forever.
+procedure TXCBWMTest.TestPumpWithoutConnection();
+var
+  Mgr: TXCBWindowManager;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    AssertFalse('Pump handles nothing without a connection', Mgr.PumpEventsOnce(10));
+    Mgr.Run(); // must return immediately
+    AssertFalse('Run left the loop stopped', Mgr.IsRunning);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+// WM-02: a refused pointer grab must not leave the manager believing it is
+// dragging. Previously FDragClient/FDragMode were committed before the grab was
+// attempted, so a failed grab produced a window glued to the cursor.
+procedure TXCBWMTest.TestDragGrabFailureDoesNotCommitDrag();
+var
+  Conn, Holder: Pxcb_connection_t;
+  ScreenNum: Integer;
+  Mgr: TXCBWindowManager;
+  Cli: TXCBWMClient;
+  Win: xcb_window_t;
+  Cookie: xcb_grab_pointer_cookie_t;
+  Reply: Pxcb_grab_pointer_reply_t;
+  Root: xcb_window_t;
+begin
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  if Conn = nil then Exit;
+
+  Holder := nil;
+  try
+    if xcb_connection_has_error(Conn) <> 0 then Exit;
+
+    Mgr := TXCBWindowManager.Create(Conn, ScreenNum);
+    try
+      Root := Mgr.RootWindow;
+      if Root = 0 then Exit;
+
+      // A real, owned window so ManageWindow has something valid to wrap.
+      Win := xcb_generate_id(Conn);
+      xcb_create_window(Conn, XCB_COPY_FROM_PARENT, Win, Root, 10, 10, 200, 150, 0,
+                        XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nil);
+      xcb_map_window(Conn, Win);
+      xcb_flush(Conn);
+
+      Cli := Mgr.ManageWindow(Win);
+      AssertNotNull('Client managed', Cli);
+      AssertEquals('No drag before grab', Integer(dmNone), Integer(Mgr.DragMode));
+
+      // A second client grabs the pointer, so the WM's grab must be refused.
+      Holder := xcb_connect(nil, @ScreenNum);
+      if (Holder <> nil) and (xcb_connection_has_error(Holder) = 0) then
+      begin
+        Cookie := xcb_grab_pointer(Holder, 0, Root,
+                                   XCB_EVENT_MASK_BUTTON_RELEASE or XCB_EVENT_MASK_POINTER_MOTION,
+                                   XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC,
+                                   XCB_NONE, XCB_NONE, XCB_CURRENT_TIME);
+        Reply := xcb_grab_pointer_reply(Holder, Cookie, nil);
+        if Reply <> nil then
+        begin
+          try
+            if Reply^.status = XCB_GRAB_STATUS_SUCCESS then
+            begin
+              try
+                Mgr.BeginDrag(Cli, dmMove, 50, 50);
+                AssertEquals('Refused grab must not enter drag mode',
+                             Integer(dmNone), Integer(Mgr.DragMode));
+                AssertNull('Refused grab must not bind a drag client', Mgr.DragClient);
+              finally
+                xcb_ungrab_pointer(Holder, XCB_CURRENT_TIME);
+                xcb_flush(Holder);
+              end;
+            end;
+          finally
+            xcb_free(Reply);
+          end;
+        end;
+      end;
+
+      Mgr.UnmanageWindow(Cli);
+    finally
+      Mgr.Free();
+    end;
+  finally
+    if Holder <> nil then xcb_disconnect(Holder);
+    xcb_disconnect(Conn);
+  end;
+end;
+
+// Shutting the manager down must hand clients back to the root window before the
+// connection closes. Frame windows belong to the WM's connection, so letting the
+// server reap them takes every reparented application with it — a WM restart
+// would end the user's session.
+//
+// Two connections are essential here: the failure only appears at disconnect
+// time, when the server frees connection-owned windows. Verifying over the WM's
+// own connection would round-trip and mask it.
+procedure TXCBWMTest.TestClientsSurviveManagerShutdown();
+var
+  Conn, Observer: Pxcb_connection_t;
+  ScreenNum: Integer;
+  Mgr: TXCBWindowManager;
+  Cli: TXCBWMClient;
+  Win: xcb_window_t;
+  Attr: Pxcb_get_window_attributes_reply_t;
+  Root: xcb_window_t;
+begin
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  if Conn = nil then Exit;
+
+  Observer := nil;
+  try
+    if xcb_connection_has_error(Conn) <> 0 then Exit;
+
+    Observer := xcb_connect(nil, @ScreenNum);
+    if (Observer = nil) or (xcb_connection_has_error(Observer) <> 0) then Exit;
+
+    Mgr := TXCBWindowManager.Create(Conn, ScreenNum);
+    Root := Mgr.RootWindow;
+    if Root = 0 then
+    begin
+      Mgr.Free();
+      Exit;
+    end;
+
+    // The client window must belong to a DIFFERENT connection than the manager,
+    // exactly like a real application. Creating it on the manager's connection
+    // would destroy it at disconnect regardless of reparenting and make this
+    // test meaningless.
+    Win := xcb_generate_id(Observer);
+    xcb_create_window(Observer, XCB_COPY_FROM_PARENT, Win, Root, 20, 20, 180, 140, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nil);
+    xcb_map_window(Observer, Win);
+    xcb_flush(Observer);
+
+    Cli := Mgr.ManageWindow(Win);
+    AssertNotNull('Client managed', Cli);
+    AssertTrue('Client reparented into a frame', Cli.IsReparented);
+    AssertTrue('Frame window created', Cli.FrameWindow <> 0);
+
+    // Tear the manager down and close the connection it used.
+    Mgr.Free();
+    xcb_disconnect(Conn);
+    Conn := nil;
+
+    // The client must still exist, as seen from an independent connection.
+    Attr := xcb_get_window_attributes_reply(
+      Observer, xcb_get_window_attributes(Observer, Win), nil);
+    AssertNotNull('Client window survives manager shutdown', Attr);
+    if Attr <> nil then
+    begin
+      AssertFalse('Client is mapped after shutdown', Attr^.map_state = XCB_MAP_STATE_UNMAPPED);
+      xcb_free(Attr);
+    end;
+
+    xcb_destroy_window(Observer, Win);
+    xcb_flush(Observer);
+  finally
+    if Conn <> nil then xcb_disconnect(Conn);
+    if Observer <> nil then xcb_disconnect(Observer);
   end;
 end;
 
