@@ -39,6 +39,10 @@ type
     procedure TestStructuralChangeForcesFullPresent();
     procedure TestInvalidateForcesFullPresent();
     procedure TestOverlayRectDrivesPartialPresent();
+    procedure TestShadowCacheInvalidatesOnResize();
+    procedure TestShadowCacheDisabledWhenNoShadow();
+    procedure TestComposeRegionTracksDirtyRect();
+    procedure TestClearRectLeavesOutsideUntouched();
   end;
 
 implementation
@@ -573,6 +577,147 @@ begin
     end;
   finally
     h.Free();
+  end;
+end;
+
+// WM-18: the shadow cache must rebuild when the geometry or styling changes, and
+// must not rebuild when nothing did. Validity is a key comparison rather than an
+// invalidation call, so a missed invalidation cannot produce a stale shadow.
+procedure TXCBCompositorTest.TestShadowCacheInvalidatesOnResize();
+var
+  comp: TXCBCompositor;
+  w: TXCBCompositedWindow;
+  first: TFloriaImage;
+begin
+  comp := TXCBCompositor.Create(nil, 0, 800, 600);
+  try
+    w := comp.RegisterWindow(7001, TXCBRect.Create(10, 10, 200, 150));
+    w.CornerRadius := 12;
+
+    AssertTrue('Shadow cache built', w.EnsureShadowCache());
+    AssertNotNull('Shadow image exists', w.ShadowImage);
+    AssertTrue('Margin is positive', w.ShadowMargin > 0);
+    AssertEquals('Built once', 1, w.ShadowBuildCount);
+
+    // Unchanged settings: reused, not rebuilt.
+    AssertTrue('Still enabled', w.EnsureShadowCache());
+    AssertEquals('Cache reused when nothing changed', 1, w.ShadowBuildCount);
+
+    // Resize: the cached shadow is no longer valid for the new size.
+    w.UpdateGeometry(10, 10, 300, 220);
+    AssertTrue('Rebuilt after resize', w.EnsureShadowCache());
+    AssertEquals('Cache rebuilt exactly once for the resize', 2, w.ShadowBuildCount);
+
+    // Style change.
+    w.CornerRadius := 24;
+    AssertTrue('Rebuilt after radius change', w.EnsureShadowCache());
+    AssertEquals('Radius change invalidated the cache', 3, w.ShadowBuildCount);
+
+    // Shadow offset/opacity are also part of the key.
+    w.ShadowConfig := TXCBWindowShadowConfig.Create(True, 12, 4, 0.22);
+    AssertTrue('Rebuilt after offset change', w.EnsureShadowCache());
+    AssertEquals('Offset change invalidated the cache', 4, w.ShadowBuildCount);
+  finally
+    comp.Free();
+  end;
+end;
+
+// WM-18: no shadow configured means no cache and no draw.
+procedure TXCBCompositorTest.TestShadowCacheDisabledWhenNoShadow();
+var
+  comp: TXCBCompositor;
+  w: TXCBCompositedWindow;
+begin
+  comp := TXCBCompositor.Create(nil, 0, 800, 600);
+  try
+    w := comp.RegisterWindow(7101, TXCBRect.Create(10, 10, 200, 150));
+    w.ShadowConfig := TXCBWindowShadowConfig.Create(False, 0, 0, 0.0);
+    AssertFalse('Disabled shadow produces no cache', w.EnsureShadowCache());
+    AssertNull('No shadow image allocated', w.ShadowImage);
+
+    // Zero opacity is also "nothing to draw".
+    w.ShadowConfig := TXCBWindowShadowConfig.Create(True, 12, 1, 0.0);
+    AssertFalse('Zero-opacity shadow produces no cache', w.EnsureShadowCache());
+  finally
+    comp.Free();
+  end;
+end;
+
+// WM-19: a content-only change must compose just the dirty region, while a
+// structural change composes the whole screen. Exposed through the compose rect so
+// the decision is assertable without measuring time.
+procedure TXCBCompositorTest.TestComposeRegionTracksDirtyRect();
+var
+  comp: TXCBCompositor;
+  w: TXCBCompositedWindow;
+begin
+  comp := TXCBCompositor.Create(nil, 0, 800, 600);
+  try
+    w := comp.RegisterWindow(7201, TXCBRect.Create(100, 50, 300, 200));
+
+    comp.CompositeScene();
+    AssertEquals('First compose covers the screen', 800, comp.LastComposeRect.Width);
+    AssertEquals('First compose covers the screen height', 600, comp.LastComposeRect.Height);
+
+    // Content-only: compose only the affected area.
+    w.MarkDamaged();
+    comp.CompositeScene();
+    AssertEquals('Content-only compose starts at the window', 100, comp.LastComposeRect.X);
+    AssertTrue('Content-only compose is smaller than the screen',
+               comp.LastComposeRect.Width < 800);
+    AssertTrue('Content-only compose excludes far pixels',
+               comp.LastComposeRect.Right() < 800);
+
+    // Structural change: back to the full screen.
+    w.CornerRadius := 20;
+    comp.CompositeScene();
+    AssertEquals('Structural change composes the screen', 800, comp.LastComposeRect.Width);
+    AssertEquals('Structural change composes the screen height', 600, comp.LastComposeRect.Height);
+  finally
+    comp.Free();
+  end;
+end;
+
+// WM-19: ClearRect must fill only its rectangle. Clear() ignores the canvas clip,
+// so a partially-recomposed scene needs the rectangle-aware variant; using Clear
+// would wipe everything outside the region being recomposed.
+procedure TXCBCompositorTest.TestClearRectLeavesOutsideUntouched();
+var
+  img: TFloriaImage;
+  p: PBgraPixel;
+  idx: Integer;
+  outsideWrong, insideWrong: Integer;
+begin
+  img := TFloriaImage.Create(100, 100);
+  try
+    img.Clear(10, 20, 30, 255);
+    img.ClearRect(25, 25, 50, 50, 200, 100, 50, 255);
+
+    p := PBgraPixel(img.Data);
+    outsideWrong := 0;
+    insideWrong := 0;
+
+    for idx := 0 to 100 * 100 - 1 do
+    begin
+      if ((idx mod 100) >= 25) and ((idx mod 100) < 75) and
+         ((idx div 100) >= 25) and ((idx div 100) < 75) then
+      begin
+        if (p[idx].R <> 200) or (p[idx].G <> 100) or (p[idx].B <> 50) then
+          Inc(insideWrong);
+      end
+      else if (p[idx].R <> 10) or (p[idx].G <> 20) or (p[idx].B <> 30) then
+        Inc(outsideWrong);
+    end;
+
+    AssertEquals('Every pixel inside the rect was filled', 0, insideWrong);
+    AssertEquals('No pixel outside the rect was touched', 0, outsideWrong);
+
+    // Out-of-bounds rectangles must clamp rather than corrupt memory.
+    img.ClearRect(-50, -50, 30, 30, 255, 255, 255, 255);
+    img.ClearRect(90, 90, 100, 100, 255, 255, 255, 255);
+    img.ClearRect(50, 50, 0, 0, 255, 255, 255, 255);
+  finally
+    img.Free();
   end;
 end;
 

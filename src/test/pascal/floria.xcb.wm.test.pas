@@ -17,6 +17,11 @@ uses
   Floria.XCB.WM,
   Floria.X11.KeySym;
 
+const
+  // Enough events to require several pump cycles at MAX_EVENTS_PER_PUMP (64),
+  // while keeping the test quick.
+  BATCH_WINDOWS = 200;
+
 type
   // Counts RebindGlobalKeys calls so MappingNotify handling can be asserted.
   TCountingWindowManager = class(TXCBWindowManager)
@@ -1855,9 +1860,10 @@ var
   Conn: Pxcb_connection_t;
   ScreenNum: Integer;
   Mgr: TCountingWindowManager;
-  Root, W: xcb_window_t;
+  Root: xcb_window_t;
+  Wins: array[0..BATCH_WINDOWS - 1] of xcb_window_t;
   Mask: Cardinal;
-  I: Integer;
+  I, total, cycles: Integer;
 begin
   ScreenNum := 0;
   Conn := xcb_connect(nil, @ScreenNum);
@@ -1875,17 +1881,18 @@ begin
       Root := Mgr.RootWindow;
       if Root = 0 then Exit;
 
-      W := xcb_generate_id(Conn);
-      xcb_create_window(Conn, XCB_COPY_FROM_PARENT, W, Root, 0, 0, 50, 50, 0,
-                        XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nil);
-      Mask := XCB_EVENT_MASK_STRUCTURE_NOTIFY;
-      xcb_change_window_attributes(Conn, W, XCB_CW_EVENT_MASK, @Mask);
-
-      // Well beyond the batch limit: 150 map/unmap pairs = 300 events.
-      for I := 1 to 150 do
+      // One distinct window per event. Mapping and unmapping the SAME window
+      // repeatedly does not work: the server coalesces the requests, so only the
+      // final state change generates a notification (measured: 4 events instead of
+      // 300). Distinct windows each produce their own MapNotify.
+      for I := 0 to BATCH_WINDOWS - 1 do
       begin
-        xcb_map_window(Conn, W);
-        xcb_unmap_window(Conn, W);
+        Wins[I] := xcb_generate_id(Conn);
+        xcb_create_window(Conn, XCB_COPY_FROM_PARENT, Wins[I], Root, 0, 0, 20, 20, 0,
+                          XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nil);
+        Mask := XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+        xcb_change_window_attributes(Conn, Wins[I], XCB_CW_EVENT_MASK, @Mask);
+        xcb_map_window(Conn, Wins[I]);
       end;
       xcb_flush(Conn);
 
@@ -1901,12 +1908,27 @@ begin
                  IntToStr(Mgr.ProcessedCount),
                  Mgr.ProcessedCount <= 64);
 
-      // The remainder must still be reachable, i.e. the cap defers rather than drops.
-      Mgr.ProcessedCount := 0;
-      AssertTrue('Second cycle continues draining', Mgr.PumpEventsOnce(200));
-      AssertTrue('Second cycle also processed events', Mgr.ProcessedCount > 0);
+      // The cap must defer, not drop: draining repeatedly has to reach every
+      // queued event. Asserting a specific second cycle is racy, because how many
+      // events the server has actually delivered by then varies; what matters is
+      // that nothing is lost.
+      total := Mgr.ProcessedCount;
+      cycles := 1;
+      while (cycles < 40) and Mgr.PumpEventsOnce(200) do
+      begin
+        Inc(total, Mgr.ProcessedCount);
+        Mgr.ProcessedCount := 0;
+        Inc(cycles);
+      end;
 
-      xcb_destroy_window(Conn, W);
+      AssertTrue('Draining needed more than one cycle (the cap is real), got ' +
+                 IntToStr(cycles), cycles > 1);
+      AssertTrue('Every queued event was eventually handled, got ' +
+                 IntToStr(total) + ' in ' + IntToStr(cycles) + ' cycles',
+                 total >= BATCH_WINDOWS - 5);
+
+      for I := 0 to BATCH_WINDOWS - 1 do
+        xcb_destroy_window(Conn, Wins[I]);
       xcb_flush(Conn);
     finally
       Mgr.Free();

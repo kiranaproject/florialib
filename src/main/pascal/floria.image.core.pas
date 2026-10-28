@@ -106,6 +106,12 @@ type
 
     procedure Allocate(const AWidth, AHeight: Integer; const AFormat: TFloriaPixelFormat = fpfBGRA32);
     procedure Clear(const R, G, B: Byte; const A: Byte = 255);
+    // Fills one rectangle, clamped to the image bounds. Clear() always covers the
+    // whole image and ignores any canvas clip, which makes it unusable for a
+    // partially-recomposed scene: everything outside the region must keep its
+    // previous pixels.
+    procedure ClearRect(const AX, AY, AWidth, AHeight: Integer;
+                        const R, G, B: Byte; const A: Byte = 255);
     function Clone(): TFloriaImage;
     function CreateScaled(const NewW, NewH: Integer; const ABilinear: Boolean = True): TFloriaImage;
     procedure CopyFrom(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
@@ -360,6 +366,44 @@ end;
 function TFloriaImage.RenderingBufPtr(): rendering_buffer_ptr;
 begin
   Result := @FRenderingBuf;
+end;
+
+procedure TFloriaImage.ClearRect(const AX, AY, AWidth, AHeight: Integer;
+                                 const R, G, B: Byte; const A: Byte = 255);
+var
+  x, y: Integer;
+  x0, y0, x1, y1: Integer;
+  row: PBgraPixel;
+  val: TBgraPixel;
+begin
+  if (FPixelBuffer = nil) or (FWidth <= 0) or (FHeight <= 0) then Exit;
+
+  x0 := AX;
+  y0 := AY;
+  x1 := AX + AWidth;
+  y1 := AY + AHeight;
+
+  if x0 < 0 then x0 := 0;
+  if y0 < 0 then y0 := 0;
+  if x1 > FWidth then x1 := FWidth;
+  if y1 > FHeight then y1 := FHeight;
+  if (x1 <= x0) or (y1 <= y0) then Exit;
+
+  if FPixelFormat = fpfBGRA32 then
+  begin
+    val := TBgraPixel.Create(R, G, B, A);
+    for y := y0 to y1 - 1 do
+    begin
+      row := PBgraPixel(Scanline[y]);
+      for x := x0 to x1 - 1 do
+        row[x] := val;
+    end;
+  end
+  else
+  begin
+    for y := y0 to y1 - 1 do
+      FillChar(PByte(Scanline[y])[x0 * 4], (x1 - x0) * 4, 0);
+  end;
 end;
 
 procedure TFloriaImage.Clear(const R, G, B: Byte; const A: Byte = 255);
