@@ -77,6 +77,42 @@ type
 
 implementation
 
+// True when another window manager is managing this display. Such a WM reparents
+// or redirects the windows these tests create, so the event stream they rely on is
+// not theirs to control. Detected via _NET_SUPPORTING_WM_CHECK, which a compliant
+// WM sets on the root window.
+function AnotherWMRunning(const AConn: Pxcb_connection_t; const ARoot: xcb_window_t): Boolean;
+var
+  atom, typeAtom: xcb_atom_t;
+  cookie: xcb_intern_atom_cookie_t;
+  reply: Pxcb_intern_atom_reply_t;
+  prop: Pxcb_get_property_reply_t;
+begin
+  Result := False;
+  if (AConn = nil) or (ARoot = 0) then Exit;
+
+  cookie := xcb_intern_atom(AConn, 1, Length('_NET_SUPPORTING_WM_CHECK'),
+                            PAnsiChar('_NET_SUPPORTING_WM_CHECK'));
+  reply := xcb_intern_atom_reply(AConn, cookie, nil);
+  if reply = nil then Exit;
+  try
+    atom := reply^.atom;
+  finally
+    xcb_free(reply);
+  end;
+  if atom = 0 then Exit;
+
+  typeAtom := XCB_ATOM_WINDOW;
+  prop := xcb_get_property_reply(AConn,
+    xcb_get_property(AConn, 0, ARoot, atom, typeAtom, 0, 1), nil);
+  if prop = nil then Exit;
+  try
+    Result := (prop^.format <> 0) and (xcb_get_property_value_length(prop) >= 4);
+  finally
+    xcb_free(prop);
+  end;
+end;
+
 procedure TCountingWindowManager.RebindGlobalKeys();
 begin
   Inc(RebindCount);
@@ -1855,6 +1891,19 @@ end;
 // The assertion counts events actually processed in one cycle. Counting leftovers
 // instead is unreliable: events arrive incrementally, so a drain can stop at a
 // natural gap and look bounded even with no cap in place.
+// WM-11: a single pump cycle must not drain an unbounded queue. A client emitting
+// a continuous stream — a ConfigureNotify storm during a resize, or a 60 Hz video
+// generating damage — would otherwise keep the drain loop non-empty forever and
+// starve DoOnTick, which is where the shell presents.
+//
+// Two things had to be got right to make this test meaningful:
+//
+//  * Counting leftover events is unreliable (they arrive incrementally, so a drain
+//    stops at a natural gap and looks bounded with no cap in place). This counts
+//    events actually processed instead.
+//  * Mapping and unmapping the SAME window does not work: the server coalesces the
+//    requests, so 300 requests produced 4 notifications. Distinct windows each
+//    produce their own MapNotify.
 procedure TXCBWMTest.TestPumpBatchIsBounded();
 var
   Conn: Pxcb_connection_t;
@@ -1863,28 +1912,40 @@ var
   Root: xcb_window_t;
   Wins: array[0..BATCH_WINDOWS - 1] of xcb_window_t;
   Mask: Cardinal;
-  I, total, cycles: Integer;
+  I, total, cycles, attempts: Integer;
 begin
   ScreenNum := 0;
-  Conn := xcb_connect(nil, @ScreenNum);
+
+  // Retry: on some displays the first xcb_connect in a process reports an error
+  // state while a second succeeds (observed under Xephyr with EGL/DRI3 warnings).
+  // That is environmental, not a property of the code under test.
+  Conn := nil;
+  for attempts := 1 to 5 do
+  begin
+    Conn := xcb_connect(nil, @ScreenNum);
+    if (Conn <> nil) and (xcb_connection_has_error(Conn) = 0) then Break;
+    if Conn <> nil then xcb_disconnect(Conn);
+    Conn := nil;
+    Sleep(20);
+  end;
   if Conn = nil then Exit;
 
   try
-    if xcb_connection_has_error(Conn) <> 0 then Exit;
-
     Mgr := TCountingWindowManager.Create(Conn, ScreenNum);
     try
       // Deliberately NOT claiming ownership: with SubstructureRedirect active the
       // maps would be turned into MapRequests and the event count would depend on
-      // window-management behaviour. Without it, each map/unmap produces a real
-      // MapNotify/UnmapNotify for this connection.
+      // window-management behaviour. Without it, each map produces a real
+      // MapNotify for this connection.
       Root := Mgr.RootWindow;
       if Root = 0 then Exit;
 
-      // One distinct window per event. Mapping and unmapping the SAME window
-      // repeatedly does not work: the server coalesces the requests, so only the
-      // final state change generates a notification (measured: 4 events instead of
-      // 300). Distinct windows each produce their own MapNotify.
+      // If some *other* window manager owns the display it redirects these
+      // windows, so the event stream is not ours to reason about. Skip rather than
+      // report a misleading failure on a developer desktop.
+      if AnotherWMRunning(Conn, Root) then Exit;
+
+      // One distinct window per event.
       for I := 0 to BATCH_WINDOWS - 1 do
       begin
         Wins[I] := xcb_generate_id(Conn);
@@ -1909,9 +1970,7 @@ begin
                  Mgr.ProcessedCount <= 64);
 
       // The cap must defer, not drop: draining repeatedly has to reach every
-      // queued event. Asserting a specific second cycle is racy, because how many
-      // events the server has actually delivered by then varies; what matters is
-      // that nothing is lost.
+      // queued event.
       total := Mgr.ProcessedCount;
       cycles := 1;
       while (cycles < 40) and Mgr.PumpEventsOnce(200) do
