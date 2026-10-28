@@ -1354,6 +1354,10 @@ begin
 
     Mgr := TXCBWindowManager.Create(Conn, ScreenNum);
     try
+      // Requires exclusive display ownership: another WM's grabs would make the
+      // pointer-grab result unpredictable.
+      if not Mgr.ClaimOwnership() then Exit;
+
       Root := Mgr.RootWindow;
       if Root = 0 then Exit;
 
@@ -1438,6 +1442,16 @@ begin
     if (Observer = nil) or (xcb_connection_has_error(Observer) <> 0) then Exit;
 
     Mgr := TXCBWindowManager.Create(Conn, ScreenNum);
+    // This test needs exclusive ownership of the display: if another window
+    // manager is running it will reparent the client window and the assertions
+    // become meaningless. ClaimOwnership fails with BadAccess in that case, so
+    // skip rather than report a false failure on a developer desktop.
+    if not Mgr.ClaimOwnership() then
+    begin
+      Mgr.Free();
+      Exit;
+    end;
+
     Root := Mgr.RootWindow;
     if Root = 0 then
     begin
