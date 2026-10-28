@@ -22,7 +22,9 @@ type
   TCountingWindowManager = class(TXCBWindowManager)
   public
     RebindCount: Integer;
+    ProcessedCount: Integer;
     procedure RebindGlobalKeys(); override;
+    function ProcessEvent(const AEvent: Pxcb_generic_event_t): Boolean; override;
   end;
 
   TXCBWMTest = class(TTestCase)
@@ -65,6 +67,7 @@ type
     procedure TestFocusInIgnoresPointerRootAndSelf();
     procedure TestPumpDrainsBurstInOneCall();
     procedure TestPumpDoesNotStallWithPendingEvents();
+    procedure TestPumpBatchIsBounded();
   end;
 
 implementation
@@ -73,6 +76,12 @@ procedure TCountingWindowManager.RebindGlobalKeys();
 begin
   Inc(RebindCount);
   inherited RebindGlobalKeys();
+end;
+
+function TCountingWindowManager.ProcessEvent(const AEvent: Pxcb_generic_event_t): Boolean;
+begin
+  Inc(ProcessedCount);
+  Result := inherited ProcessEvent(AEvent);
 end;
 
 procedure TXCBWMTest.TestPointAndRect();
@@ -1607,12 +1616,10 @@ begin
 
     Mgr := TXCBWindowManager.Create(Conn, ScreenNum);
     try
-      if not Mgr.ClaimOwnership() then
-      begin
-        // Another WM owns this display; nothing to assert.
-        Mgr.Free();
-        Exit;
-      end;
+      // Another WM owns this display: nothing to assert, but do NOT free Mgr here
+      // — the finally block below owns it. Freeing in both places was a double
+      // free that surfaced as an access violation in whichever test ran next.
+      if not Mgr.ClaimOwnership() then Exit;
 
       Attr := xcb_get_window_attributes_reply(
         Conn, xcb_get_window_attributes(Conn, Mgr.RootWindow), nil);
@@ -1824,6 +1831,80 @@ begin
       // pending event. Allow generous slack for a loaded machine.
       AssertTrue('Pump did not wait for the timeout (' + IntToStr(Elapsed) + ' ms)',
                  Elapsed < 400);
+
+      xcb_destroy_window(Conn, W);
+      xcb_flush(Conn);
+    finally
+      Mgr.Free();
+    end;
+  finally
+    xcb_disconnect(Conn);
+  end;
+end;
+
+// WM-11: a single pump cycle must not drain an unbounded queue. A client emitting
+// a continuous stream — a ConfigureNotify storm during a resize, or a 60 Hz video
+// generating damage — would otherwise keep the drain loop non-empty forever and
+// starve DoOnTick, which is where the shell presents.
+//
+// The assertion counts events actually processed in one cycle. Counting leftovers
+// instead is unreliable: events arrive incrementally, so a drain can stop at a
+// natural gap and look bounded even with no cap in place.
+procedure TXCBWMTest.TestPumpBatchIsBounded();
+var
+  Conn: Pxcb_connection_t;
+  ScreenNum: Integer;
+  Mgr: TCountingWindowManager;
+  Root, W: xcb_window_t;
+  Mask: Cardinal;
+  I: Integer;
+begin
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  if Conn = nil then Exit;
+
+  try
+    if xcb_connection_has_error(Conn) <> 0 then Exit;
+
+    Mgr := TCountingWindowManager.Create(Conn, ScreenNum);
+    try
+      // Deliberately NOT claiming ownership: with SubstructureRedirect active the
+      // maps would be turned into MapRequests and the event count would depend on
+      // window-management behaviour. Without it, each map/unmap produces a real
+      // MapNotify/UnmapNotify for this connection.
+      Root := Mgr.RootWindow;
+      if Root = 0 then Exit;
+
+      W := xcb_generate_id(Conn);
+      xcb_create_window(Conn, XCB_COPY_FROM_PARENT, W, Root, 0, 0, 50, 50, 0,
+                        XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nil);
+      Mask := XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+      xcb_change_window_attributes(Conn, W, XCB_CW_EVENT_MASK, @Mask);
+
+      // Well beyond the batch limit: 150 map/unmap pairs = 300 events.
+      for I := 1 to 150 do
+      begin
+        xcb_map_window(Conn, W);
+        xcb_unmap_window(Conn, W);
+      end;
+      xcb_flush(Conn);
+
+      // Round-trip so the server has processed and sent every one of those events
+      // before the pump runs.
+      xcb_free(xcb_get_input_focus_reply(Conn, xcb_get_input_focus(Conn), nil));
+
+      Mgr.ProcessedCount := 0;
+      AssertTrue('Pump handled a batch', Mgr.PumpEventsOnce(200));
+
+      AssertTrue('Some events were processed', Mgr.ProcessedCount > 0);
+      AssertTrue('One cycle processed at most the batch cap, got ' +
+                 IntToStr(Mgr.ProcessedCount),
+                 Mgr.ProcessedCount <= 64);
+
+      // The remainder must still be reachable, i.e. the cap defers rather than drops.
+      Mgr.ProcessedCount := 0;
+      AssertTrue('Second cycle continues draining', Mgr.PumpEventsOnce(200));
+      AssertTrue('Second cycle also processed events', Mgr.ProcessedCount > 0);
 
       xcb_destroy_window(Conn, W);
       xcb_flush(Conn);

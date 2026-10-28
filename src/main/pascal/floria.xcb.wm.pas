@@ -26,6 +26,10 @@ uses
 const
   XCB_ALL_DESKTOPS = Cardinal($FFFFFFFF);
 
+  // Upper bound on events handled per pump cycle. Keeps a flood of events from
+  // starving the per-cycle tick (and therefore presentation).
+  MAX_EVENTS_PER_PUMP = 64;
+
   // Motif Hints flags
   XCB_MWM_HINTS_FUNCTIONS   = 1 shl 0;
   XCB_MWM_HINTS_DECORATIONS = 1 shl 1;
@@ -4860,6 +4864,7 @@ var
   timeval: TTimeVal;
   maxFd: cint;
   n: cint;
+  drained: Integer;
 begin
   Result := False;
   if FConn = nil then Exit;
@@ -4878,6 +4883,7 @@ begin
   //    This is a robustness choice, not a fix for an observed stall: an earlier
   //    report of the pump missing events turned out to be stderr buffering in the
   //    diagnostic output, not a stalled queue. See docs/roadmap.md WM-04.
+  drained := 0;
   repeat
     Event := xcb_poll_for_event(FConn);
     if Event = nil then Break;
@@ -4887,6 +4893,13 @@ begin
     finally
       xcb_free(Event);
     end;
+    Inc(drained);
+    // Bounded batch (WM-11). A client emitting a continuous stream — a
+    // ConfigureNotify storm during a resize, or a 60 Hz video generating damage —
+    // would otherwise keep this loop non-empty forever and starve DoOnTick, which
+    // is where the shell presents. Leftover events stay queued and are picked up
+    // by the next call, whose step 1 drains xcb's queue before selecting.
+    if drained >= MAX_EVENTS_PER_PUMP then Break;
   until False;
 
   if Result then Exit;
@@ -4929,9 +4942,10 @@ begin
     end;
   end;
 
-  // 4. Drain X events.
+  // 4. Drain X events, bounded by the same batch limit as step 1.
   if (xcbFd >= 0) and (fpFD_ISSET(xcbFd, readSet) <> 0) then
   begin
+    drained := 0;
     repeat
       Event := xcb_poll_for_event(FConn);
       if Event = nil then Break;
@@ -4941,6 +4955,8 @@ begin
       finally
         xcb_free(Event);
       end;
+      Inc(drained);
+      if drained >= MAX_EVENTS_PER_PUMP then Break;
     until False;
   end;
 end;

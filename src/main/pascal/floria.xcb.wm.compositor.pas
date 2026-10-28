@@ -68,6 +68,11 @@ type
     procedure UpdatePixmap();
     procedure FetchImage();
     procedure MarkDamaged();
+    // Subtracts the accumulated server-side damage region without touching the
+    // local dirty flag. Must be called for every registered window on every pass,
+    // including ones that are not rendered, or the server-side damage region for
+    // hidden windows grows without bound.
+    procedure SubtractDamage();
     procedure ClearDamage();
 
     property Window         : xcb_window_t           read FWindow;
@@ -89,6 +94,31 @@ type
 
   // Scene paint notification delegate
   TXCBCompositorPaintEvent = procedure(ASender: TObject; ACanvas: TFloriaCanvasAgg; const ASceneRect: TXCBRect) of object;
+
+  // Snapshot of everything that affects the rendered scene *except* window
+  // content. Comparing consecutive snapshots tells the compositor whether the
+  // scene changed structurally — stacking order, geometry, visibility, styling —
+  // which requires a full present. A content-only change can be presented
+  // partially, because every other pixel on screen is already correct.
+  //
+  // Doing it this way, rather than asking callers to flag structural changes,
+  // means a stacking reorder the compositor was never told about still forces a
+  // full present. Missing such a notification would otherwise leave stale pixels.
+  TXCBSceneEntry = record
+    Window             : xcb_window_t;
+    Geometry           : TXCBRect;
+    Visible            : Boolean;
+    Opacity            : Single;
+    CornerRadius       : Integer;
+    BottomCornerRadius : Integer;
+    ShadowEnabled      : Boolean;
+    ShadowRadius       : Integer;
+    ShadowOffsetY      : Integer;
+    ShadowOpacity      : Single;
+    BlurEnabled        : Boolean;
+    BlurRadius         : Integer;
+  end;
+  TXCBSceneEntryArray = array of TXCBSceneEntry;
 
   // TXCBCompositor
   // Master compositor coordinating redirection, damage event routing, scene rendering,
@@ -121,8 +151,39 @@ type
     FOnBeforeRender        : TXCBCompositorPaintEvent;
     FOnAfterRender         : TXCBCompositorPaintEvent;
 
+    // Present-path bookkeeping (WM-12). FDirtyRect is the union of everything
+    // known to have changed since the last present; it drives a partial upload.
+    FDirtyRect             : TXCBRect;
+    FDirtyValid            : Boolean;
+    FSceneSnapshot         : TXCBSceneEntryArray;
+    FSnapshotValid         : Boolean;
+    FStructuralChange      : Boolean;
+
+    // Instrumentation, so the present path can be asserted rather than assumed.
+    FLastPresentRect       : TXCBRect;
+    FLastPresentBytes      : Cardinal;
+    FPresentCount          : Integer;
+    FFullPresentCount      : Integer;
+    FPartialPresentCount   : Integer;
+    FDamageSubtractCount   : Integer;
+
+    // Shell-drawn overlay bounds (HUDs, snap previews) for this and the previous
+    // frame. Overlays are painted in OnAfterRender, so they are invisible to the
+    // scene snapshot; without tracking them here, dismissing or moving a HUD would
+    // produce no dirty rect and leave its pixels on screen.
+    FOverlayRect           : TXCBRect;
+    FPrevOverlayRect       : TXCBRect;
+
     function QueryExtensions(): Boolean;
     procedure EnsureGC();
+    procedure AddDirty(const ARect: TXCBRect);
+    procedure ClearDirty();
+    function BuildSnapshot(): TXCBSceneEntryArray;
+    function SnapshotChanged(const ANew: TXCBSceneEntryArray): Boolean;
+    procedure UploadRect(const ARect: TXCBRect; const ATarget: xcb_drawable_t);
+    // Decides which region the next present must cover and records it. Separated
+    // from the upload so the decision is testable without a live connection.
+    function ComputePresentRect(): TXCBRect;
   public
     constructor Create(AConn: Pxcb_connection_t; const ARoot: xcb_window_t;
                        const AWidth: Integer = 1920; const AHeight: Integer = 1080);
@@ -168,6 +229,31 @@ type
 
     property OnBeforeRender : TXCBCompositorPaintEvent read FOnBeforeRender write FOnBeforeRender;
     property OnAfterRender  : TXCBCompositorPaintEvent read FOnAfterRender write FOnAfterRender;
+    // Bounds of the overlay the shell drew in the most recent OnAfterRender call.
+    property OverlayRect    : TXCBRect read FOverlayRect;
+
+    // Present-path state and instrumentation.
+    property DirtyRect          : TXCBRect  read FDirtyRect;
+    property DirtyValid         : Boolean   read FDirtyValid;
+    property LastPresentRect    : TXCBRect  read FLastPresentRect;
+    property LastPresentBytes   : Cardinal  read FLastPresentBytes;
+    property PresentCount       : Integer   read FPresentCount;
+    property FullPresentCount   : Integer   read FFullPresentCount;
+    property PartialPresentCount: Integer   read FPartialPresentCount;
+    // Number of windows whose server-side damage was subtracted. Should equal the
+    // registered window count per composite pass, including hidden windows.
+    property DamageSubtractCount: Integer   read FDamageSubtractCount;
+    // Forces the next present to cover the whole screen (e.g. after a resize or a
+    // background change). Content damage alone stays partial.
+    procedure Invalidate();
+    // Clears the instrumentation counters, so a test can measure one pass.
+    procedure ResetPresentStats();
+    // Declares the screen area the shell's OnAfterRender overlay covers this frame.
+    // Pass a zero rect when nothing is drawn. The compositor unions the previous
+    // and current bounds into the dirty region, so a HUD that moves or disappears
+    // repaints the pixels it used to occupy. Without this, overlays are invisible
+    // to the scene snapshot and leave stale pixels behind under partial present.
+    procedure SetOverlayRect(const ARect: TXCBRect);
   end;
 
 implementation
@@ -364,10 +450,17 @@ end;
 procedure TXCBCompositedWindow.MarkDamaged();
 begin
   FIsDirty := True;
+  // Content changed inside the window: only that area of the scene needs
+  // presenting. Structural changes are detected separately via the scene
+  // snapshot, so this stays conservative.
+  if FCompositor <> nil then
+    FCompositor.AddDirty(FGeometry);
 end;
 
-procedure TXCBCompositedWindow.ClearDamage();
+procedure TXCBCompositedWindow.SubtractDamage();
 begin
+  if FCompositor <> nil then
+    Inc(FCompositor.FDamageSubtractCount);
   if (FCompositor <> nil) and (FCompositor.Connection <> nil) then
   begin
     if FDamage <> 0 then
@@ -375,6 +468,11 @@ begin
     if FFrameDamage <> 0 then
       xcb_damage_subtract(FCompositor.Connection, FFrameDamage, 0, 0);
   end;
+end;
+
+procedure TXCBCompositedWindow.ClearDamage();
+begin
+  SubtractDamage();
   FIsDirty := False;
 end;
 
@@ -409,6 +507,18 @@ begin
   FSceneImage := TFloriaImage.Create(FScreenWidth, FScreenHeight);
   FSceneImage.Clear(FBgR, FBgG, FBgB, FBgA);
   FSceneCanvas := TFloriaCanvasAgg.Create(FSceneImage);
+
+  FDirtyRect := TXCBRect.Create(0, 0, 0, 0);
+  FDirtyValid := False;
+  SetLength(FSceneSnapshot, 0);
+  FSnapshotValid := False;
+  FStructuralChange := True;
+  FLastPresentRect := TXCBRect.Create(0, 0, 0, 0);
+  FLastPresentBytes := 0;
+  FPresentCount := 0;
+  FFullPresentCount := 0;
+  FPartialPresentCount := 0;
+  FDamageSubtractCount := 0;
 
   QueryExtensions();
 end;
@@ -472,12 +582,14 @@ begin
     xcb_free(compReply);
   end;
 
-  // Query Damage extension
+  // Query Damage extension. The version reply succeeding is not sufficient: the
+  // extension may still be absent, in which case FDamageEventBase would stay 0
+  // and event-type matching would alias X errors. Only claim the extension once
+  // the event base is known.
   dmgCookie := xcb_damage_query_version(FConn, 1, 1);
   dmgReply := xcb_damage_query_version_reply(FConn, dmgCookie, nil);
   if dmgReply <> nil then
   begin
-    FHasDamage := True;
     FDamageMajor := dmgReply^.major_version;
     FDamageMinor := dmgReply^.minor_version;
     xcb_free(dmgReply);
@@ -487,6 +599,7 @@ begin
     begin
       FDamageEventBase := extReply^.first_event;
       FDamageErrorBase := extReply^.first_error;
+      FHasDamage := True;
     end;
   end;
 
@@ -502,6 +615,164 @@ begin
   FGC := xcb_generate_id(FConn);
   mask := 0;
   xcb_create_gc(FConn, FGC, FRootWindow, mask, @values[0]);
+end;
+
+procedure TXCBCompositor.ResetPresentStats();
+begin
+  FPresentCount := 0;
+  FFullPresentCount := 0;
+  FPartialPresentCount := 0;
+  FDamageSubtractCount := 0;
+  FLastPresentBytes := 0;
+  FLastPresentRect := TXCBRect.Create(0, 0, 0, 0);
+end;
+
+// The shell declares what its OnAfterRender overlay covers. Called from inside the
+// overlay painter, so it describes the frame currently being composed.
+procedure TXCBCompositor.SetOverlayRect(const ARect: TXCBRect);
+begin
+  FOverlayRect := ARect;
+end;
+
+// Force the next present to cover the whole screen.
+procedure TXCBCompositor.Invalidate();
+begin
+  FDirtyValid := False;
+  FSnapshotValid := False;
+end;
+
+// Union a changed region into the pending present area, clamped to the screen.
+procedure TXCBCompositor.AddDirty(const ARect: TXCBRect);
+var
+  l, t, r, b: Integer;
+begin
+  if (ARect.Width <= 0) or (ARect.Height <= 0) then Exit;
+
+  l := ARect.X;
+  t := ARect.Y;
+  r := ARect.Right();
+  b := ARect.Bottom();
+
+  if l < 0 then l := 0;
+  if t < 0 then t := 0;
+  if r > FScreenWidth then r := FScreenWidth;
+  if b > FScreenHeight then b := FScreenHeight;
+  if (r <= l) or (b <= t) then Exit;
+
+  if not FDirtyValid then
+  begin
+    FDirtyRect := TXCBRect.Create(l, t, r - l, b - t);
+    FDirtyValid := True;
+    Exit;
+  end;
+
+  if l < FDirtyRect.X then FDirtyRect.X := l;
+  if t < FDirtyRect.Y then FDirtyRect.Y := t;
+  if r > FDirtyRect.Right() then
+    FDirtyRect.Width := r - FDirtyRect.X;
+  if b > FDirtyRect.Bottom() then
+    FDirtyRect.Height := b - FDirtyRect.Y;
+end;
+
+procedure TXCBCompositor.ClearDirty();
+begin
+  FDirtyValid := False;
+  FDirtyRect := TXCBRect.Create(0, 0, 0, 0);
+end;
+
+function TXCBCompositor.BuildSnapshot(): TXCBSceneEntryArray;
+var
+  i: Integer;
+  w: TXCBCompositedWindow;
+begin
+  SetLength(Result, FWindows.Count);
+  for i := 0 to FWindows.Count - 1 do
+  begin
+    w := TXCBCompositedWindow(FWindows[i]);
+    Result[i].Window := w.Window;
+    Result[i].Geometry := w.Geometry;
+    Result[i].Visible := w.IsVisible;
+    Result[i].Opacity := w.Opacity;
+    Result[i].CornerRadius := w.CornerRadius;
+    Result[i].BottomCornerRadius := w.BottomCornerRadius;
+    Result[i].ShadowEnabled := w.ShadowConfig.Enabled;
+    Result[i].ShadowRadius := w.ShadowConfig.Radius;
+    Result[i].ShadowOffsetY := w.ShadowConfig.OffsetY;
+    Result[i].ShadowOpacity := w.ShadowConfig.Opacity;
+    Result[i].BlurEnabled := w.HasBackdropBlur;
+    Result[i].BlurRadius := w.BlurRadius;
+  end;
+end;
+
+// True when anything other than window *content* changed: order, geometry,
+// visibility, opacity, corner radii, shadow or blur settings.
+function TXCBCompositor.SnapshotChanged(const ANew: TXCBSceneEntryArray): Boolean;
+var
+  i: Integer;
+  a, b: TXCBSceneEntry;
+begin
+  Result := True;
+  if not FSnapshotValid then Exit;
+  if Length(ANew) <> Length(FSceneSnapshot) then Exit;
+
+  for i := 0 to High(ANew) do
+  begin
+    a := ANew[i];
+    b := FSceneSnapshot[i];
+    if (a.Window <> b.Window) or
+       (a.Geometry.X <> b.Geometry.X) or
+       (a.Geometry.Y <> b.Geometry.Y) or
+       (a.Geometry.Width <> b.Geometry.Width) or
+       (a.Geometry.Height <> b.Geometry.Height) or
+       (a.Visible <> b.Visible) or
+       (a.Opacity <> b.Opacity) or
+       (a.CornerRadius <> b.CornerRadius) or
+       (a.BottomCornerRadius <> b.BottomCornerRadius) or
+       (a.ShadowEnabled <> b.ShadowEnabled) or
+       (a.ShadowRadius <> b.ShadowRadius) or
+       (a.ShadowOffsetY <> b.ShadowOffsetY) or
+       (a.ShadowOpacity <> b.ShadowOpacity) or
+       (a.BlurEnabled <> b.BlurEnabled) or
+       (a.BlurRadius <> b.BlurRadius) then
+      Exit;
+  end;
+
+  Result := False;
+end;
+
+// Upload one rectangle of the scene image to the target drawable. Rows are copied
+// into a tight buffer because xcb_put_image expects contiguous rows of exactly
+// the requested width, while the scene image has full-screen stride.
+procedure TXCBCompositor.UploadRect(const ARect: TXCBRect; const ATarget: xcb_drawable_t);
+var
+  rowBytes: Cardinal;
+  dataLen: Cardinal;
+  y: Integer;
+  buf: PByte;
+  src: PByte;
+begin
+  if (FSceneImage = nil) or (FConn = nil) or (ATarget = 0) then Exit;
+  if (ARect.Width <= 0) or (ARect.Height <= 0) then Exit;
+
+  rowBytes := Cardinal(ARect.Width) * 4;
+  dataLen := rowBytes * Cardinal(ARect.Height);
+
+  GetMem(buf, dataLen);
+  try
+    for y := 0 to ARect.Height - 1 do
+    begin
+      src := PByte(FSceneImage.Scanline[ARect.Y + y]) + ARect.X * 4;
+      Move(src^, (buf + Cardinal(y) * rowBytes)^, rowBytes);
+    end;
+
+    xcb_put_image(FConn, XCB_IMAGE_FORMAT_Z_PIXMAP, ATarget, FGC,
+                  ARect.Width, ARect.Height, ARect.X, ARect.Y, 0, 24,
+                  dataLen, buf);
+  finally
+    FreeMem(buf);
+  end;
+
+  FLastPresentBytes := dataLen;
 end;
 
 function TXCBCompositor.EnableCompositing(): Boolean;
@@ -605,6 +876,11 @@ function TXCBCompositor.IsDamageNotify(const AEvent: Pxcb_generic_event_t): Bool
 begin
   Result := False;
   if (AEvent = nil) or not FHasDamage then Exit;
+  // FDamageEventBase = 0 means the event base was never resolved. Without this
+  // guard the comparison degenerates to (response_type and $7F) = 0, which
+  // matches X *error* events — they would be handed to HandleDamageNotify and
+  // reinterpreted as damage notifications with garbage drawable ids.
+  if FDamageEventBase = 0 then Exit;
   Result := ((AEvent^.response_type and $7F) = FDamageEventBase + XCB_DAMAGE_NOTIFY);
 end;
 
@@ -620,6 +896,9 @@ begin
   if FWallpaper <> nil then
     FWallpaper.Free();
   FWallpaper := AImage;
+  // The background is outside the scene snapshot, so a change here must force a
+  // full present explicitly.
+  Invalidate();
 end;
 
 procedure TXCBCompositor.SetBackgroundColor(const R, G, B: Byte; const A: Byte);
@@ -628,6 +907,7 @@ begin
   FBgG := G;
   FBgB := B;
   FBgA := A;
+  Invalidate();
 end;
 
 procedure TXCBCompositor.SetWindowOpacity(const AWindow: xcb_window_t; const AOpacity: Single);
@@ -685,6 +965,7 @@ var
   rect: TXCBRect;
   backdropImg: TFloriaImage;
   srcX, srcY, bw, bh: Integer;
+  newSnapshot: TXCBSceneEntryArray;
 begin
   if (FSceneImage = nil) or (FSceneCanvas = nil) then Exit;
 
@@ -698,19 +979,28 @@ begin
   if Assigned(FOnBeforeRender) then
     FOnBeforeRender(Self, FSceneCanvas, rect);
 
+  // Reset before the overlay painter runs, so a frame with no overlay reports an
+  // empty rect rather than inheriting the previous frame's bounds.
+  FOverlayRect := TXCBRect.Create(0, 0, 0, 0);
+
   // 2. Render Windows in stacking order (bottom to top)
   for i := 0 to FWindows.Count - 1 do
   begin
     w := TXCBCompositedWindow(FWindows[i]);
+
+    // Subtract the server-side damage region for EVERY registered window, before
+    // any decision to skip it. Doing this only for rendered windows let hidden,
+    // shaded and zero-geometry windows accumulate damage regions in the server
+    // without bound. The local dirty flag is left alone, so a window that
+    // reappears still triggers a fresh fetch.
+    w.SubtractDamage();
+
     if not w.IsVisible or (w.Geometry.Width <= 0) or (w.Geometry.Height <= 0) then
       Continue;
 
     // Fetch damaged/dirty client pixmap pixels
     if w.IsDirty and (w.Pixmap <> 0) then
-    begin
       w.FetchImage();
-      w.ClearDamage();
-    end;
 
     // A. Render Soft Gaussian Drop Shadow via AggPas
     if w.ShadowConfig.Enabled then
@@ -763,14 +1053,69 @@ begin
 
   if Assigned(FOnAfterRender) then
     FOnAfterRender(Self, FSceneCanvas, rect);
+
+  // Overlay bookkeeping. Overlays are painted after the scene and are not part of
+  // the snapshot, so a HUD that appears, moves or disappears would otherwise leave
+  // stale pixels on screen: nothing in the dirty region would cover its old
+  // position. Unioning the previous and current bounds fixes that, and keeps the
+  // present partial rather than forcing a full screen for every HUD change.
+  if (FPrevOverlayRect.Width > 0) or (FOverlayRect.Width > 0) then
+  begin
+    if (FOverlayRect.Width <> FPrevOverlayRect.Width) or
+       (FOverlayRect.Height <> FPrevOverlayRect.Height) or
+       (FOverlayRect.X <> FPrevOverlayRect.X) or
+       (FOverlayRect.Y <> FPrevOverlayRect.Y) then
+    begin
+      AddDirty(FPrevOverlayRect);
+      AddDirty(FOverlayRect);
+    end;
+  end;
+  FPrevOverlayRect := FOverlayRect;
+
+  // Record what the scene looks like structurally, so PresentToScreen can decide
+  // whether a partial upload is safe. Done after rendering because the render is
+  // what the snapshot describes.
+  newSnapshot := BuildSnapshot();
+  FStructuralChange := SnapshotChanged(newSnapshot);
+  FSceneSnapshot := newSnapshot;
+  FSnapshotValid := True;
+end;
+
+function TXCBCompositor.ComputePresentRect(): TXCBRect;
+begin
+  // A partial upload is only safe when the only thing that changed since the last
+  // present was window content. Any structural change — stacking, geometry,
+  // visibility, styling — forces the full screen, because those can alter pixels
+  // outside the damage rectangles (a shadow left behind by a moved window, a
+  // window uncovered by a reorder).
+  //
+  // Presenting a sub-rectangle is valid because the scene image is always fully
+  // re-rendered: every pixel in it is current, so only the changed area needs to
+  // reach the screen.
+  if FDirtyValid and (not FStructuralChange) and
+     (FDirtyRect.Width > 0) and (FDirtyRect.Height > 0) then
+  begin
+    Result := FDirtyRect;
+    Inc(FPartialPresentCount);
+  end
+  else
+  begin
+    Result := TXCBRect.Create(0, 0, FScreenWidth, FScreenHeight);
+    Inc(FFullPresentCount);
+  end;
+
+  FLastPresentRect := Result;
 end;
 
 procedure TXCBCompositor.PresentToScreen(const ATargetDrawable: xcb_drawable_t);
 var
   target: xcb_drawable_t;
-  dataLen: Cardinal;
+  presentRect: TXCBRect;
 begin
-  if (FConn = nil) or (FSceneImage = nil) then Exit;
+  if FSceneImage = nil then Exit;
+
+  presentRect := ComputePresentRect();
+  Inc(FPresentCount);
 
   if ATargetDrawable <> 0 then
     target := ATargetDrawable
@@ -779,13 +1124,15 @@ begin
   else
     target := FRootWindow;
 
-  EnsureGC();
-  dataLen := Cardinal(FScreenWidth * FScreenHeight * 4);
+  if FConn <> nil then
+  begin
+    EnsureGC();
+    UploadRect(presentRect, target);
+    xcb_flush(FConn);
+  end;
 
-  xcb_put_image(FConn, XCB_IMAGE_FORMAT_Z_PIXMAP, target, FGC,
-                FScreenWidth, FScreenHeight, 0, 0, 0, 24,
-                dataLen, PByte(FSceneImage.Data));
-  xcb_flush(FConn);
+  ClearDirty();
+  FStructuralChange := False;
 end;
 
 procedure TXCBCompositor.Resize(const AWidth, AHeight: Integer);
@@ -813,6 +1160,10 @@ begin
   FSceneImage := TFloriaImage.Create(FScreenWidth, FScreenHeight);
   FSceneImage.Clear(FBgR, FBgG, FBgB, FBgA);
   FSceneCanvas := TFloriaCanvasAgg.Create(FSceneImage);
+
+  // New backing image and new dimensions: nothing from the previous frame can be
+  // reused.
+  Invalidate();
 end;
 
 end.
