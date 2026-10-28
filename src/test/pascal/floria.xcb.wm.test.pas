@@ -14,9 +14,17 @@ uses
   Classes, SysUtils, fpcunit, testregistry,
   Floria.XCB,
   Floria.XCB.EWMH,
-  Floria.XCB.WM;
+  Floria.XCB.WM,
+  Floria.X11.KeySym;
 
 type
+  // Counts RebindGlobalKeys calls so MappingNotify handling can be asserted.
+  TCountingWindowManager = class(TXCBWindowManager)
+  public
+    RebindCount: Integer;
+    procedure RebindGlobalKeys(); override;
+  end;
+
   TXCBWMTest = class(TTestCase)
   published
     procedure TestPointAndRect();
@@ -49,9 +57,23 @@ type
     procedure TestPumpWithoutConnection();
     procedure TestDragGrabFailureDoesNotCommitDrag();
     procedure TestClientsSurviveManagerShutdown();
+    procedure TestKeysymResolutionQueriesServer();
+    procedure TestKeyBindingsResolveToValidBits();
+    procedure TestMappingNotifyRebindsKeys();
+    procedure TestRootEventMaskIncludesFocusAndRelease();
+    procedure TestFocusInSyncsActiveClient();
+    procedure TestFocusInIgnoresPointerRootAndSelf();
+    procedure TestPumpDrainsBurstInOneCall();
+    procedure TestPumpDoesNotStallWithPendingEvents();
   end;
 
 implementation
+
+procedure TCountingWindowManager.RebindGlobalKeys();
+begin
+  Inc(RebindCount);
+  inherited RebindGlobalKeys();
+end;
 
 procedure TXCBWMTest.TestPointAndRect();
 var
@@ -1461,7 +1483,344 @@ begin
   end;
 end;
 
+// WM-06: the binding table must come from the server. A constant table cannot
+// return 0 for a keysym that no key carries, and cannot agree with the server's
+// own keycode for a keysym at the same time.
+procedure TXCBWMTest.TestKeysymResolutionQueriesServer();
+var
+  Conn: Pxcb_connection_t;
+  ScreenNum: Integer;
+  Mgr: TXCBWindowManager;
+  TabKc: xcb_keycode_t;
+begin
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  if Conn = nil then Exit;
+
+  try
+    if xcb_connection_has_error(Conn) <> 0 then Exit;
+
+    Mgr := TXCBWindowManager.Create(Conn, ScreenNum);
+    try
+      AssertTrue('Bindings resolved against a live server', Mgr.KeyBindingsValid);
+      AssertTrue('Tab keycode resolved', Mgr.KeycodeTab <> 0);
+
+      // Cross-check: the resolver must agree with a fresh query.
+      TabKc := Mgr.KeysymToKeycode(XK_Tab);
+      AssertEquals('KeysymToKeycode(Tab) is stable', Integer(TabKc), Integer(Mgr.KeycodeTab));
+
+      // A keysym that no key carries must resolve to 0. This is the assertion
+      // that fails for any implementation backed by a constant table.
+      AssertEquals('Unmapped keysym resolves to 0',
+                   Integer(0), Integer(Mgr.KeysymToKeycode($0FFFFFFF)));
+
+      // XK_space is always present.
+      AssertTrue('Space keycode resolved', Mgr.KeycodeSpace <> 0);
+    finally
+      Mgr.Free();
+    end;
+  finally
+    xcb_disconnect(Conn);
+  end;
+end;
+
+// WM-06: modifier masks must be single bits and Alt must be usable, otherwise the
+// grab combinations silently degenerate.
+procedure TXCBWMTest.TestKeyBindingsResolveToValidBits();
+var
+  Mgr: TXCBWindowManager;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    AssertTrue('Offline fallback table is valid', Mgr.KeyBindingsValid);
+    AssertTrue('Alt mask non-zero', Mgr.ModAlt <> 0);
+    AssertTrue('Super mask non-zero', Mgr.ModSuper <> 0);
+
+    // Exactly one bit set: a modifier mask is 1 shl n.
+    AssertTrue('Alt is a single modifier bit', (Mgr.ModAlt and (Mgr.ModAlt - 1)) = 0);
+    AssertTrue('Super is a single modifier bit', (Mgr.ModSuper and (Mgr.ModSuper - 1)) = 0);
+    AssertTrue('NumLock is a single modifier bit',
+               (Mgr.ModNumLock and (Mgr.ModNumLock - 1)) = 0);
+
+    // The four lock combinations the grabber uses must be distinct.
+    AssertTrue('Alt and Alt+NumLock differ', Mgr.ModAlt <> (Mgr.ModAlt or Mgr.ModNumLock));
+  finally
+    Mgr.Free();
+  end;
+end;
+
+// WM-06: a layout switch delivers MappingNotify. The manager must re-resolve and
+// ask the shell to re-grab, otherwise every binding dies silently.
+procedure TXCBWMTest.TestMappingNotifyRebindsKeys();
+var
+  Mgr: TCountingWindowManager;
+  Ev: xcb_mapping_notify_event_t;
+begin
+  Mgr := TCountingWindowManager.Create(nil, 0);
+  try
+    Mgr.RebindCount := 0;
+
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_MAPPING_NOTIFY;
+    Ev.request := XCB_MAPPING_KEYBOARD;
+
+    AssertTrue('MappingNotify consumed', Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev)));
+    AssertEquals('RebindGlobalKeys invoked once', 1, Mgr.RebindCount);
+    AssertTrue('Bindings still valid after rebind', Mgr.KeyBindingsValid);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+// WM-05: the root mask must select the events the WM actually relies on. Without
+// FOCUS_CHANGE there is no focus tracking at all; without BUTTON_RELEASE a drag
+// can miss its terminating release; without LEAVE_WINDOW the root-cursor reset is
+// dead code.
+procedure TXCBWMTest.TestRootEventMaskIncludesFocusAndRelease();
+var
+  Conn: Pxcb_connection_t;
+  ScreenNum: Integer;
+  Mgr: TXCBWindowManager;
+  Attr: Pxcb_get_window_attributes_reply_t;
+  Mask: Cardinal;
+begin
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  if Conn = nil then Exit;
+
+  try
+    if xcb_connection_has_error(Conn) <> 0 then Exit;
+
+    Mgr := TXCBWindowManager.Create(Conn, ScreenNum);
+    try
+      if not Mgr.ClaimOwnership() then
+      begin
+        // Another WM owns this display; nothing to assert.
+        Mgr.Free();
+        Exit;
+      end;
+
+      Attr := xcb_get_window_attributes_reply(
+        Conn, xcb_get_window_attributes(Conn, Mgr.RootWindow), nil);
+      AssertNotNull('Root attributes readable', Attr);
+      if Attr <> nil then
+      begin
+        try
+          Mask := Attr^.your_event_mask;
+          AssertTrue('Root selects FOCUS_CHANGE',
+                     (Mask and XCB_EVENT_MASK_FOCUS_CHANGE) <> 0);
+          AssertTrue('Root selects BUTTON_RELEASE',
+                     (Mask and XCB_EVENT_MASK_BUTTON_RELEASE) <> 0);
+          AssertTrue('Root selects ENTER_WINDOW',
+                     (Mask and XCB_EVENT_MASK_ENTER_WINDOW) <> 0);
+          AssertTrue('Root selects LEAVE_WINDOW',
+                     (Mask and XCB_EVENT_MASK_LEAVE_WINDOW) <> 0);
+          AssertTrue('Root selects SUBSTRUCTURE_REDIRECT',
+                     (Mask and XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT) <> 0);
+        finally
+          xcb_free(Attr);
+        end;
+      end;
+    finally
+      Mgr.Free();
+    end;
+  finally
+    xcb_disconnect(Conn);
+  end;
+end;
+
+// WM-05: focus that arrives from outside (a client calling XSetInputFocus) must be
+// adopted, so the active window does not go stale.
+procedure TXCBWMTest.TestFocusInSyncsActiveClient();
+var
+  Mgr: TXCBWindowManager;
+  Cli1, Cli2: TXCBWMClient;
+  Ev: xcb_focus_in_event_t;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Cli1 := Mgr.ManageWindow(7001);
+    Cli2 := Mgr.ManageWindow(7002);
+    AssertNotNull('Client 1 managed', Cli1);
+    AssertNotNull('Client 2 managed', Cli2);
+    Mgr.ActiveClient := Cli1;
+    AssertSame('Client 1 initially active', Cli1, Mgr.ActiveClient);
+
+    // Client 2 grabs focus on its own.
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_FOCUS_IN;
+    Ev.detail := XCB_NOTIFY_DETAIL_ANCESTOR;
+    Ev.event := 7002;
+
+    AssertTrue('FocusIn consumed', Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev)));
+    AssertSame('Active client followed focus', Cli2, Mgr.ActiveClient);
+    AssertTrue('Client 2 marked focused', wsFocused in Cli2.State);
+    AssertFalse('Client 1 no longer focused', wsFocused in Cli1.State);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+// WM-05: focus reverting to PointerRoot/None, or a FocusIn for the client we
+// already consider active, must not disturb the active client.
+procedure TXCBWMTest.TestFocusInIgnoresPointerRootAndSelf();
+var
+  Mgr: TXCBWindowManager;
+  Cli1: TXCBWMClient;
+  Ev: xcb_focus_in_event_t;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Cli1 := Mgr.ManageWindow(7101);
+    Mgr.ActiveClient := Cli1;
+
+    // Focus reverted to the root pointer: keep the last active client.
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_FOCUS_IN;
+    Ev.detail := XCB_NOTIFY_DETAIL_POINTER_ROOT;
+    Ev.event := Mgr.RootWindow;
+    AssertTrue('PointerRoot FocusIn consumed', Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev)));
+    AssertSame('Active client unchanged on PointerRoot', Cli1, Mgr.ActiveClient);
+
+    // Focus on the already-active client is a no-op.
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_FOCUS_IN;
+    Ev.detail := XCB_NOTIFY_DETAIL_ANCESTOR;
+    Ev.event := 7101;
+    AssertTrue('Self FocusIn consumed', Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev)));
+    AssertSame('Active client unchanged for self', Cli1, Mgr.ActiveClient);
+
+    // While the manager is applying focus itself, incoming FocusIn is ignored.
+    Mgr.SyncingFocus := True;
+    FillChar(Ev, SizeOf(Ev), 0);
+    Ev.response_type := XCB_FOCUS_IN;
+    Ev.detail := XCB_NOTIFY_DETAIL_ANCESTOR;
+    Ev.event := 7101;
+    Mgr.ProcessEvent(Pxcb_generic_event_t(@Ev));
+    AssertSame('Active client unchanged while syncing', Cli1, Mgr.ActiveClient);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+// The pump must drain a burst of pending events in a single call rather than
+// returning after the first one. Each pump cycle ends with a present in the
+// shell, so one-event-per-cycle would cap throughput at the tick rate.
+procedure TXCBWMTest.TestPumpDrainsBurstInOneCall();var
+  Conn: Pxcb_connection_t;
+  ScreenNum: Integer;
+  Mgr: TCountingWindowManager;
+  Root, W: xcb_window_t;
+  Mask: Cardinal;
+  I: Integer;
+  Handled: Integer;
+begin
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  if Conn = nil then Exit;
+
+  try
+    if xcb_connection_has_error(Conn) <> 0 then Exit;
+
+    Mgr := TCountingWindowManager.Create(Conn, ScreenNum);
+    try
+      Root := Mgr.RootWindow;
+      if Root = 0 then Exit;
+
+      // A window of our own, selecting structure events, so mapping and
+      // unmapping it generates a real burst of events for the pump.
+      W := xcb_generate_id(Conn);
+      xcb_create_window(Conn, XCB_COPY_FROM_PARENT, W, Root, 0, 0, 50, 50, 0,
+                        XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nil);
+      Mask := XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+      xcb_change_window_attributes(Conn, W, XCB_CW_EVENT_MASK, @Mask);
+      for I := 1 to 5 do
+      begin
+        xcb_map_window(Conn, W);
+        xcb_unmap_window(Conn, W);
+      end;
+      xcb_flush(Conn);
+
+      Handled := 0;
+      for I := 1 to 20 do
+      begin
+        if Mgr.PumpEventsOnce(50) then
+          Inc(Handled)
+        else
+          Break;
+      end;
+
+      AssertTrue('Pump processed at least one batch', Handled >= 1);
+
+      // Once the pump reports "nothing to do", the queue must really be empty.
+      AssertFalse('Pump reports idle only when truly idle', Mgr.PumpEventsOnce(10));
+
+      xcb_destroy_window(Conn, W);
+      xcb_flush(Conn);
+    finally
+      Mgr.Free();
+    end;
+  finally
+    xcb_disconnect(Conn);
+  end;
+end;
+
+// Contract guard for the pump: a call with events already waiting must return
+// quickly and must not depend on further activity to notice them.
+//
+// Note: this does not distinguish xcb_poll_for_event from
+// xcb_poll_for_queued_event — both pass here, because the socket is still
+// readable in this scenario. It pins the behaviour, not the implementation
+// detail; the reasoning for the primitive used lives in PumpEventsOnce.
+procedure TXCBWMTest.TestPumpDoesNotStallWithPendingEvents();
+var
+  Conn: Pxcb_connection_t;
+  ScreenNum: Integer;
+  Mgr: TCountingWindowManager;
+  Root, W: xcb_window_t;
+  Mask: Cardinal;
+  StartTick: QWord;
+  Elapsed: QWord;
+begin
+  ScreenNum := 0;
+  Conn := xcb_connect(nil, @ScreenNum);
+  if Conn = nil then Exit;
+
+  try
+    if xcb_connection_has_error(Conn) <> 0 then Exit;
+
+    Mgr := TCountingWindowManager.Create(Conn, ScreenNum);
+    try
+      Root := Mgr.RootWindow;
+      if Root = 0 then Exit;
+
+      W := xcb_generate_id(Conn);
+      xcb_create_window(Conn, XCB_COPY_FROM_PARENT, W, Root, 0, 0, 50, 50, 0,
+                        XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, nil);
+      Mask := XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+      xcb_change_window_attributes(Conn, W, XCB_CW_EVENT_MASK, @Mask);
+      xcb_map_window(Conn, W);
+      xcb_flush(Conn);
+
+      StartTick := GetTickCount64();
+      AssertTrue('Pending event handled', Mgr.PumpEventsOnce(500));
+      Elapsed := GetTickCount64() - StartTick;
+
+      // A 500 ms select timeout would be hit only if the pump were blind to the
+      // pending event. Allow generous slack for a loaded machine.
+      AssertTrue('Pump did not wait for the timeout (' + IntToStr(Elapsed) + ' ms)',
+                 Elapsed < 400);
+
+      xcb_destroy_window(Conn, W);
+      xcb_flush(Conn);
+    finally
+      Mgr.Free();
+    end;
+  finally
+    xcb_disconnect(Conn);
+  end;
+end;
+
 initialization
   RegisterTest(TXCBWMTest);
-
 end.

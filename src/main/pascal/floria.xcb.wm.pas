@@ -20,7 +20,8 @@ uses
   Floria.XCB.Cursor,
   Floria.XCB.EWMH,
   Floria.XCB.ICCCM,
-  Floria.XCB.RandR;
+  Floria.XCB.RandR,
+  Floria.X11.KeySym;
 
 const
   XCB_ALL_DESKTOPS = Cardinal($FFFFFFFF);
@@ -238,6 +239,9 @@ type
   // value (255 when no reply was received). Lets the shell log or fall back.
   TXCBDragGrabFailureEvent = procedure(const AStatus: Byte) of object;
 
+  // The binding does not declare a pointer type for focus events.
+  Pxcb_focus_in_event_t = ^xcb_focus_in_event_t;
+
   // Frame painting delegate
   TXCBFramePaintEvent = procedure(ASender: TObject; AClient: TXCBWMClient; const ARect: TXCBRect) of object;
 
@@ -400,6 +404,28 @@ type
     FWakeupPipe        : array[0..1] of cint;
     FWakeupPipeValid   : Boolean;
     FTickIntervalMs    : Integer;
+
+    // Key bindings, resolved from keysyms and the server's modifier map rather
+    // than assumed from evdev/US keycodes. Populated by ResolveKeyBindings.
+    FKeycodeTab        : xcb_keycode_t;
+    FKeycodeSpace      : xcb_keycode_t;
+    FKeycodeLeft       : xcb_keycode_t;
+    FKeycodeRight      : xcb_keycode_t;
+    FKeycodeUp         : xcb_keycode_t;
+    FKeycodeDown       : xcb_keycode_t;
+    FKeycodeEscape     : xcb_keycode_t;
+    FKeycodeReturn     : xcb_keycode_t;
+    FKeycodeAltL       : xcb_keycode_t;
+    FKeycodeAltR       : xcb_keycode_t;
+    FModAlt            : Word;
+    FModSuper          : Word;
+    FModNumLock        : Word;
+    FModCapsLock       : Word;
+    FKeyBindingsValid  : Boolean;
+    FSyncingFocus      : Boolean;
+    // Most-recently-used order. Front = current active client. This is what makes
+    // Alt+Tab mean "the previous window" rather than "the next in creation order".
+    FMruClients        : TFPList;
     FWorkarea          : TXCBRect;
     FMonitors          : TObjectList;
     FPrimaryMonitor    : TXCBMonitor;
@@ -463,8 +489,7 @@ type
     constructor Create(AConn: Pxcb_connection_t = nil; const AScreenNum: Integer = 0);
     destructor Destroy(); override;
 
-    function ClaimOwnership(): Boolean; virtual;
-    procedure InitEWMH();
+    function ClaimOwnership(): Boolean; virtual;    procedure InitEWMH();
     procedure UpdateAllowedActions(const AClient: TXCBWMClient);
     procedure ScanWindows();
     function ManageWindow(const AWindow: xcb_window_t): TXCBWMClient;
@@ -491,9 +516,44 @@ type
     property ShutdownRequested : Boolean read FShutdownRequested;
     property TickIntervalMs    : Integer read FTickIntervalMs write FTickIntervalMs;
 
+    // Keyboard binding resolution (WM-06). Keysyms are mapped to the current
+    // keycodes and modifier masks on demand, so a layout change does not silently
+    // break every grab.
+    procedure ResolveKeyBindings();
+    function KeysymToKeycode(const AKeysym: Cardinal): xcb_keycode_t;
+    function KeycodeToModifierMask(const AKeycode: xcb_keycode_t): Word;
+    // Override to re-issue passive grabs after a layout change.
+    procedure RebindGlobalKeys(); virtual;
+    property KeycodeTab        : xcb_keycode_t read FKeycodeTab;
+    property KeycodeSpace      : xcb_keycode_t read FKeycodeSpace;
+    property KeycodeLeft       : xcb_keycode_t read FKeycodeLeft;
+    property KeycodeRight      : xcb_keycode_t read FKeycodeRight;
+    property KeycodeUp         : xcb_keycode_t read FKeycodeUp;
+    property KeycodeDown       : xcb_keycode_t read FKeycodeDown;
+    property KeycodeEscape     : xcb_keycode_t read FKeycodeEscape;
+    property KeycodeReturn     : xcb_keycode_t read FKeycodeReturn;
+    property KeycodeAltL       : xcb_keycode_t read FKeycodeAltL;
+    property KeycodeAltR       : xcb_keycode_t read FKeycodeAltR;
+    property ModAlt            : Word          read FModAlt;
+    property ModSuper          : Word          read FModSuper;
+    property ModNumLock        : Word          read FModNumLock;
+    property ModCapsLock       : Word          read FModCapsLock;
+    property KeyBindingsValid  : Boolean       read FKeyBindingsValid;
+
     procedure SwitchDesktop(const ANewDesktop: Integer);
     procedure SetDesktopCount(const ACount: Integer);
     procedure SetActiveClient(const AClient: TXCBWMClient);
+    // Adopt focus that arrived from somewhere other than the manager (a client
+    // calling XSetInputFocus, or focus reverting). Updates the active client and
+    // state without re-raising or re-asserting focus, which would fight the server.
+    procedure SyncActiveClientFromFocus(const AClient: TXCBWMClient); virtual;
+    property SyncingFocus : Boolean read FSyncingFocus write FSyncingFocus;
+
+    // MRU bookkeeping. TouchMru moves a client to the front; RemoveFromMru drops
+    // it. Both are no-ops for nil or for clients that were never activated.
+    procedure TouchMru(const AClient: TXCBWMClient);
+    procedure RemoveFromMru(const AClient: TXCBWMClient);
+    property MruClients : TFPList read FMruClients;
     procedure RecomputeWorkareas();
     procedure RecomputeWorkarea();
 
@@ -1684,6 +1744,23 @@ begin
   FWakeupPipe[1] := -1;
   FWakeupPipeValid := False;
   FTickIntervalMs := 16;
+  FKeycodeTab := 0;
+  FKeycodeSpace := 0;
+  FKeycodeLeft := 0;
+  FKeycodeRight := 0;
+  FKeycodeUp := 0;
+  FKeycodeDown := 0;
+  FKeycodeEscape := 0;
+  FKeycodeReturn := 0;
+  FKeycodeAltL := 0;
+  FKeycodeAltR := 0;
+  FModAlt := 0;
+  FModSuper := 0;
+  FModNumLock := 0;
+  FModCapsLock := 0;
+  FKeyBindingsValid := False;
+  FSyncingFocus := False;
+  FMruClients := TFPList.Create();
   FWorkarea := TXCBRect.Create(0, 0, 1920, 1080);
   FAtomWMDeleteWindow := 0;
   FAtomWMTakeFocus := 0;
@@ -1747,6 +1824,10 @@ begin
     InitCursors();
   end;
 
+  // Populate the binding table immediately so an offline manager (unit tests)
+  // has a usable, documented default; a live one re-resolves in ClaimOwnership.
+  ResolveKeyBindings();
+
   RefreshMonitors();
 end;
 
@@ -1790,6 +1871,7 @@ begin
     xcb_cursor_context_free(FCursorCtx);
     FCursorCtx := nil;
   end;
+  FMruClients.Free();
   FClients.Free();
   FDesktopNames.Free();
   FMonitors.Free();
@@ -1862,6 +1944,184 @@ begin
   xcb_flush(FConn);
 end;
 
+// Resolve a keysym to a keycode using the server's current keyboard mapping.
+// Xlib's XKeysymToKeycode scans every keysym column, not just the first, because
+// a keysym may only be reachable through a shift level. Returns 0 when unmapped.
+function TXCBWindowManager.KeysymToKeycode(const AKeysym: Cardinal): xcb_keycode_t;
+var
+  Cookie: xcb_get_keyboard_mapping_cookie_t;
+  Reply: Pxcb_get_keyboard_mapping_reply_t;
+  Syms: Pxcb_keysym_t;
+  Setup: Pxcb_setup_t;
+  MinKc, MaxKc, Kc: Integer;
+  PerKeycode, Col, Idx: Integer;
+begin
+  Result := 0;
+  if (FConn = nil) or (AKeysym = 0) then Exit;
+
+  Setup := xcb_get_setup(FConn);
+  if Setup = nil then Exit;
+
+  MinKc := Setup^.min_keycode;
+  MaxKc := Setup^.max_keycode;
+  if (MaxKc < MinKc) then Exit;
+
+  Cookie := xcb_get_keyboard_mapping(FConn, MinKc, Byte(MaxKc - MinKc + 1));
+  Reply := xcb_get_keyboard_mapping_reply(FConn, Cookie, nil);
+  if Reply = nil then Exit;
+
+  try
+    PerKeycode := Reply^.keysyms_per_keycode;
+    if PerKeycode <= 0 then Exit;
+
+    Syms := xcb_get_keyboard_mapping_keysyms(Reply);
+    if Syms = nil then Exit;
+
+    for Kc := MinKc to MaxKc do
+    begin
+      for Col := 0 to PerKeycode - 1 do
+      begin
+        Idx := (Kc - MinKc) * PerKeycode + Col;
+        if Pxcb_keysym_t(PByte(Syms) + Idx * SizeOf(xcb_keysym_t))^ = AKeysym then
+        begin
+          Result := xcb_keycode_t(Kc);
+          Exit;
+        end;
+      end;
+    end;
+  finally
+    xcb_free(Reply);
+  end;
+end;
+
+// Which modifier bit (Mod1..Mod5 / Shift / Lock / Control) carries this keycode.
+// Returns 0 when the keycode is not part of any modifier set.
+function TXCBWindowManager.KeycodeToModifierMask(const AKeycode: xcb_keycode_t): Word;
+var
+  Cookie: xcb_get_modifier_mapping_cookie_t;
+  Reply: Pxcb_get_modifier_mapping_reply_t;
+  Keycodes: Pxcb_keycode_t;
+  PerModifier: Integer;
+  ModIdx, Slot: Integer;
+begin
+  Result := 0;
+  if (FConn = nil) or (AKeycode = 0) then Exit;
+
+  Cookie := xcb_get_modifier_mapping(FConn);
+  Reply := xcb_get_modifier_mapping_reply(FConn, Cookie, nil);
+  if Reply = nil then Exit;
+
+  try
+    PerModifier := Reply^.keycodes_per_modifier;
+    if PerModifier <= 0 then Exit;
+
+    Keycodes := xcb_get_modifier_mapping_keycodes(Reply);
+    if Keycodes = nil then Exit;
+
+    // 8 modifier rows: Shift, Lock, Control, Mod1..Mod5
+    for ModIdx := 0 to 7 do
+    begin
+      for Slot := 0 to PerModifier - 1 do
+      begin
+        if PByte(Keycodes)[ModIdx * PerModifier + Slot] = AKeycode then
+        begin
+          Result := Word(1) shl ModIdx;
+          Exit;
+        end;
+      end;
+    end;
+  finally
+    xcb_free(Reply);
+  end;
+end;
+
+// Rebuild the binding table from the server. Safe to call repeatedly; used both
+// at startup and after XCB_MAPPING_NOTIFY.
+procedure TXCBWindowManager.ResolveKeyBindings();
+var
+  AltKc, SuperKc, NumKc, CapsKc: xcb_keycode_t;
+begin
+  FKeycodeTab := 0;
+  FKeycodeSpace := 0;
+  FKeycodeLeft := 0;
+  FKeycodeRight := 0;
+  FKeycodeUp := 0;
+  FKeycodeDown := 0;
+  FKeycodeEscape := 0;
+  FKeycodeReturn := 0;
+  FKeycodeAltL := 0;
+  FKeycodeAltR := 0;
+  FModAlt := 0;
+  FModSuper := 0;
+  FModNumLock := 0;
+  FModCapsLock := 0;
+  FKeyBindingsValid := False;
+
+  if FConn = nil then
+  begin
+    // No server to query (headless unit tests, or before xcb_connect). Fall back
+    // to the standard evdev/US table so the binding state machine is testable.
+    // This is the only place these constants are allowed to appear: on a live
+    // connection everything below is resolved from the server.
+    FKeycodeTab := 23;      // XK_Tab
+    FKeycodeSpace := 65;    // XK_space
+    FKeycodeLeft := 113;
+    FKeycodeRight := 114;
+    FKeycodeUp := 111;
+    FKeycodeDown := 116;
+    FKeycodeEscape := 9;
+    FKeycodeReturn := 36;
+    FKeycodeAltL := 64;
+    FKeycodeAltR := 108;
+    FModAlt := XCB_MOD_MASK_1;
+    FModSuper := XCB_MOD_MASK_4;
+    FModNumLock := XCB_MOD_MASK_2;
+    FModCapsLock := XCB_MOD_MASK_LOCK;
+    FKeyBindingsValid := True;
+    Exit;
+  end;
+
+  FKeycodeTab := KeysymToKeycode(XK_Tab);
+  FKeycodeSpace := KeysymToKeycode(XK_space);
+  FKeycodeLeft := KeysymToKeycode(XK_Left);
+  FKeycodeRight := KeysymToKeycode(XK_Right);
+  FKeycodeUp := KeysymToKeycode(XK_Up);
+  FKeycodeDown := KeysymToKeycode(XK_Down);
+  FKeycodeEscape := KeysymToKeycode(XK_Escape);
+  FKeycodeReturn := KeysymToKeycode(XK_Return);
+  FKeycodeAltL := KeysymToKeycode(XK_Alt_L);
+  FKeycodeAltR := KeysymToKeycode(XK_Alt_R);
+
+  // Alt is conventionally Mod1 and Super Mod4, but neither is guaranteed: a user
+  // can remap them, and on some layouts Alt lives on Mod5. Ask the server.
+  AltKc := KeysymToKeycode(XK_Alt_L);
+  if AltKc = 0 then AltKc := KeysymToKeycode(XK_Alt_R);
+  FModAlt := KeycodeToModifierMask(AltKc);
+
+  SuperKc := KeysymToKeycode(XK_Super_L);
+  if SuperKc = 0 then SuperKc := KeysymToKeycode(XK_Super_R);
+  FModSuper := KeycodeToModifierMask(SuperKc);
+
+  NumKc := KeysymToKeycode(XK_Num_Lock);
+  FModNumLock := KeycodeToModifierMask(NumKc);
+
+  CapsKc := KeysymToKeycode(XK_Caps_Lock);
+  FModCapsLock := KeycodeToModifierMask(CapsKc);
+
+  // Fall back to the historical constants when the map cannot be read (for
+  // example a server that reports no Alt_L keysym at all).
+  if FModAlt = 0 then FModAlt := XCB_MOD_MASK_1;
+  if FModSuper = 0 then FModSuper := XCB_MOD_MASK_4;
+  if FModNumLock = 0 then FModNumLock := XCB_MOD_MASK_2;
+
+  FKeyBindingsValid := (FKeycodeTab <> 0);
+end;
+
+procedure TXCBWindowManager.RebindGlobalKeys();
+begin
+  // Default: nothing to re-grab. Shells override.
+end;
+
 function TXCBWindowManager.ClaimOwnership(): Boolean;
 var
   Values: array[0..0] of Cardinal;
@@ -1877,7 +2137,11 @@ begin
                XCB_EVENT_MASK_STRUCTURE_NOTIFY or
                XCB_EVENT_MASK_PROPERTY_CHANGE or
                XCB_EVENT_MASK_BUTTON_PRESS or
-               XCB_EVENT_MASK_POINTER_MOTION;
+               XCB_EVENT_MASK_BUTTON_RELEASE or
+               XCB_EVENT_MASK_POINTER_MOTION or
+               XCB_EVENT_MASK_ENTER_WINDOW or
+               XCB_EVENT_MASK_LEAVE_WINDOW or
+               XCB_EVENT_MASK_FOCUS_CHANGE;
 
   Cookie := xcb_change_window_attributes_checked(
     FConn,
@@ -1899,6 +2163,11 @@ begin
     SetWindowCursor(FRootWindow, FCursorNormal);
     FCurrentRootCursor := FCursorNormal;
   end;
+
+  // Resolve keycodes and modifier masks from the live server. Doing this here
+  // rather than at construction means a layout already in effect is honoured,
+  // and a later XCB_MAPPING_NOTIFY re-runs it.
+  ResolveKeyBindings();
 
   // RandR extension initialization
   extReply := xcb_get_extension_data(FConn, @xcb_randr_id);
@@ -3744,26 +4013,34 @@ begin
 
     if (FConn <> nil) and not (Cli.WindowType in [wtDesktop, wtDock]) then
     begin
-      EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE;
+      // FOCUS_CHANGE on the client window is what lets the manager notice an
+      // application calling XSetInputFocus itself, or focus reverting, instead of
+      // trusting its own bookkeeping. Each connection has its own event mask, so
+      // this does not interfere with the client's own selection.
+      EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE or
+                   XCB_EVENT_MASK_FOCUS_CHANGE;
       xcb_change_window_attributes(FConn, Cli.ClientWindow, XCB_CW_EVENT_MASK, @EventMask);
 
-      // Passive grab on Alt + Button1 (move) and Alt + Button3 (resize)
+      // Passive grabs on <Alt> + Button1 (move) and <Alt> + Button3 (resize).
+      // The modifier comes from the resolved map, not the hardcoded Mod1, and the
+      // NumLock variant is included so a locked keypad does not defeat the grab.
       xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
                       XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
-                      XCB_BUTTON_INDEX_1, XCB_MOD_MASK_1);
+                      XCB_BUTTON_INDEX_1, FModAlt);
       xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
                       XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
-                      XCB_BUTTON_INDEX_1, XCB_MOD_MASK_1 or XCB_MOD_MASK_2);
+                      XCB_BUTTON_INDEX_1, FModAlt or FModNumLock);
       xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
                       XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
-                      XCB_BUTTON_INDEX_3, XCB_MOD_MASK_1);
+                      XCB_BUTTON_INDEX_3, FModAlt);
       xcb_grab_button(FConn, 0, Cli.ClientWindow, XCB_EVENT_MASK_BUTTON_PRESS,
                       XCB_GRAB_MODE_SYNC, XCB_GRAB_MODE_ASYNC, XCB_NONE, XCB_NONE,
-                      XCB_BUTTON_INDEX_3, XCB_MOD_MASK_1 or XCB_MOD_MASK_2);
+                      XCB_BUTTON_INDEX_3, FModAlt or FModNumLock);
     end
     else if FConn <> nil then
     begin
-      EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE;
+      EventMask := XCB_EVENT_MASK_STRUCTURE_NOTIFY or XCB_EVENT_MASK_PROPERTY_CHANGE or
+                   XCB_EVENT_MASK_FOCUS_CHANGE;
       xcb_change_window_attributes(FConn, Cli.ClientWindow, XCB_CW_EVENT_MASK, @EventMask);
     end;
 
@@ -3836,6 +4113,7 @@ begin
     EndDrag();
 
   DoOnClientUnmapped(AClient);
+  RemoveFromMru(AClient);
 
   if AClient.IsReparented and (FConn <> nil) then
     UnparentClient(AClient);
@@ -3970,6 +4248,7 @@ var
   ExposeEv: Pxcb_expose_event_t;
   MsgEv: Pxcb_client_message_event_t;
   PropEv: Pxcb_property_notify_event_t;
+  FocusEv: Pxcb_focus_in_event_t;
   MsgData32: PCardinalArray;
   Cli: TXCBWMClient;
   FrameRect: TXCBRect;
@@ -3987,7 +4266,6 @@ begin
   if AEvent = nil then Exit;
 
   EvType := AEvent^.response_type and $7F;
-
   if FRandRAvailable and (FRandREventBase > 0) then
   begin
     if (EvType = FRandREventBase + XCB_RANDR_SCREEN_CHANGE_NOTIFY) or
@@ -4186,6 +4464,45 @@ begin
       MotionEv := Pxcb_motion_notify_event_t(AEvent);
       if FDragMode <> dmNone then
         UpdateDrag(MotionEv^.root_x, MotionEv^.root_y);
+      Result := True;
+    end;
+
+    XCB_MAPPING_NOTIFY:
+    begin
+      // The keyboard mapping changed (layout switch, remap, xmodmap). Passive
+      // grabs on keycodes that no longer exist stop firing, so every binding must
+      // be re-resolved and re-grabbed. MappingNotify is delivered to all clients
+      // regardless of event mask.
+      ResolveKeyBindings();
+      RebindGlobalKeys();
+      Result := True;
+    end;
+
+    XCB_FOCUS_IN:
+    begin
+      FocusEv := Pxcb_focus_in_event_t(AEvent);
+      // Ignore the focus changes we caused ourselves.
+      if not FSyncingFocus then
+      begin
+        // PointerRoot / None mean no client holds focus; keep the last active
+        // client for the UI rather than blanking it.
+        if (FocusEv^.detail <> XCB_NOTIFY_DETAIL_POINTER_ROOT) and
+           (FocusEv^.detail <> XCB_NOTIFY_DETAIL_NONE) then
+        begin
+          Cli := FindClientByClientWindow(FocusEv^.event);
+          if Cli = nil then
+            Cli := FindClient(FocusEv^.event);
+          if Cli <> nil then
+            SyncActiveClientFromFocus(Cli);
+        end;
+      end;
+      Result := True;
+    end;
+
+    XCB_FOCUS_OUT:
+    begin
+      // Focus leaving is not itself meaningful: the FocusIn that follows tells us
+      // where it went. Just consume it so the default handler does not react.
       Result := True;
     end;
 
@@ -4547,11 +4864,22 @@ begin
   Result := False;
   if FConn = nil then Exit;
 
-  // 1. Events already sitting in xcb's internal queue. Checking this before
-  //    select() is essential: xcb may hold events while the socket is drained,
-  //    and select() would then block despite work being pending.
+  // 1. Events already sitting in xcb's internal queue.
+  //
+  //    xcb_poll_for_event is used deliberately in preference to
+  //    xcb_poll_for_queued_event. The "queued" variant never reads the socket: if
+  //    xcb has bytes buffered but not yet parsed into events (which can happen
+  //    after a request/reply round-trip), the socket is empty, select() below
+  //    stays quiet, and poll_for_queued_event reports nothing — the pump would
+  //    sleep with events pending. xcb_poll_for_event does a zero-timeout poll on
+  //    the fd, so it is still non-blocking and leaves the socket genuinely empty
+  //    when it returns nil.
+  //
+  //    This is a robustness choice, not a fix for an observed stall: an earlier
+  //    report of the pump missing events turned out to be stderr buffering in the
+  //    diagnostic output, not a stalled queue. See docs/roadmap.md WM-04.
   repeat
-    Event := xcb_poll_for_queued_event(FConn);
+    Event := xcb_poll_for_event(FConn);
     if Event = nil then Break;
     try
       ProcessEvent(Event);
@@ -4720,8 +5048,42 @@ begin
     RefreshEWMHDesktop();
 end;
 
-procedure TXCBWindowManager.SetActiveClient(const AClient: TXCBWMClient);
+// Focus arrived from the server rather than from us. Keep the manager's notion of
+// the active client in step, but do not raise or re-assert focus: doing so would
+// either fight the client that just took focus or loop through FocusIn.
+procedure TXCBWindowManager.SyncActiveClientFromFocus(const AClient: TXCBWMClient);
+var
+  OldCli: TXCBWMClient;
 begin
+  if AClient = nil then Exit;
+  if AClient = FActiveClient then Exit;
+
+  // Only manage real, visible clients.
+  if not AClient.IsReparented and (AClient.WindowType <> wtDesktop) then Exit;
+  if wsMinimized in AClient.State then Exit;
+
+  FSyncingFocus := True;
+  try
+    OldCli := FActiveClient;
+    if OldCli <> nil then
+      Exclude(OldCli.FState, wsFocused);
+
+    FActiveClient := AClient;
+    Include(AClient.FState, wsFocused);
+
+    if FConn <> nil then
+    begin
+      RefreshEWMHActiveWindow();
+      xcb_flush(FConn);
+    end;
+
+    DoOnClientActivated(AClient);
+  finally
+    FSyncingFocus := False;
+  end;
+end;
+
+procedure TXCBWindowManager.SetActiveClient(const AClient: TXCBWMClient);begin
   if FActiveClient = AClient then Exit;
   if AClient <> nil then
     AClient.Activate()
@@ -4959,9 +5321,33 @@ begin
   // Subclasses override
 end;
 
+// Move a client to the front of the MRU order. Called whenever a client becomes
+// active, so MRU[0] is always the current window and MRU[1] the previous one.
+procedure TXCBWindowManager.TouchMru(const AClient: TXCBWMClient);
+var
+  Idx: Integer;
+begin
+  if AClient = nil then Exit;
+  Idx := FMruClients.IndexOf(AClient);
+  if Idx >= 0 then
+    FMruClients.Delete(Idx);
+  FMruClients.Insert(0, AClient);
+end;
+
+procedure TXCBWindowManager.RemoveFromMru(const AClient: TXCBWMClient);
+var
+  Idx: Integer;
+begin
+  if AClient = nil then Exit;
+  Idx := FMruClients.IndexOf(AClient);
+  if Idx >= 0 then
+    FMruClients.Delete(Idx);
+end;
+
 procedure TXCBWindowManager.DoOnClientActivated(const AClient: TXCBWMClient);
 begin
-  // Subclasses override
+  // Keep MRU order current; subclasses override for their own bookkeeping.
+  TouchMru(AClient);
 end;
 
 procedure TXCBWindowManager.DoOnClientConfigure(const AClient: TXCBWMClient);
