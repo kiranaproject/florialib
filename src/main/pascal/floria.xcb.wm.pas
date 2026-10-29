@@ -420,6 +420,7 @@ type
     FKeycodeEscape     : xcb_keycode_t;
     FKeycodeReturn     : xcb_keycode_t;
     FKeycodeAltL       : xcb_keycode_t;
+    FKeycodeD          : xcb_keycode_t;
     FKeycodeAltR       : xcb_keycode_t;
     FModAlt            : Word;
     FModSuper          : Word;
@@ -537,6 +538,7 @@ type
     property KeycodeEscape     : xcb_keycode_t read FKeycodeEscape;
     property KeycodeReturn     : xcb_keycode_t read FKeycodeReturn;
     property KeycodeAltL       : xcb_keycode_t read FKeycodeAltL;
+    property KeycodeD          : xcb_keycode_t read FKeycodeD;
     property KeycodeAltR       : xcb_keycode_t read FKeycodeAltR;
     property ModAlt            : Word          read FModAlt;
     property ModSuper          : Word          read FModSuper;
@@ -1758,6 +1760,7 @@ begin
   FKeycodeReturn := 0;
   FKeycodeAltL := 0;
   FKeycodeAltR := 0;
+  FKeycodeD := 0;
   FModAlt := 0;
   FModSuper := 0;
   FModNumLock := 0;
@@ -2077,6 +2080,7 @@ begin
     FKeycodeReturn := 36;
     FKeycodeAltL := 64;
     FKeycodeAltR := 108;
+    FKeycodeD := 40;
     FModAlt := XCB_MOD_MASK_1;
     FModSuper := XCB_MOD_MASK_4;
     FModNumLock := XCB_MOD_MASK_2;
@@ -2095,6 +2099,7 @@ begin
   FKeycodeReturn := KeysymToKeycode(XK_Return);
   FKeycodeAltL := KeysymToKeycode(XK_Alt_L);
   FKeycodeAltR := KeysymToKeycode(XK_Alt_R);
+  FKeycodeD := KeysymToKeycode(XK_d_);
 
   // Alt is conventionally Mod1 and Super Mod4, but neither is guaranteed: a user
   // can remap them, and on some layouts Alt lives on Mod5. Ask the server.
