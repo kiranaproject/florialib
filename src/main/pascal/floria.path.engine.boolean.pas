@@ -315,6 +315,194 @@ end;
 
 
 // ---------------------------------------------------------------------------
+// Y-bucketed edge index
+// ---------------------------------------------------------------------------
+
+// Classifying a candidate segment needs the winding number of a probe point,
+// which the naive implementation answered by scanning every vertex of the
+// operand. That made classification O(split segments * vertices) and dominated
+// the cost of large booleans.
+//
+// A ray-cast crossing test only ever looks at edges whose Y range spans the
+// query point, so bucketing edges by Y turns each query into a scan of the few
+// edges near that height. For typical path data that is one or two edges
+// instead of thousands.
+//
+// An edge is registered in every bucket its Y range touches, so a bucket
+// lookup cannot miss an edge that actually spans the query height.
+type
+  TYEdgeIndex = record
+    YLo, YHi: Double;
+    BucketHeight: Double;
+    Buckets: array of array of Integer;
+    EdgeA: array of TGridPt;
+    EdgeB: array of TGridPt;
+  end;
+
+procedure BuildYIndex(out AIndex: TYEdgeIndex; const APaths: TGridPaths);
+var
+  I, J, N, Prev, EdgeCount, BucketCount, B0, B1, B: Integer;
+  YMin, YMax, H: Double;
+  Ax, Ay, Bx, By: Int64;
+begin
+  EdgeCount := 0;
+  YMin := 0;
+  YMax := 0;
+  for I := 0 to High(APaths) do
+  begin
+    N := Length(APaths[I]);
+    if N < 3 then
+      Continue;
+    for J := 0 to N - 1 do
+    begin
+      Ax := APaths[I][J].X;
+      Ay := APaths[I][J].Y;
+      if EdgeCount = 0 then
+      begin
+        YMin := Ay;
+        YMax := Ay;
+      end
+      else
+      begin
+        if Ay < YMin then YMin := Ay;
+        if Ay > YMax then YMax := Ay;
+      end;
+      Inc(EdgeCount);
+    end;
+  end;
+
+  SetLength(AIndex.EdgeA, EdgeCount);
+  SetLength(AIndex.EdgeB, EdgeCount);
+
+  EdgeCount := 0;
+  for I := 0 to High(APaths) do
+  begin
+    N := Length(APaths[I]);
+    if N < 3 then
+      Continue;
+    Prev := N - 1;
+    for J := 0 to N - 1 do
+    begin
+      AIndex.EdgeA[EdgeCount] := APaths[I][Prev];
+      AIndex.EdgeB[EdgeCount] := APaths[I][J];
+      if APaths[I][J].Y < YMin then YMin := APaths[I][J].Y;
+      if APaths[I][J].Y > YMax then YMax := APaths[I][J].Y;
+      Inc(EdgeCount);
+      Prev := J;
+    end;
+  end;
+
+  AIndex.YLo := YMin;
+  AIndex.YHi := YMax;
+
+  if EdgeCount = 0 then
+  begin
+    AIndex.BucketHeight := 1;
+    SetLength(AIndex.Buckets, 0);
+    Exit;
+  end;
+
+  // Roughly one edge per two buckets keeps occupancy low without wasting
+  // memory on very small inputs.
+  BucketCount := EdgeCount div 2;
+  if BucketCount < 16 then
+    BucketCount := 16;
+  if BucketCount > 8192 then
+    BucketCount := 8192;
+
+  H := (YMax - YMin) / BucketCount;
+  if H <= 0 then
+    H := 1;
+  AIndex.BucketHeight := H;
+  SetLength(AIndex.Buckets, BucketCount);
+
+  for B := 0 to EdgeCount - 1 do
+  begin
+    if AIndex.EdgeA[B].Y < AIndex.EdgeB[B].Y then
+    begin
+      Ay := AIndex.EdgeA[B].Y;
+      By := AIndex.EdgeB[B].Y;
+    end
+    else
+    begin
+      Ay := AIndex.EdgeB[B].Y;
+      By := AIndex.EdgeA[B].Y;
+    end;
+
+    B0 := Trunc((Ay - YMin) / H);
+    B1 := Trunc((By - YMin) / H);
+    if B0 < 0 then B0 := 0;
+    if B1 < 0 then B1 := 0;
+    if B0 > BucketCount - 1 then B0 := BucketCount - 1;
+    if B1 > BucketCount - 1 then B1 := BucketCount - 1;
+
+    for J := B0 to B1 do
+    begin
+      SetLength(AIndex.Buckets[J], Length(AIndex.Buckets[J]) + 1);
+      AIndex.Buckets[J][High(AIndex.Buckets[J])] := B;
+    end;
+  end;
+end;
+
+// Winding number and ray-crossing count at (APtX, APtY), consulting only the
+// edges that can span that height.
+procedure WindingIndexed(const AIndex: TYEdgeIndex;
+  const APtX, APtY: Double; out AWinding, ACrossings: Integer);
+var
+  K, B, BucketCount, Count: Integer;
+  A, E: TGridPt;
+  XIntersect, Side: Double;
+begin
+  AWinding := 0;
+  ACrossings := 0;
+
+  BucketCount := Length(AIndex.Buckets);
+  if BucketCount = 0 then
+    Exit;
+
+  B := Trunc((APtY - AIndex.YLo) / AIndex.BucketHeight);
+  if B < 0 then B := 0;
+  if B > BucketCount - 1 then B := BucketCount - 1;
+
+  Count := Length(AIndex.Buckets[B]);
+  for K := 0 to Count - 1 do
+  begin
+    A := AIndex.EdgeA[AIndex.Buckets[B][K]];
+    E := AIndex.EdgeB[AIndex.Buckets[B][K]];
+
+    if ((A.Y <= APtY) and (E.Y > APtY)) or
+       ((E.Y <= APtY) and (A.Y > APtY)) then
+    begin
+      XIntersect := A.X + (APtY - A.Y) * (E.X - A.X) / (E.Y - A.Y);
+      if XIntersect > APtX then
+        Inc(ACrossings);
+    end;
+
+    Side := (E.X - A.X) * (APtY - A.Y) - (APtX - A.X) * (E.Y - A.Y);
+
+    if A.Y <= APtY then
+    begin
+      if (E.Y > APtY) and (Side > 0) then
+        Inc(AWinding);
+    end
+    else
+    begin
+      if (E.Y <= APtY) and (Side < 0) then
+        Dec(AWinding);
+    end;
+  end;
+end;
+
+function IsInsideIndexed(const AIndex: TYEdgeIndex;
+  const APtX, APtY: Double; ARule: TFillRule): Boolean;
+var
+  W, C: Integer;
+begin
+  WindingIndexed(AIndex, APtX, APtY, W, C);
+  Result := InsideByRule(W, C, ARule);
+end;
+
+// ---------------------------------------------------------------------------
 // Intersections
 // ---------------------------------------------------------------------------
 
@@ -360,6 +548,13 @@ begin
 
     R := AAll[I].A;
     S := AAll[I].B;
+
+    // Quick reject: disjoint bounding boxes cannot intersect, and this test is
+    // four integer comparisons against a division, a multiply and two divides
+    // below. On path data the great majority of pairs are rejected here.
+    if (Max(P.X, Q.X) < Min(R.X, S.X)) or (Min(P.X, Q.X) > Max(R.X, S.X)) or
+       (Max(P.Y, Q.Y) < Min(R.Y, S.Y)) or (Min(P.Y, Q.Y) > Max(R.Y, S.Y)) then
+      Continue;
 
     Denom := (Q.X - P.X) * (S.Y - R.Y) - (Q.Y - P.Y) * (S.X - R.X);
     if Abs(Denom) < 1e-12 then
@@ -468,6 +663,143 @@ begin
             (A.B.X = B.B.X) and (A.B.Y = B.B.Y);
 end;
 
+// Sorts segments by (A, B) and drops adjacent duplicates.
+//
+// Deduplicating as a post-pass rather than by scanning what has been kept so
+// far matters: the previous version compared every candidate against every
+// already-kept segment, which is another O(n^2) over the edge count and showed
+// up clearly once classification was made cheap.
+procedure SortAndDedupeSegments(var ASegs: TSegmentArray; var ACount: Integer);
+var
+  Tmp: TSegment;
+  OutCount, I: Integer;
+
+  function Before(const L, R: TSegment): Boolean;
+  begin
+    if L.A.X <> R.A.X then Exit(L.A.X < R.A.X);
+    if L.A.Y <> R.A.Y then Exit(L.A.Y < R.A.Y);
+    if L.B.X <> R.B.X then Exit(L.B.X < R.B.X);
+    Result := L.B.Y < R.B.Y;
+  end;
+
+  procedure Sort(ALo, AHi: Integer);
+  var
+    I2, J2: Integer;
+    Pivot: TSegment;
+  begin
+    if ALo >= AHi then
+      Exit;
+    Pivot := ASegs[(ALo + AHi) div 2];
+    I2 := ALo;
+    J2 := AHi;
+    repeat
+      while Before(ASegs[I2], Pivot) do Inc(I2);
+      while Before(Pivot, ASegs[J2]) do Dec(J2);
+      if I2 <= J2 then
+      begin
+        Tmp := ASegs[I2];
+        ASegs[I2] := ASegs[J2];
+        ASegs[J2] := Tmp;
+        Inc(I2);
+        Dec(J2);
+      end;
+    until I2 > J2;
+    if ALo < J2 then Sort(ALo, J2);
+    if I2 < AHi then Sort(I2, AHi);
+  end;
+
+begin
+  if ACount = 0 then
+    Exit;
+
+  Sort(0, ACount - 1);
+
+  OutCount := 1;
+  for I := 1 to ACount - 1 do
+    if not SameSegment(ASegs[I], ASegs[OutCount - 1]) then
+    begin
+      ASegs[OutCount] := ASegs[I];
+      Inc(OutCount);
+    end;
+
+  ACount := OutCount;
+end;
+
+// Index sort of ASegs by start vertex, so the chaining walk can find the
+// segments that begin at a given point without scanning the whole array.
+//
+// Before this, every step of every walk scanned all segments to find a
+// successor, which made chaining O(n^2) on its own and dominated the cost of
+// large booleans.
+procedure SortSegmentOrder(var AOrder: array of Integer;
+  const ASegs: TSegmentArray; ALo, AHi: Integer);
+var
+  I, J, Pivot, Tmp: Integer;
+
+  function Less(ALeft, ARight: Integer): Boolean;
+  begin
+    if ASegs[AOrder[ALeft]].A.X <> ASegs[AOrder[ARight]].A.X then
+      Exit(ASegs[AOrder[ALeft]].A.X < ASegs[AOrder[ARight]].A.X);
+    if ASegs[AOrder[ALeft]].A.Y <> ASegs[AOrder[ARight]].A.Y then
+      Exit(ASegs[AOrder[ALeft]].A.Y < ASegs[AOrder[ARight]].A.Y);
+    Result := AOrder[ALeft] < AOrder[ARight];
+  end;
+
+begin
+  if ALo >= AHi then
+    Exit;
+
+  // Insertion sort is faster for the short runs quicksort bottoms out on.
+  if AHi - ALo < 12 then
+  begin
+    for I := ALo + 1 to AHi do
+    begin
+      Tmp := AOrder[I];
+      J := I - 1;
+      while (J >= ALo) and (ASegs[AOrder[J]].A.X > ASegs[Tmp].A.X) do
+      begin
+        AOrder[J + 1] := AOrder[J];
+        Dec(J);
+      end;
+      while (J >= ALo) and (ASegs[AOrder[J]].A.X = ASegs[Tmp].A.X) and
+            (ASegs[AOrder[J]].A.Y > ASegs[Tmp].A.Y) do
+      begin
+        AOrder[J + 1] := AOrder[J];
+        Dec(J);
+      end;
+      AOrder[J + 1] := Tmp;
+    end;
+    Exit;
+  end;
+
+  Pivot := AOrder[(ALo + AHi) div 2];
+  I := ALo;
+  J := AHi;
+  repeat
+    while (ASegs[AOrder[I]].A.X < ASegs[Pivot].A.X) or
+          ((ASegs[AOrder[I]].A.X = ASegs[Pivot].A.X) and
+           (ASegs[AOrder[I]].A.Y < ASegs[Pivot].A.Y)) do
+      Inc(I);
+    while (ASegs[AOrder[J]].A.X > ASegs[Pivot].A.X) or
+          ((ASegs[AOrder[J]].A.X = ASegs[Pivot].A.X) and
+           (ASegs[AOrder[J]].A.Y > ASegs[Pivot].A.Y)) do
+      Dec(J);
+    if I <= J then
+    begin
+      Tmp := AOrder[I];
+      AOrder[I] := AOrder[J];
+      AOrder[J] := Tmp;
+      Inc(I);
+      Dec(J);
+    end;
+  until I > J;
+
+  if ALo < J then
+    SortSegmentOrder(AOrder, ASegs, ALo, J);
+  if I < AHi then
+    SortSegmentOrder(AOrder, ASegs, I, AHi);
+end;
+
 // Chains directed boundary segments into closed contours.
 //
 // Segments are grouped by their start vertex. At a junction the most clockwise
@@ -482,11 +814,33 @@ end;
 function ChainSegments(const ASegments: TSegmentArray): TGridPaths;
 var
   Used: array of Boolean;
+  Order: array of Integer;
   I, J, Current, NextIdx, Count, OutCount, Steps: Integer;
   Contour: TGridPath;
   BestAngle, Angle: Double;
   DX, DY, EX, EY, Cross, Dot: Double;
   Found, Closed: Boolean;
+  ScanFrom, ScanTo: Integer;
+
+  // First position in Order whose segment starts at or after (AX, AY).
+  function LowerBound(AX, AY: Int64): Integer;
+  var
+    Lo, Hi, Mid: Integer;
+  begin
+    Lo := 0;
+    Hi := Length(Order);
+    while Lo < Hi do
+    begin
+      Mid := (Lo + Hi) div 2;
+      if (ASegments[Order[Mid]].A.X < AX) or
+         ((ASegments[Order[Mid]].A.X = AX) and (ASegments[Order[Mid]].A.Y < AY)) then
+        Lo := Mid + 1
+      else
+        Hi := Mid;
+    end;
+    Result := Lo;
+  end;
+
 begin
   SetLength(Result, 0);
   if Length(ASegments) = 0 then
@@ -495,6 +849,11 @@ begin
   SetLength(Used, Length(ASegments));
   for I := 0 to High(Used) do
     Used[I] := False;
+
+  SetLength(Order, Length(ASegments));
+  for I := 0 to High(Order) do
+    Order[I] := I;
+  SortSegmentOrder(Order, ASegments, 0, High(Order));
 
   OutCount := 0;
   for I := 0 to High(ASegments) do
@@ -526,23 +885,29 @@ begin
       BestAngle := 0.0;
       Found := False;
 
-      for J := 0 to High(ASegments) do
+      // Only segments starting exactly at the current end vertex are
+      // candidates; the sorted index turns that into a contiguous run.
+      ScanFrom := LowerBound(ASegments[Current].B.X, ASegments[Current].B.Y);
+      ScanTo := ScanFrom;
+      while (ScanTo < Length(Order)) and
+            (ASegments[Order[ScanTo]].A.X = ASegments[Current].B.X) and
+            (ASegments[Order[ScanTo]].A.Y = ASegments[Current].B.Y) do
+        Inc(ScanTo);
+
+      for J := ScanFrom to ScanTo - 1 do
       begin
-        if Used[J] then
-          Continue;
-        if (ASegments[J].A.X <> ASegments[Current].B.X) or
-           (ASegments[J].A.Y <> ASegments[Current].B.Y) then
+        if Used[Order[J]] then
           Continue;
 
-        EX := ASegments[J].B.X - ASegments[J].A.X;
-        EY := ASegments[J].B.Y - ASegments[J].A.Y;
+        EX := ASegments[Order[J]].B.X - ASegments[Order[J]].A.X;
+        EY := ASegments[Order[J]].B.Y - ASegments[Order[J]].A.Y;
         Cross := DX * EY - DY * EX;
         Dot := DX * EX + DY * EY;
         Angle := ArcTan2(Cross, Dot);
 
         if (not Found) or (Angle < BestAngle) then
         begin
-          NextIdx := J;
+          NextIdx := Order[J];
           BestAngle := Angle;
           Found := True;
         end;
@@ -554,7 +919,6 @@ begin
       if (ASegments[NextIdx].B.X = ASegments[I].A.X) and
          (ASegments[NextIdx].B.Y = ASegments[I].A.Y) then
       begin
-        // Closing segment: record its start vertex, then stop.
         Used[NextIdx] := True;
         SetLength(Contour, Count + 1);
         Contour[Count] := ASegments[NextIdx].A;
@@ -593,6 +957,7 @@ function FloriaBooleanOp(AOp: TPathBooleanOp;
 var
   Scale, InvScale: Double;
   SubjGrid, ClipGrid: TGridPaths;
+  SubjIndex, ClipIndex: TYEdgeIndex;
   AllSegments: TSegmentArray;
   SplitSegments: TSegmentArray;
   SplitCount, I, J, K: Integer;
@@ -613,6 +978,9 @@ begin
 
   SubjGrid := CleanGridPaths(ScaleToGrid(ASubject, Scale));
   ClipGrid := CleanGridPaths(ScaleToGrid(AClip, Scale));
+
+  BuildYIndex(SubjIndex, SubjGrid);
+  BuildYIndex(ClipIndex, ClipGrid);
 
   // Collect every edge from both operands.
   SetLength(AllSegments, 0);
@@ -664,17 +1032,6 @@ begin
        (SplitSegments[I].A.Y = SplitSegments[I].B.Y) then
       Continue;
 
-    // Deduplicate against what we already kept.
-    Found := False;
-    for K := 0 to BoundaryCount - 1 do
-      if SameSegment(Boundary[K], SplitSegments[I]) then
-      begin
-        Found := True;
-        Break;
-      end;
-    if Found then
-      Continue;
-
     MidX := (SplitSegments[I].A.X + SplitSegments[I].B.X) * 0.5;
     MidY := (SplitSegments[I].A.Y + SplitSegments[I].B.Y) * 0.5;
 
@@ -686,12 +1043,12 @@ begin
     NX := NX / Len * BOOLEAN_SAMPLE_OFFSET;
     NY := NY / Len * BOOLEAN_SAMPLE_OFFSET;
 
-    InSubjL := IsInsidePoint(SubjGrid, MidX + NX, MidY + NY, AFillRule);
-    InClipL := IsInsidePoint(ClipGrid, MidX + NX, MidY + NY, AFillRule);
+    InSubjL := IsInsideIndexed(SubjIndex, MidX + NX, MidY + NY, AFillRule);
+    InClipL := IsInsideIndexed(ClipIndex, MidX + NX, MidY + NY, AFillRule);
     InsideL := Pred(InSubjL, InClipL);
 
-    InSubjR := IsInsidePoint(SubjGrid, MidX - NX, MidY - NY, AFillRule);
-    InClipR := IsInsidePoint(ClipGrid, MidX - NX, MidY - NY, AFillRule);
+    InSubjR := IsInsideIndexed(SubjIndex, MidX - NX, MidY - NY, AFillRule);
+    InClipR := IsInsideIndexed(ClipIndex, MidX - NX, MidY - NY, AFillRule);
     InsideR := Pred(InSubjR, InClipR);
 
     if InsideL = InsideR then
@@ -708,6 +1065,7 @@ begin
     Inc(BoundaryCount);
   end;
 
+  SortAndDedupeSegments(Boundary, BoundaryCount);
   SetLength(Boundary, BoundaryCount);
   Chained := ChainSegments(Boundary);
   CleanResult := CleanGridPaths(Chained);
