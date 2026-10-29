@@ -21,6 +21,7 @@ uses
   Floria.XCB.EWMH,
   Floria.XCB.ICCCM,
   Floria.XCB.RandR,
+  Floria.XCB.Shape,
   Floria.X11.KeySym;
 
 const
@@ -3646,6 +3647,7 @@ var
   ResizeWin: xcb_window_t;
   ValueMask: Cardinal;
   ValueList: array[0..3] of Cardinal;
+  Rects: array[0..3] of xcb_rectangle_t;
   Margin: Integer;
 begin
   Result := 0;
@@ -3682,6 +3684,42 @@ begin
     ValueMask,
     @ValueList[0]
   );
+
+  // Shape this window into a border: four rectangles covering only the outer
+  // Margin, leaving the window interior hollow.
+  //
+  // The window exists to catch button and motion events in the resize margin, so
+  // its input region should be exactly that margin. Without a shape it is a solid
+  // rectangle over the whole window plus margin; that happens to be harmless today
+  // only because the window is stacked BELOW the frame, so the interior is covered
+  // by the frame anyway. Shaping makes the region match its purpose instead of
+  // relying on that stacking accident.
+  //
+  // This is NOT what fixed the stuck resize cursor. That was a frame cursor being
+  // inherited by the client window; see TWMSamaCompositingWM.UpdateHoverCursor.
+  begin
+    Rects[0].x := 0;                       Rects[0].y := 0;
+    Rects[0].width := ARect.Width + Margin * 2;
+    Rects[0].height := Margin;                       // top strip
+
+    Rects[1].x := 0;                       Rects[1].y := ARect.Height + Margin;
+    Rects[1].width := ARect.Width + Margin * 2;
+    Rects[1].height := Margin;                       // bottom strip
+
+    Rects[2].x := 0;                       Rects[2].y := Margin;
+    Rects[2].width := Margin;
+    Rects[2].height := ARect.Height;                 // left strip
+
+    Rects[3].x := ARect.Width + Margin;    Rects[3].y := Margin;
+    Rects[3].width := Margin;
+    Rects[3].height := ARect.Height;                 // right strip
+
+    // Only the INPUT shape. ShapeBounding is a BadMatch on an InputOnly window
+    // (it has no bounding region to clip), and this window is InputOnly.
+    xcb_shape_rectangles(FConn, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT,
+                         XCB_SHAPE_SO_SET, ResizeWin, 0, 0, 4, @Rects[0]);
+    xcb_flush(FConn);
+  end;
 
   Result := ResizeWin;
 end;

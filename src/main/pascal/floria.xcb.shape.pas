@@ -205,7 +205,16 @@ function xcb_shape_query_version_unchecked(c: Pxcb_connection_t): xcb_shape_quer
 function xcb_shape_query_version_reply(c: Pxcb_connection_t; cookie: xcb_shape_query_version_cookie_t; e: PPxcb_generic_error_t): Pxcb_shape_query_version_reply_t; cdecl; external 'xcb-shape' name 'xcb_shape_query_version_reply';
 function xcb_shape_rectangles_sizeof(_buffer: Pointer; rectangles_len: Cardinal): Integer; cdecl; external 'xcb-shape' name 'xcb_shape_rectangles_sizeof';
 { xcb_shape_rectangles_checked: skipped — return type 'xcb_void_cookie_t' comes from a filtered-out header }
-{ xcb_shape_rectangles: skipped — return type 'xcb_void_cookie_t' comes from a filtered-out header }
+{ xcb_shape_rectangles: restored by hand. The generator dropped it because its
+  return type is xcb_void_cookie_t, which is declared in Floria.XCB. Needed to
+  give the WM's InputOnly resize windows a rectangular border shape, so they do
+  not swallow pointer motion over the window interior. }
+function xcb_shape_rectangles(c: Pxcb_connection_t; op: Byte; destination_kind: Byte;
+                              ordering: Byte; destination_window: xcb_window_t;
+                              x_offset: SmallInt; y_offset: SmallInt;
+                              rectangles_len: Cardinal;
+                              rectangles: Pxcb_rectangle_t): xcb_void_cookie_t; cdecl;
+  external 'xcb-shape' name 'xcb_shape_rectangles';
 function xcb_shape_rectangles_rectangles(R: Pxcb_shape_rectangles_request_t): Pxcb_rectangle_t; cdecl; external 'xcb-shape' name 'xcb_shape_rectangles_rectangles';
 function xcb_shape_rectangles_rectangles_length(R: Pxcb_shape_rectangles_request_t): Integer; cdecl; external 'xcb-shape' name 'xcb_shape_rectangles_rectangles_length';
 { xcb_shape_rectangles_rectangles_iterator: skipped — return type 'xcb_rectangle_iterator_t' comes from a filtered-out header }
