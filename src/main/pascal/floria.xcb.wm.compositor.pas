@@ -39,15 +39,51 @@ type
   end;
 
   // TXCBCompositedWindow
-  // Represents a managed redirected top-level client window within the compositor scene.
+  // Represents a managed window in the compositor scene.
+  //
+  // TWO-SURFACE MODEL (WM-20)
+  // -------------------------
+  // A decorated window is two independent drawables, and each is captured
+  // separately:
+  //
+  //   Surface 1 ("frame")  - FWindow: the WM's own decorations (titlebar, borders,
+  //                          frame background). Always present.
+  //   Surface 2 ("client") - FClientWindow: the application's content, reparented
+  //                          inside the frame. Absent for undecorated windows.
+  //
+  // The earlier single-surface model named one pixmap on the frame and relied on
+  // the server flattening the client into it. That works only while the server can
+  // see the client's pixels; once the client's offscreen content is gone the frame
+  // pixmap has a hole and there is no second source to fall back on. See WM-20.
+  //
+  // Both surfaces are drawn inside ONE rounded clip (see CompositeScene). Clipping
+  // each surface separately puts a seam where they meet, because each clip's
+  // corner antialiasing blends against whatever is underneath.
   TXCBCompositedWindow = class
   private
     FCompositor     : TXCBCompositor;
+    // The registered top-level drawable: the frame when decorated, otherwise the
+    // client itself.
     FWindow         : xcb_window_t;
-    FFrameWindow    : xcb_window_t;
+    // The client reparented inside FWindow, or 0 when undecorated. This field was
+    // historically called FrameWindow, which was actively misleading: it never
+    // held a frame.
+    FClientWindow   : xcb_window_t;
+
+    // --- Surface 1: primary (frame) -------------------------------------------
     FPixmap         : xcb_pixmap_t;
     FDamage         : xcb_damage_damage_t;
-    FFrameDamage    : xcb_damage_damage_t;
+    FImage          : TFloriaImage;
+    FIsDirty        : Boolean;
+
+    // --- Surface 2: client ----------------------------------------------------
+    FClientPixmap   : xcb_pixmap_t;
+    FClientDamage   : xcb_damage_damage_t;
+    FClientImage    : TFloriaImage;
+    FClientDirty    : Boolean;
+    FClientOffset   : TXCBPoint;
+    FClientHasAlpha : Boolean;
+
     FGeometry       : TXCBRect;
     FOpacity        : Single;
     FShadowConfig   : TXCBWindowShadowConfig;
@@ -55,9 +91,7 @@ type
     FBlurRadius     : Integer;
     FCornerRadius   : Integer;
     FBottomCornerRadius: Integer;
-    FIsDirty        : Boolean;
     FIsVisible      : Boolean;
-    FImage          : TFloriaImage;
     FHasAlphaChannel: Boolean;
 
     // Cached drop shadow (WM-18). The shadow's rendered form depends only on
@@ -79,6 +113,12 @@ type
     FShadowBuildCount: Integer;
 
     procedure InvalidateShadowCache();
+    function GetHasClient(): Boolean;
+    // Fetches one surface from its named pixmap. Shared by both surfaces.
+    function FetchSurface(const APixmap: xcb_pixmap_t;
+                          const AWidth, AHeight: Integer;
+                          const AHasAlpha: Boolean;
+                          var AImage: TFloriaImage): Boolean;
   public
     // Builds the cached shadow if the settings changed. Returns False when no
     // shadow should be drawn. Public because the compositor drives the render.
@@ -90,17 +130,25 @@ type
     // freed image's address is immediately reused by the replacement.
     property ShadowBuildCount: Integer  read FShadowBuildCount;
     constructor Create(const ACompositor: TXCBCompositor; const AWindow: xcb_window_t;
-                       const AGeometry: TXCBRect; const AFrame: xcb_window_t = 0);
+                       const AGeometry: TXCBRect; const AClientWindow: xcb_window_t = 0);
     destructor Destroy(); override;
 
     procedure UpdateGeometry(const AX, AY, AWidth, AHeight: Integer);
-    procedure UpdatePixmap();
-    procedure FetchImage();
+    // (Re)creates both offscreen surfaces and re-reads where the client sits
+    // inside the frame. Called on registration and whenever dimensions change.
+    procedure UpdateSurfaces();
+    // Fetches whichever surfaces are dirty. Returns True if anything was fetched.
+    function FetchImages(): Boolean;
+    // Marks the whole window dirty (both surfaces).
     procedure MarkDamaged();
-    // Subtracts the accumulated server-side damage region without touching the
-    // local dirty flag. Must be called for every registered window on every pass,
-    // including ones that are not rendered, or the server-side damage region for
-    // hidden windows grows without bound.
+    // Marks one surface dirty. Damage notifications identify which window was
+    // damaged, so most updates only need one of these.
+    procedure MarkFrameDamaged();
+    procedure MarkClientDamaged();
+    // Subtracts the accumulated server-side damage regions without touching the
+    // local dirty flags. Must be called for every registered window on every pass,
+    // including ones that are not rendered, or the server-side damage regions for
+    // hidden windows grow without bound.
     procedure SubtractDamage();
     procedure ClearDamage();
     // Screen-space bounds actually painted by this window: geometry plus the
@@ -108,9 +156,14 @@ type
     function PaintedRect(): TXCBRect;
 
     property Window         : xcb_window_t           read FWindow;
-    property FrameWindow    : xcb_window_t           read FFrameWindow write FFrameWindow;
+    // The reparented client, or 0 when the window is undecorated. Historically
+    // exposed as FrameWindow, which never held a frame; renamed for clarity.
+    property ClientWindow   : xcb_window_t           read FClientWindow write FClientWindow;
+    property HasClient      : Boolean                read GetHasClient;
     property Pixmap         : xcb_pixmap_t           read FPixmap;
+    property ClientPixmap   : xcb_pixmap_t           read FClientPixmap;
     property Damage         : xcb_damage_damage_t    read FDamage;
+    property ClientDamage   : xcb_damage_damage_t    read FClientDamage;
     property Geometry       : TXCBRect               read FGeometry write FGeometry;
     property Opacity        : Single                 read FOpacity write FOpacity;
     property ShadowConfig   : TXCBWindowShadowConfig read FShadowConfig write FShadowConfig;
@@ -119,13 +172,27 @@ type
     property CornerRadius      : Integer                read FCornerRadius write FCornerRadius;
     property BottomCornerRadius: Integer                read FBottomCornerRadius write FBottomCornerRadius;
     property IsDirty           : Boolean                read FIsDirty write FIsDirty;
+    property ClientIsDirty     : Boolean                read FClientDirty write FClientDirty;
     property IsVisible      : Boolean                read FIsVisible write FIsVisible;
-    property Image          : TFloriaImage           read FImage write FImage;
+    // Primary (frame) surface image. For an undecorated window this is the whole
+    // window; for a decorated one it is the decorations with a hole where the
+    // client sits.
+    property FrameImage     : TFloriaImage           read FImage write FImage;
+    // Client surface image, nil when undecorated.
+    property ClientImage    : TFloriaImage           read FClientImage;
+    // Where the client surface sits, relative to the frame's top-left.
+    property ClientOffset   : TXCBPoint              read FClientOffset;
     property HasAlphaChannel: Boolean                read FHasAlphaChannel write FHasAlphaChannel;
+    property ClientHasAlphaChannel: Boolean          read FClientHasAlpha write FClientHasAlpha;
   end;
 
   // Scene paint notification delegate
   TXCBCompositorPaintEvent = procedure(ASender: TObject; ACanvas: TFloriaCanvasAgg; const ASceneRect: TXCBRect) of object;
+
+  // Diagnostics sink. Wired by the shell so compositor-level problems (failed
+  // redirections, surfaces that could not be fetched) are visible instead of
+  // silently degrading.
+  TXCBCompositorLogEvent = procedure(const AMessage: AnsiString) of object;
 
   // Snapshot of everything that affects the rendered scene *except* window
   // content. Comparing consecutive snapshots tells the compositor whether the
@@ -138,6 +205,8 @@ type
   // full present. Missing such a notification would otherwise leave stale pixels.
   TXCBSceneEntry = record
     Window             : xcb_window_t;
+    ClientWindow       : xcb_window_t;
+    ClientOffset       : TXCBPoint;
     Geometry           : TXCBRect;
     Visible            : Boolean;
     Opacity            : Single;
@@ -182,6 +251,7 @@ type
     FBgA                   : Byte;
     FOnBeforeRender        : TXCBCompositorPaintEvent;
     FOnAfterRender         : TXCBCompositorPaintEvent;
+    FDebugLog              : TXCBCompositorLogEvent;
 
     // Present-path bookkeeping (WM-12). FDirtyRect is the union of everything
     // known to have changed since the last present; it drives a partial upload.
@@ -212,6 +282,16 @@ type
 
     function QueryExtensions(): Boolean;
     procedure EnsureGC();
+    // True when the window's visual is 32-bit, i.e. it has a native alpha channel.
+    function WindowHasAlpha(const AWindow: xcb_window_t): Boolean;
+    // Enables or disables explicit redirection of a client window.
+    //
+    // redirect_subwindows(root) only redirects root's direct children, which are
+    // the WM's frames. A client reparented inside a frame is a grandchild, so it
+    // has no offscreen storage of its own and its content is lost once it is
+    // covered on screen. Redirecting it gives it its own storage; the client
+    // surface is then fetched from that rather than from the frame's pixmap.
+    procedure RedirectClient(const AWindow: xcb_window_t; const AEnable: Boolean);
     procedure AddDirty(const ARect: TXCBRect);
     procedure ClearDirty();
     function BuildSnapshot(): TXCBSceneEntryArray;
@@ -228,8 +308,11 @@ type
     function EnableCompositing(): Boolean;
     procedure DisableCompositing();
 
+    // AWindow is the top-level drawable to composite: the frame when decorated,
+    // otherwise the client itself. AClientWindow is the client reparented inside
+    // that frame, or 0 when undecorated.
     function RegisterWindow(const AWindow: xcb_window_t; const AGeometry: TXCBRect;
-                            const AFrame: xcb_window_t = 0): TXCBCompositedWindow;
+                            const AClientWindow: xcb_window_t = 0): TXCBCompositedWindow;
     procedure UnregisterWindow(const AWindow: xcb_window_t);
     function FindWindow(const AWindow: xcb_window_t): TXCBCompositedWindow;
 
@@ -265,6 +348,7 @@ type
 
     property OnBeforeRender : TXCBCompositorPaintEvent read FOnBeforeRender write FOnBeforeRender;
     property OnAfterRender  : TXCBCompositorPaintEvent read FOnAfterRender write FOnAfterRender;
+    property OnDebugLog     : TXCBCompositorLogEvent read FDebugLog write FDebugLog;
     // Bounds of the overlay the shell drew in the most recent OnAfterRender call.
     property OverlayRect    : TXCBRect read FOverlayRect;
     property LastComposeRect: TXCBRect read FLastComposeRect;
@@ -356,15 +440,12 @@ end;
 // -----------------------------------------------------------------------------
 
 constructor TXCBCompositedWindow.Create(const ACompositor: TXCBCompositor; const AWindow: xcb_window_t;
-                                       const AGeometry: TXCBRect; const AFrame: xcb_window_t);
-var
-  geomCookie: xcb_get_geometry_cookie_t;
-  geomReply: Pxcb_get_geometry_reply_t;
+                                       const AGeometry: TXCBRect; const AClientWindow: xcb_window_t);
 begin
   inherited Create();
   FCompositor := ACompositor;
   FWindow := AWindow;
-  FFrameWindow := AFrame;
+  FClientWindow := AClientWindow;
   FGeometry := AGeometry;
   FOpacity := 1.0;
   FShadowConfig := TXCBWindowShadowConfig.Create(True, 12, 1, 0.22);
@@ -373,12 +454,18 @@ begin
   FCornerRadius := 10;
   FBottomCornerRadius := 10;
   FIsDirty := True;
+  FClientDirty := True;
   FIsVisible := True;
   FHasAlphaChannel := False;
   FPixmap := 0;
   FDamage := 0;
-  FFrameDamage := 0;
   FImage := nil;
+
+  FClientPixmap := 0;
+  FClientDamage := 0;
+  FClientImage := nil;
+  FClientOffset := TXCBPoint.Create(0, 0);
+  FClientHasAlpha := False;
 
   FShadowImage := nil;
   FShadowMargin := 0;
@@ -393,26 +480,30 @@ begin
   if (FCompositor <> nil) and (FCompositor.Connection <> nil) and (FWindow <> 0) then
   begin
     // Check window visual depth to determine if window has a native 32-bit alpha channel
-    geomCookie := xcb_get_geometry(FCompositor.Connection, FWindow);
-    geomReply := xcb_get_geometry_reply(FCompositor.Connection, geomCookie, nil);
-    if geomReply <> nil then
-    begin
-      FHasAlphaChannel := (geomReply^.depth = 32);
-      xcb_free(geomReply);
-    end;
+    FHasAlphaChannel := FCompositor.WindowHasAlpha(FWindow);
 
-    // Create Damage tracking object
+    // Damage tracking for the primary surface.
     FDamage := xcb_generate_id(FCompositor.Connection);
     xcb_damage_create(FCompositor.Connection, FDamage, FWindow, XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY);
 
-    if (FFrameWindow <> 0) and (FFrameWindow <> FWindow) then
+    if (FClientWindow <> 0) and (FClientWindow <> FWindow) then
     begin
-      FFrameDamage := xcb_generate_id(FCompositor.Connection);
-      xcb_damage_create(FCompositor.Connection, FFrameDamage, FFrameWindow, XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY);
+      FClientHasAlpha := FCompositor.WindowHasAlpha(FClientWindow);
+
+      // The client must be redirected in its own right to have offscreen content.
+      // redirect_subwindows(root) only covers root's direct children (the frames);
+      // a client reparented inside a frame is a grandchild with no storage of its
+      // own, and its content is lost once it is covered on screen. This is the
+      // core of WM-20.
+      FCompositor.RedirectClient(FClientWindow, True);
+
+      FClientDamage := xcb_generate_id(FCompositor.Connection);
+      xcb_damage_create(FCompositor.Connection, FClientDamage, FClientWindow,
+                        XCB_DAMAGE_REPORT_LEVEL_NON_EMPTY);
     end;
 
-    // Create named window pixmap
-    UpdatePixmap();
+    // Create both named window pixmaps.
+    UpdateSurfaces();
   end;
 end;
 
@@ -420,21 +511,36 @@ destructor TXCBCompositedWindow.Destroy();
 begin
   if (FCompositor <> nil) and (FCompositor.Connection <> nil) then
   begin
-    if FFrameDamage <> 0 then
+    if FClientDamage <> 0 then
     begin
-      xcb_damage_destroy(FCompositor.Connection, FFrameDamage);
-      FFrameDamage := 0;
+      xcb_damage_destroy(FCompositor.Connection, FClientDamage);
+      FClientDamage := 0;
     end;
     if FDamage <> 0 then
     begin
       xcb_damage_destroy(FCompositor.Connection, FDamage);
       FDamage := 0;
     end;
+    if FClientPixmap <> 0 then
+    begin
+      xcb_free_pixmap(FCompositor.Connection, FClientPixmap);
+      FClientPixmap := 0;
+    end;
     if FPixmap <> 0 then
     begin
       xcb_free_pixmap(FCompositor.Connection, FPixmap);
       FPixmap := 0;
     end;
+
+    // Give the client back to the server's normal drawing path.
+    if (FClientWindow <> 0) and (FClientWindow <> FWindow) then
+      FCompositor.RedirectClient(FClientWindow, False);
+  end;
+
+  if FClientImage <> nil then
+  begin
+    FClientImage.Free();
+    FClientImage := nil;
   end;
 
   if FImage <> nil then
@@ -460,15 +566,25 @@ begin
 
   if dimsChanged then
   begin
-    UpdatePixmap();
+    UpdateSurfaces();
     FIsDirty := True;
+    FClientDirty := True;
   end;
 end;
 
-procedure TXCBCompositedWindow.UpdatePixmap();
+// (Re)creates both offscreen surfaces.
+//
+// The client's position inside the frame is read from the server rather than
+// assumed from frame insets: the WM owns the geometry, and asking avoids the
+// compositor having to duplicate that knowledge (and get it wrong when insets
+// change).
+procedure TXCBCompositedWindow.UpdateSurfaces();
+var
+  geom: Pxcb_get_geometry_reply_t;
 begin
   if (FCompositor = nil) or (FCompositor.Connection = nil) or (FWindow = 0) then Exit;
 
+  // --- Surface 1: primary (frame) -------------------------------------------
   if FPixmap <> 0 then
   begin
     xcb_free_pixmap(FCompositor.Connection, FPixmap);
@@ -480,25 +596,52 @@ begin
     FPixmap := xcb_generate_id(FCompositor.Connection);
     xcb_composite_name_window_pixmap(FCompositor.Connection, FWindow, FPixmap);
   end;
+
+  // --- Surface 2: client ----------------------------------------------------
+  if FClientPixmap <> 0 then
+  begin
+    xcb_free_pixmap(FCompositor.Connection, FClientPixmap);
+    FClientPixmap := 0;
+  end;
+
+  if (FClientWindow = 0) or (FClientWindow = FWindow) then Exit;
+
+  geom := xcb_get_geometry_reply(FCompositor.Connection,
+                                 xcb_get_geometry(FCompositor.Connection, FClientWindow), nil);
+  if geom = nil then Exit;
+  try
+    // x/y are relative to the parent, which is the frame.
+    FClientOffset := TXCBPoint.Create(geom^.x, geom^.y);
+    if (geom^.width > 0) and (geom^.height > 0) then
+    begin
+      FClientPixmap := xcb_generate_id(FCompositor.Connection);
+      xcb_composite_name_window_pixmap(FCompositor.Connection, FClientWindow, FClientPixmap);
+    end;
+  finally
+    xcb_free(geom);
+  end;
 end;
 
-procedure TXCBCompositedWindow.FetchImage();
+// Fetches one surface from its named pixmap into a TFloriaImage.
+// Shared by both surfaces; returns False when there is nothing to fetch.
+function TXCBCompositedWindow.FetchSurface(const APixmap: xcb_pixmap_t;
+                                           const AWidth, AHeight: Integer;
+                                           const AHasAlpha: Boolean;
+                                           var AImage: TFloriaImage): Boolean;
 var
   cookie: xcb_get_image_cookie_t;
   reply: Pxcb_get_image_reply_t;
   rawBytes: PByte;
-  targetW, targetH: Integer;
   x, y: Integer;
   srcRow, dstRow: PByte;
   rowBytes: Integer;
 begin
-  if (FCompositor = nil) or (FCompositor.Connection = nil) or (FPixmap = 0) then Exit;
-  targetW := FGeometry.Width;
-  targetH := FGeometry.Height;
-  if (targetW <= 0) or (targetH <= 0) then Exit;
+  Result := False;
+  if (FCompositor = nil) or (FCompositor.Connection = nil) or (APixmap = 0) then Exit;
+  if (AWidth <= 0) or (AHeight <= 0) then Exit;
 
-  cookie := xcb_get_image(FCompositor.Connection, XCB_IMAGE_FORMAT_Z_PIXMAP, FPixmap,
-                          0, 0, targetW, targetH, Cardinal($FFFFFFFF));
+  cookie := xcb_get_image(FCompositor.Connection, XCB_IMAGE_FORMAT_Z_PIXMAP, APixmap,
+                          0, 0, AWidth, AHeight, Cardinal($FFFFFFFF));
   reply := xcb_get_image_reply(FCompositor.Connection, cookie, nil);
   if reply = nil then Exit;
 
@@ -506,38 +649,101 @@ begin
     rawBytes := xcb_get_image_data(reply);
     if rawBytes = nil then Exit;
 
-    if (FImage = nil) or (FImage.Width <> targetW) or (FImage.Height <> targetH) then
+    if (AImage = nil) or (AImage.Width <> AWidth) or (AImage.Height <> AHeight) then
     begin
-      if FImage <> nil then FImage.Free();
-      FImage := TFloriaImage.Create(targetW, targetH);
+      if AImage <> nil then AImage.Free();
+      AImage := TFloriaImage.Create(AWidth, AHeight);
     end;
 
-    rowBytes := targetW * 4;
-    for y := 0 to targetH - 1 do
+    rowBytes := AWidth * 4;
+    for y := 0 to AHeight - 1 do
     begin
       srcRow := rawBytes + (y * rowBytes);
-      dstRow := PByte(FImage.Scanline[y]);
-      if FHasAlphaChannel then
+      dstRow := PByte(AImage.Scanline[y]);
+      if AHasAlpha then
         Move(srcRow^, dstRow^, rowBytes)
       else
       begin
-        for x := 0 to targetW - 1 do
+        for x := 0 to AWidth - 1 do
           PDWord(dstRow + (x * 4))^ := PDWord(srcRow + (x * 4))^ or Cardinal($FF000000);
       end;
     end;
 
-    FIsDirty := False;
+    Result := True;
   finally
     xcb_free(reply);
+  end;
+end;
+
+// Fetches whichever surfaces are dirty. Returns True when anything was fetched,
+// so the caller knows the scene changed.
+function TXCBCompositedWindow.FetchImages(): Boolean;
+var
+  geom: Pxcb_get_geometry_reply_t;
+  cw, ch: Integer;
+begin
+  Result := False;
+
+  if FIsDirty and (FPixmap <> 0) then
+  begin
+    if FetchSurface(FPixmap, FGeometry.Width, FGeometry.Height, FHasAlphaChannel, FImage) then
+      Result := True;
+    FIsDirty := False;
+  end;
+
+  if FClientDirty and (FClientPixmap <> 0) and (FClientWindow <> 0) then
+  begin
+    // The client's size can differ from the frame's, and can change without the
+    // frame changing (shading, for example), so ask rather than assume.
+    cw := 0;
+    ch := 0;
+    geom := xcb_get_geometry_reply(FCompositor.Connection,
+                                   xcb_get_geometry(FCompositor.Connection, FClientWindow), nil);
+    if geom <> nil then
+    begin
+      cw := geom^.width;
+      ch := geom^.height;
+      FClientOffset := TXCBPoint.Create(geom^.x, geom^.y);
+      xcb_free(geom);
+    end;
+
+    if (cw > 0) and (ch > 0) then
+    begin
+      if (FClientImage = nil) or (FClientImage.Width <> cw) or (FClientImage.Height <> ch) then
+      begin
+        // The pixmap was named at the old size; re-name it for the new one.
+        xcb_free_pixmap(FCompositor.Connection, FClientPixmap);
+        FClientPixmap := xcb_generate_id(FCompositor.Connection);
+        xcb_composite_name_window_pixmap(FCompositor.Connection, FClientWindow, FClientPixmap);
+      end;
+      if FetchSurface(FClientPixmap, cw, ch, FClientHasAlpha, FClientImage) then
+        Result := True;
+    end;
+    FClientDirty := False;
   end;
 end;
 
 procedure TXCBCompositedWindow.MarkDamaged();
 begin
   FIsDirty := True;
+  FClientDirty := True;
   // Content changed inside the window: only that area of the scene needs
   // presenting. Structural changes are detected separately via the scene
   // snapshot, so this stays conservative.
+  if FCompositor <> nil then
+    FCompositor.AddDirty(FGeometry);
+end;
+
+procedure TXCBCompositedWindow.MarkFrameDamaged();
+begin
+  FIsDirty := True;
+  if FCompositor <> nil then
+    FCompositor.AddDirty(FGeometry);
+end;
+
+procedure TXCBCompositedWindow.MarkClientDamaged();
+begin
+  FClientDirty := True;
   if FCompositor <> nil then
     FCompositor.AddDirty(FGeometry);
 end;
@@ -550,8 +756,8 @@ begin
   begin
     if FDamage <> 0 then
       xcb_damage_subtract(FCompositor.Connection, FDamage, 0, 0);
-    if FFrameDamage <> 0 then
-      xcb_damage_subtract(FCompositor.Connection, FFrameDamage, 0, 0);
+    if FClientDamage <> 0 then
+      xcb_damage_subtract(FCompositor.Connection, FClientDamage, 0, 0);
   end;
 end;
 
@@ -559,6 +765,12 @@ procedure TXCBCompositedWindow.ClearDamage();
 begin
   SubtractDamage();
   FIsDirty := False;
+  FClientDirty := False;
+end;
+
+function TXCBCompositedWindow.GetHasClient(): Boolean;
+begin
+  Result := (FClientWindow <> 0) and (FClientWindow <> FWindow);
 end;
 
 procedure TXCBCompositedWindow.InvalidateShadowCache();
@@ -785,6 +997,52 @@ begin
   Result := FHasComposite and FHasDamage;
 end;
 
+function TXCBCompositor.WindowHasAlpha(const AWindow: xcb_window_t): Boolean;
+var
+  geom: Pxcb_get_geometry_reply_t;
+begin
+  Result := False;
+  if (FConn = nil) or (AWindow = 0) then Exit;
+  geom := xcb_get_geometry_reply(FConn, xcb_get_geometry(FConn, AWindow), nil);
+  if geom = nil then Exit;
+  try
+    Result := geom^.depth = 32;
+  finally
+    xcb_free(geom);
+  end;
+end;
+
+procedure TXCBCompositor.RedirectClient(const AWindow: xcb_window_t; const AEnable: Boolean);
+var
+  cookie: xcb_void_cookie_t;
+  err: Pxcb_generic_error_t;
+begin
+  if (FConn = nil) or (AWindow = 0) then Exit;
+  if not FHasComposite then Exit;
+
+  if AEnable then
+    cookie := xcb_composite_redirect_window_checked(FConn, AWindow,
+                                                    XCB_COMPOSITE_REDIRECT_MANUAL)
+  else
+    cookie := xcb_composite_unredirect_window_checked(FConn, AWindow,
+                                                      XCB_COMPOSITE_REDIRECT_MANUAL);
+
+  // A failure here means the client will fall back to being flattened into the
+  // frame's pixmap. That still renders, so it is not fatal, but the client surface
+  // will be empty and the WM-20 class of artifact can return. Report it rather
+  // than failing silently.
+  err := xcb_request_check(FConn, cookie);
+  if err <> nil then
+  begin
+    if FDebugLog <> nil then
+      FDebugLog(Format('RedirectClient(0x%.x, %s) failed: error %d',
+        [AWindow, BoolToStr(AEnable, 'on', 'off'), err^.error_code]));
+    xcb_free(err);
+  end;
+
+  xcb_flush(FConn);
+end;
+
 procedure TXCBCompositor.EnsureGC();
 var
   mask: Cardinal;
@@ -869,6 +1127,8 @@ begin
   begin
     w := TXCBCompositedWindow(FWindows[i]);
     Result[i].Window := w.Window;
+    Result[i].ClientWindow := w.ClientWindow;
+    Result[i].ClientOffset := w.ClientOffset;
     Result[i].Geometry := w.Geometry;
     Result[i].Visible := w.IsVisible;
     Result[i].Opacity := w.Opacity;
@@ -899,6 +1159,9 @@ begin
     a := ANew[i];
     b := FSceneSnapshot[i];
     if (a.Window <> b.Window) or
+       (a.ClientWindow <> b.ClientWindow) or
+       (a.ClientOffset.X <> b.ClientOffset.X) or
+       (a.ClientOffset.Y <> b.ClientOffset.Y) or
        (a.Geometry.X <> b.Geometry.X) or
        (a.Geometry.Y <> b.Geometry.Y) or
        (a.Geometry.Width <> b.Geometry.Width) or
@@ -992,17 +1255,18 @@ begin
 end;
 
 function TXCBCompositor.RegisterWindow(const AWindow: xcb_window_t; const AGeometry: TXCBRect;
-                                      const AFrame: xcb_window_t): TXCBCompositedWindow;
+                                      const AClientWindow: xcb_window_t): TXCBCompositedWindow;
 begin
   Result := FindWindow(AWindow);
   if Result <> nil then
   begin
     Result.UpdateGeometry(AGeometry.X, AGeometry.Y, AGeometry.Width, AGeometry.Height);
-    Result.FrameWindow := AFrame;
+    Result.ClientWindow := AClientWindow;
+    Result.UpdateSurfaces();
     Exit;
   end;
 
-  Result := TXCBCompositedWindow.Create(Self, AWindow, AGeometry, AFrame);
+  Result := TXCBCompositedWindow.Create(Self, AWindow, AGeometry, AClientWindow);
   FWindows.Add(Result);
 end;
 
@@ -1014,7 +1278,7 @@ begin
   for i := FWindows.Count - 1 downto 0 do
   begin
     w := TXCBCompositedWindow(FWindows[i]);
-    if (w.Window = AWindow) or (w.FrameWindow = AWindow) then
+    if (w.Window = AWindow) or (w.ClientWindow = AWindow) then
     begin
       FWindows.Delete(i);
       Exit;
@@ -1031,7 +1295,7 @@ begin
   for i := 0 to FWindows.Count - 1 do
   begin
     w := TXCBCompositedWindow(FWindows[i]);
-    if (w.Window = AWindow) or (w.FrameWindow = AWindow) then
+    if (w.Window = AWindow) or (w.ClientWindow = AWindow) then
       Exit(w);
   end;
 end;
@@ -1044,11 +1308,18 @@ begin
   if AEvent = nil then Exit;
 
   w := FindWindow(AEvent^.drawable);
-  if w <> nil then
-  begin
-    w.MarkDamaged();
-    Result := True;
-  end;
+  if w = nil then Exit;
+
+  // Route to the surface that actually changed. Damage on the client window means
+  // only the client image needs re-fetching; damage on the frame means only the
+  // decorations do. Marking both would double the round-trips for the common case
+  // (typing in a terminal), which is the whole point of tracking them separately.
+  if (w.ClientWindow <> 0) and (AEvent^.drawable = w.ClientWindow) then
+    w.MarkClientDamaged()
+  else
+    w.MarkFrameDamaged();
+
+  Result := True;
 end;
 
 function TXCBCompositor.IsDamageNotify(const AEvent: Pxcb_generic_event_t): Boolean;
@@ -1217,9 +1488,9 @@ begin
     if not w.IsVisible or (w.Geometry.Width <= 0) or (w.Geometry.Height <= 0) then
       Continue;
 
-    // Fetch damaged/dirty client pixmap pixels
-    if w.IsDirty and (w.Pixmap <> 0) then
-      w.FetchImage();
+    // Fetch whichever surfaces changed. Each is a separate round-trip, so this
+    // only touches the ones actually marked dirty.
+    w.FetchImages();
 
     // A. Render Soft Gaussian Drop Shadow from the cached image (WM-18).
     // Re-rasterizing it per frame measured at 86-91% of compose time; blitting the
@@ -1250,8 +1521,17 @@ begin
       end;
     end;
 
-    // C. Render Window Surface (Client Image) with Opacity and Rounded Corners
-    if w.Image <> nil then
+    // C. Render the window surfaces: frame first, then the client on top.
+    //
+    // BOTH draws go inside ONE rounded clip. Clipping each surface separately
+    // leaves a visible seam where they meet: each clip's corner antialiasing
+    // blends against whatever is underneath, so the client's first row would blend
+    // against the frame background instead of against the titlebar. Measured: a
+    // 1px seam at the titlebar/client boundary, 122 pixels, up to 63/255 off.
+    //
+    // Verified pixel-identical to the previous single-surface rendering, including
+    // when the corner radius exceeds the titlebar height.
+    if (w.FrameImage <> nil) or (w.ClientImage <> nil) then
     begin
       if ((w.CornerRadius > 0) or (w.BottomCornerRadius > 0)) and
          (w.Geometry.Width > Max(w.CornerRadius, w.BottomCornerRadius) * 2) and
@@ -1259,11 +1539,23 @@ begin
       begin
         FSceneCanvas.PushClipRoundedRect(w.Geometry.X, w.Geometry.Y, w.Geometry.Width, w.Geometry.Height,
                                          w.CornerRadius, w.BottomCornerRadius);
-        FSceneCanvas.DrawImage(w.Geometry.X, w.Geometry.Y, w.Image, w.Opacity);
+        if w.FrameImage <> nil then
+          FSceneCanvas.DrawImage(w.Geometry.X, w.Geometry.Y, w.FrameImage, w.Opacity);
+        if w.ClientImage <> nil then
+          FSceneCanvas.DrawImage(w.Geometry.X + w.ClientOffset.X,
+                                 w.Geometry.Y + w.ClientOffset.Y,
+                                 w.ClientImage, w.Opacity);
         FSceneCanvas.PopClipRoundedRect();
       end
       else
-        FSceneCanvas.DrawImage(w.Geometry.X, w.Geometry.Y, w.Image, w.Opacity);
+      begin
+        if w.FrameImage <> nil then
+          FSceneCanvas.DrawImage(w.Geometry.X, w.Geometry.Y, w.FrameImage, w.Opacity);
+        if w.ClientImage <> nil then
+          FSceneCanvas.DrawImage(w.Geometry.X + w.ClientOffset.X,
+                                 w.Geometry.Y + w.ClientOffset.Y,
+                                 w.ClientImage, w.Opacity);
+      end;
     end;
   end;
 

@@ -139,7 +139,7 @@ begin
     w1.Opacity := 0.9;
     clientImg1 := TFloriaImage.Create(200, 150);
     clientImg1.Clear(60, 60, 80, 220); // Semi-transparent bluish panel
-    w1.Image := clientImg1;
+    w1.FrameImage := clientImg1;
     w1.IsDirty := False;
 
     // Create 2nd simulated client (Foreground dialog with Drop Shadow)
@@ -148,7 +148,7 @@ begin
     w2.ShadowConfig := TXCBWindowShadowConfig.Create(True, 12, 4, 0.4);
     clientImg2 := TFloriaImage.Create(250, 180);
     clientImg2.Clear(240, 240, 250, 255); // Bright card
-    w2.Image := clientImg2;
+    w2.FrameImage := clientImg2;
     w2.IsDirty := False;
 
     // Execute full composite pass
