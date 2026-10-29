@@ -11,6 +11,7 @@ performance assumption that went with it rather than leaving it untested.
 From the repository root:
 
 ```bash
+mkdir -p target/tools
 fpc -Fu"$PWD/target/units" \
     -Fu"$HOME/.pasbuild/repository/fpgui-framework/2.2.0-SNAPSHOT/x86_64-linux-3.2.3/units" \
     -FEtarget/tools -O2 -o"$PWD/target/tools/pathbench" \
