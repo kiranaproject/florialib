@@ -4324,7 +4324,16 @@ begin
 
           if isMaximizedOrTiled then
           begin
-            Cli.RestoredRect := FrameRect;
+            // A maximized/tiled window is not floating, so the application has no
+            // say in its geometry. Tell it what it actually has and ignore the
+            // request.
+            //
+            // This used to save FrameRect as RestoredRect, which destroyed the
+            // restore target: applications that re-assert their geometry after a
+            // resize (GTK ones snapping to size increments, for example) would
+            // request their own tiled size, and "restore" would then restore the
+            // tiled geometry instead of the floating one. Measured: mate-terminal
+            // requests 504x756 when tiled, overwriting a 814x693 restore target.
             SendSyntheticConfigureNotify(Cli);
           end
           else
@@ -4347,7 +4356,8 @@ begin
 
           if isMaximizedOrTiled then
           begin
-            Cli.RestoredRect := TXCBRect.Create(newX, newY, newW, newH);
+            // Same reasoning as above: do not let a geometry request from a
+            // non-floating window overwrite its restore target.
             SendSyntheticConfigureNotify(Cli);
           end
           else

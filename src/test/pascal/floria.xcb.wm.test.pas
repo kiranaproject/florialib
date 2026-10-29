@@ -73,6 +73,7 @@ type
     procedure TestPumpDrainsBurstInOneCall();
     procedure TestPumpDoesNotStallWithPendingEvents();
     procedure TestPumpBatchIsBounded();
+    procedure TestConfigureRequestDoesNotClobberRestoreTarget();
   end;
 
 implementation
@@ -641,7 +642,7 @@ var
   Mgr: TXCBWindowManager;
   Client: TXCBWMClient;
   CfgEv: xcb_configure_request_event_t;
-  ExpectedFrameR: TXCBRect;
+  SavedRestored: TXCBRect;
 begin
   Mgr := TXCBWindowManager.Create(nil, 0);
   try
@@ -660,6 +661,8 @@ begin
     AssertEquals('Maximized frame Y', 0, Client.CurrentRect.Y);
     AssertEquals('Maximized frame Width', 1920, Client.CurrentRect.Width);
     AssertEquals('Maximized frame Height', 1080, Client.CurrentRect.Height);
+
+    SavedRestored := Client.RestoredRect;
 
     // Simulate configure request from client with smaller size (e.g. Lazarus debug stop)
     FillChar(CfgEv, SizeOf(CfgEv), 0);
@@ -680,19 +683,25 @@ begin
     AssertEquals('Maximized frame Width remains intact', 1920, Client.CurrentRect.Width);
     AssertEquals('Maximized frame Height remains intact', 1080, Client.CurrentRect.Height);
 
-    // RestoredRect must have been updated to the requested geometry
-    ExpectedFrameR := Mgr.FrameMetrics.ClientToFrameRect(TXCBRect.Create(50, 50, 600, 400));
-    AssertEquals('RestoredRect X updated', ExpectedFrameR.X, Client.RestoredRect.X);
-    AssertEquals('RestoredRect Y updated', ExpectedFrameR.Y, Client.RestoredRect.Y);
-    AssertEquals('RestoredRect Width updated', ExpectedFrameR.Width, Client.RestoredRect.Width);
-    AssertEquals('RestoredRect Height updated', ExpectedFrameR.Height, Client.RestoredRect.Height);
-
-    // Restore client: must restore to the updated RestoredRect!
-    Client.Restore();
-    AssertEquals('Restored frame X matches requested', ExpectedFrameR.X, Client.CurrentRect.X);
-    AssertEquals('Restored frame Y matches requested', ExpectedFrameR.Y, Client.CurrentRect.Y);
-    AssertEquals('Restored frame Width matches requested', ExpectedFrameR.Width, Client.CurrentRect.Width);
-    AssertEquals('Restored frame Height matches requested', ExpectedFrameR.Height, Client.CurrentRect.Height);
+    // The restore target must NOT be replaced by the request.
+    //
+    // This used to assert the opposite: that a geometry request from a maximized
+    // window became its restore target. That is not how window managers behave —
+    // a maximized or tiled window is not floating, so the application has no say
+    // in its geometry — and it broke a very common real case. GTK applications
+    // snap their size to the resize increments in WM_NORMAL_HINTS, so resizing a
+    // tiled mate-terminal makes it request its own tiled size; saving that as the
+    // restore target meant "restore" restored the tiled geometry. Measured on a
+    // live session: mate-terminal requested 504x756 while tiled, destroying an
+    // 814x693 restore target, while xterm (which sends no such request) was fine.
+    //
+    // The cost: an application that programmatically sets its size while maximized
+    // in the hope of un-maximizing to that size is now ignored. That is the
+    // behaviour of Mutter and KWin, and it is the safer of the two.
+    AssertEquals('Restore target X preserved', SavedRestored.X, Client.RestoredRect.X);
+    AssertEquals('Restore target Y preserved', SavedRestored.Y, Client.RestoredRect.Y);
+    AssertEquals('Restore target width preserved', SavedRestored.Width, Client.RestoredRect.Width);
+    AssertEquals('Restore target height preserved', SavedRestored.Height, Client.RestoredRect.Height);
   finally
     Mgr.Free();
   end;
@@ -1994,6 +2003,66 @@ begin
     end;
   finally
     xcb_disconnect(Conn);
+  end;
+end;
+
+// Regression: an application that re-asserts its geometry while tiled must not be
+// able to overwrite the window's restore target.
+//
+// GTK applications snap their size to the resize increments advertised in
+// WM_NORMAL_HINTS, so resizing a tiled mate-terminal makes it send a
+// ConfigureRequest for its own tiled size. That request used to be saved as
+// RestoredRect, so "restore" restored the tiled geometry instead of the floating
+// one. xterm does not send such a request, which is why the bug only showed on
+// some applications.
+procedure TXCBWMTest.TestConfigureRequestDoesNotClobberRestoreTarget();
+var
+  Mgr: TXCBWindowManager;
+  Cli: TXCBWMClient;
+  CfgEv: xcb_configure_request_event_t;
+  original: TXCBRect;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Cli := Mgr.ManageWindow(9801);
+    AssertNotNull('Client managed', Cli);
+
+    original := TXCBRect.Create(200, 66, 814, 693);
+    Cli.CurrentRect := original;
+    Cli.RestoredRect := original;
+
+    Cli.TileLeft();
+    AssertTrue('Tiled', wsTiledLeft in Cli.State);
+    AssertEquals('Restore target unchanged by tiling', original.Width, Cli.RestoredRect.Width);
+    AssertEquals('Restore target height unchanged', original.Height, Cli.RestoredRect.Height);
+
+    // The application now asks for its own tiled size, as a GTK app would.
+    FillChar(CfgEv, SizeOf(CfgEv), 0);
+    CfgEv.response_type := XCB_CONFIGURE_REQUEST;
+    CfgEv.window := Cli.ClientWindow;
+    CfgEv.value_mask := XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
+                        XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT;
+    CfgEv.x := 0;
+    CfgEv.y := 0;
+    CfgEv.width := 504;
+    CfgEv.height := 756;
+
+    AssertTrue('ConfigureRequest handled', Mgr.ProcessEvent(Pxcb_generic_event_t(@CfgEv)));
+
+    // The restore target must survive it.
+    AssertEquals('Restore target X not clobbered', original.X, Cli.RestoredRect.X);
+    AssertEquals('Restore target Y not clobbered', original.Y, Cli.RestoredRect.Y);
+    AssertEquals('Restore target width not clobbered', original.Width, Cli.RestoredRect.Width);
+    AssertEquals('Restore target height not clobbered', original.Height, Cli.RestoredRect.Height);
+
+    // And restoring returns the floating geometry, not the tiled one.
+    Cli.Restore();
+    AssertEquals('Restored width', original.Width, Cli.CurrentRect.Width);
+    AssertEquals('Restored height', original.Height, Cli.CurrentRect.Height);
+    AssertEquals('Restored X', original.X, Cli.CurrentRect.X);
+    AssertEquals('Restored Y', original.Y, Cli.CurrentRect.Y);
+  finally
+    Mgr.Free();
   end;
 end;
 
