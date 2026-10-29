@@ -5011,6 +5011,24 @@ begin
       Inc(drained);
       if drained >= MAX_EVENTS_PER_PUMP then Break;
     until False;
+
+    // The socket was readable but produced no events. If the connection is dead,
+    // stop the loop.
+    //
+    // Without this the WM spins at full speed after the X server exits. select()
+    // reports a dead socket as readable forever (EOF), xcb_poll_for_event returns
+    // nil because there is nothing to parse, Result stays False, and the loop
+    // retries immediately - no timeout is ever reached because select() returns at
+    // once. Measured at 2.0 cores on wmsama and 2.4 on shellsama, still spinning
+    // 56 minutes after the display went away.
+    //
+    // Checking the connection state is the only way to tell "readable, will have
+    // data next time" from "readable, will never have data again".
+    if (drained = 0) and (xcb_connection_has_error(FConn) <> 0) then
+    begin
+      FIsRunning := False;
+      Exit;
+    end;
   end;
 end;
 
