@@ -654,6 +654,7 @@ begin
       if AImage <> nil then AImage.Free();
       AImage := TFloriaImage.Create(AWidth, AHeight);
     end;
+    AImage.IsPremultiplied := AHasAlpha;
 
     rowBytes := AWidth * 4;
     for y := 0 to AHeight - 1 do
