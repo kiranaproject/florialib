@@ -4305,7 +4305,8 @@ begin
   for I := 0 to FClients.Count - 1 do
   begin
     Cli := TXCBWMClient(FClients[I]);
-    if (Cli.ClientWindow = AWindow) or (Cli.FrameWindow = AWindow) or (Cli.ResizeWindow = AWindow) then
+    if (Cli.ClientWindow = AWindow) or (Cli.FrameWindow = AWindow) or (Cli.ResizeWindow = AWindow) or
+       ((Cli.ControlsWindow <> 0) and (Cli.ControlsWindow = AWindow)) then
       Exit(Cli);
   end;
 end;
