@@ -587,6 +587,7 @@ type
     procedure ReparentClient(const AClient: TXCBWMClient);
     procedure UnparentClient(const AClient: TXCBWMClient);
     procedure SendSyntheticConfigureNotify(const AClient: TXCBWMClient);
+    procedure UpdateFrameExtents(const AClient: TXCBWMClient);
 
     // Interactive dragging helpers
     procedure BeginDrag(const AClient: TXCBWMClient; const AMode: TXCBDragMode; const ARootX, ARootY: Integer); virtual;
@@ -3996,38 +3997,45 @@ begin
                          @Values[0]);
   end;
 
-  if FEwmhInitialized then
-  begin
-    if AClient.ExtendedClientArea then
-    begin
-      Values[0] := FFrameMetrics.BorderWidth;
-      Values[1] := FFrameMetrics.BorderWidth;
-      Values[2] := 0;
-      Values[3] := FFrameMetrics.BorderWidth;
-    end
-    else
-    begin
-      Values[0] := FFrameMetrics.Insets.Left;
-      Values[1] := FFrameMetrics.Insets.Right;
-      Values[2] := FFrameMetrics.Insets.Top;
-      Values[3] := FFrameMetrics.Insets.Bottom;
-    end;
-    xcb_change_property(
-      FConn,
-      XCB_PROP_MODE_REPLACE,
-      AClient.ClientWindow,
-      FEwmh._NET_FRAME_EXTENTS,
-      XCB_ATOM_CARDINAL,
-      32,
-      4,
-      @Values[0]
-    );
-  end;
-
+  UpdateFrameExtents(AClient);
   xcb_flush(FConn);
 
   // Send synthetic ConfigureNotify per ICCCM 4.1.4
   SendSyntheticConfigureNotify(AClient);
+end;
+
+procedure TXCBWindowManager.UpdateFrameExtents(const AClient: TXCBWMClient);
+var
+  Values: array[0..3] of Cardinal;
+begin
+  if (FConn = nil) or (AClient = nil) or (AClient.ClientWindow = 0) or not FEwmhInitialized then Exit;
+
+  if AClient.ExtendedClientArea then
+  begin
+    Values[0] := FFrameMetrics.BorderWidth;
+    Values[1] := FFrameMetrics.BorderWidth;
+    Values[2] := 0;
+    Values[3] := FFrameMetrics.BorderWidth;
+  end
+  else
+  begin
+    Values[0] := FFrameMetrics.Insets.Left;
+    Values[1] := FFrameMetrics.Insets.Right;
+    Values[2] := FFrameMetrics.Insets.Top;
+    Values[3] := FFrameMetrics.Insets.Bottom;
+  end;
+
+  xcb_change_property(
+    FConn,
+    XCB_PROP_MODE_REPLACE,
+    AClient.ClientWindow,
+    FEwmh._NET_FRAME_EXTENTS,
+    XCB_ATOM_CARDINAL,
+    32,
+    4,
+    @Values[0]
+  );
+  xcb_flush(FConn);
 end;
 
 procedure TXCBWindowManager.SendSyntheticConfigureNotify(const AClient: TXCBWMClient);
