@@ -1525,6 +1525,8 @@ procedure TXCBWMClient.SetGeometry(const AX, AY, AWidth, AHeight: Integer);
 var
   Values: array[0..3] of Cardinal;
   InnerRect: TXCBRect;
+  Rects: array[0..3] of xcb_rectangle_t;
+  Margin: Integer;
 begin
   FCurrentRect.X := AX;
   FCurrentRect.Y := AY;
@@ -1571,10 +1573,11 @@ begin
     // Outer input-only resize frame geometry
     if FResizeWindow <> 0 then
     begin
-      Values[0] := AX - 8;
-      Values[1] := AY - 8;
-      Values[2] := AWidth + 16;
-      Values[3] := AHeight + 16;
+      Margin := 8;
+      Values[0] := AX - Margin;
+      Values[1] := AY - Margin;
+      Values[2] := AWidth + (Margin * 2);
+      Values[3] := AHeight + (Margin * 2);
       xcb_configure_window(
         FManager.Connection,
         FResizeWindow,
@@ -1582,6 +1585,27 @@ begin
         XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
         @Values[0]
       );
+
+      // Keep input shape in sync with the new window dimensions so outer
+      // resize margins along right, bottom, and bottom-right remain active.
+      Rects[0].x := 0;                       Rects[0].y := 0;
+      Rects[0].width := AWidth + (Margin * 2);
+      Rects[0].height := Margin;                       // top strip
+
+      Rects[1].x := 0;                       Rects[1].y := AHeight + Margin;
+      Rects[1].width := AWidth + (Margin * 2);
+      Rects[1].height := Margin;                       // bottom strip
+
+      Rects[2].x := 0;                       Rects[2].y := Margin;
+      Rects[2].width := Margin;
+      Rects[2].height := AHeight;                      // left strip
+
+      Rects[3].x := AWidth + Margin;         Rects[3].y := Margin;
+      Rects[3].width := Margin;
+      Rects[3].height := AHeight;                      // right strip
+
+      xcb_shape_rectangles(FManager.Connection, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT,
+                           XCB_SHAPE_SO_SET, FResizeWindow, 0, 0, 4, @Rects[0]);
     end;
   end
   else
