@@ -188,6 +188,8 @@ type
 
   // Scene paint notification delegate
   TXCBCompositorPaintEvent = procedure(ASender: TObject; ACanvas: TFloriaCanvasAgg; const ASceneRect: TXCBRect) of object;
+  // Window overlay paint notification delegate (invoked on top of window surfaces within rounded clip)
+  TXCBWindowOverlayPaintEvent = procedure(ASender: TObject; AWindow: TXCBCompositedWindow; ACanvas: TFloriaCanvasAgg; const ARect: TXCBRect) of object;
 
   // Diagnostics sink. Wired by the shell so compositor-level problems (failed
   // redirections, surfaces that could not be fetched) are visible instead of
@@ -251,6 +253,7 @@ type
     FBgA                   : Byte;
     FOnBeforeRender        : TXCBCompositorPaintEvent;
     FOnAfterRender         : TXCBCompositorPaintEvent;
+    FOnWindowOverlayRender : TXCBWindowOverlayPaintEvent;
     FDebugLog              : TXCBCompositorLogEvent;
 
     // Present-path bookkeeping (WM-12). FDirtyRect is the union of everything
@@ -348,6 +351,7 @@ type
 
     property OnBeforeRender : TXCBCompositorPaintEvent read FOnBeforeRender write FOnBeforeRender;
     property OnAfterRender  : TXCBCompositorPaintEvent read FOnAfterRender write FOnAfterRender;
+    property OnWindowOverlayRender : TXCBWindowOverlayPaintEvent read FOnWindowOverlayRender write FOnWindowOverlayRender;
     property OnDebugLog     : TXCBCompositorLogEvent read FDebugLog write FDebugLog;
     // Bounds of the overlay the shell drew in the most recent OnAfterRender call.
     property OverlayRect    : TXCBRect read FOverlayRect;
@@ -1546,6 +1550,8 @@ begin
           FSceneCanvas.DrawImage(w.Geometry.X + w.ClientOffset.X,
                                  w.Geometry.Y + w.ClientOffset.Y,
                                  w.ClientImage, w.Opacity);
+        if Assigned(FOnWindowOverlayRender) then
+          FOnWindowOverlayRender(Self, w, FSceneCanvas, w.Geometry);
         FSceneCanvas.PopClipRoundedRect();
       end
       else
@@ -1556,6 +1562,8 @@ begin
           FSceneCanvas.DrawImage(w.Geometry.X + w.ClientOffset.X,
                                  w.Geometry.Y + w.ClientOffset.Y,
                                  w.ClientImage, w.Opacity);
+        if Assigned(FOnWindowOverlayRender) then
+          FOnWindowOverlayRender(Self, w, FSceneCanvas, w.Geometry);
       end;
     end;
   end;

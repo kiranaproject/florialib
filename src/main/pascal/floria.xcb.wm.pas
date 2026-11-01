@@ -324,6 +324,8 @@ type
     FHasMaximizeButton   : Boolean;
     FHasMinimizeButton   : Boolean;
     FHasCloseButton      : Boolean;
+    FExtendedClientArea  : Boolean;
+    FControlsWindow      : xcb_window_t;
   public
     constructor Create(const AClientWin: xcb_window_t; const AManager: TXCBWindowManager);
     destructor Destroy(); override;
@@ -384,6 +386,8 @@ type
     property HasMaximizeButton   : Boolean           read FHasMaximizeButton write FHasMaximizeButton;
     property HasMinimizeButton   : Boolean           read FHasMinimizeButton write FHasMinimizeButton;
     property HasCloseButton      : Boolean           read FHasCloseButton write FHasCloseButton;
+    property ExtendedClientArea  : Boolean           read FExtendedClientArea write FExtendedClientArea;
+    property ControlsWindow      : xcb_window_t      read FControlsWindow write FControlsWindow;
   end;
 
   // TXCBWindowManager
@@ -440,13 +444,16 @@ type
     FRandRErrorBase    : Byte;
     
     // Atoms
-    FAtomWMDeleteWindow    : xcb_atom_t;
-    FAtomWMTakeFocus       : xcb_atom_t;
-    FAtomMotifWmHints      : xcb_atom_t;
-    FAtomNetWmStrut        : xcb_atom_t;
-    FAtomNetWmStrutPartial : xcb_atom_t;
-    FAtomWMChangeState     : xcb_atom_t;
-    FAtomWMState           : xcb_atom_t;
+    FAtomWMDeleteWindow               : xcb_atom_t;
+    FAtomWMTakeFocus                  : xcb_atom_t;
+    FAtomMotifWmHints                 : xcb_atom_t;
+    FAtomNetWmStrut                   : xcb_atom_t;
+    FAtomNetWmStrutPartial            : xcb_atom_t;
+    FAtomWMChangeState                : xcb_atom_t;
+    FAtomWMState                      : xcb_atom_t;
+    FAtomNetWmExtendedClientArea      : xcb_atom_t;
+    FAtomNetWmStateExtendedClientArea : xcb_atom_t;
+    FAtomNetWmWindowControlsInset     : xcb_atom_t;
 
     // Interactive Dragging
     FDragClient        : TXCBWMClient;
@@ -615,6 +622,9 @@ type
     property AtomNetWmStrutPartial : xcb_atom_t      read FAtomNetWmStrutPartial;
     property AtomWMChangeState     : xcb_atom_t      read FAtomWMChangeState;
     property AtomWMState           : xcb_atom_t      read FAtomWMState;
+    property AtomNetWmExtendedClientArea      : xcb_atom_t read FAtomNetWmExtendedClientArea;
+    property AtomNetWmStateExtendedClientArea : xcb_atom_t read FAtomNetWmStateExtendedClientArea;
+    property AtomNetWmWindowControlsInset     : xcb_atom_t read FAtomNetWmWindowControlsInset;
     property Ewmh                  : xcb_ewmh_connection_t read FEwmh write FEwmh;
     property EwmhInitialized       : Boolean               read FEwmhInitialized write FEwmhInitialized;
     property Monitors              : TObjectList           read FMonitors;
@@ -954,14 +964,24 @@ begin
   FHasMaximizeButton := True;
   FHasMinimizeButton := True;
   FHasCloseButton := True;
+  FExtendedClientArea := False;
+  FControlsWindow := 0;
 end;
 
 destructor TXCBWMClient.Destroy();
 begin
-  if (FManager <> nil) and (FManager.Connection <> nil) and (FResizeWindow <> 0) then
+  if (FManager <> nil) and (FManager.Connection <> nil) then
   begin
-    xcb_destroy_window(FManager.Connection, FResizeWindow);
-    FResizeWindow := 0;
+    if FControlsWindow <> 0 then
+    begin
+      xcb_destroy_window(FManager.Connection, FControlsWindow);
+      FControlsWindow := 0;
+    end;
+    if FResizeWindow <> 0 then
+    begin
+      xcb_destroy_window(FManager.Connection, FResizeWindow);
+      FResizeWindow := 0;
+    end;
   end;
   inherited Destroy();
 end;
@@ -1557,7 +1577,15 @@ begin
     );
 
     // Inner client geometry
-    InnerRect := FManager.FrameMetrics.FrameToClientInnerRect(FCurrentRect);
+    if FExtendedClientArea then
+      InnerRect := TXCBRect.Create(
+        FManager.FrameMetrics.BorderWidth,
+        FManager.FrameMetrics.BorderWidth,
+        AWidth - (FManager.FrameMetrics.BorderWidth * 2),
+        AHeight - (FManager.FrameMetrics.BorderWidth * 2)
+      )
+    else
+      InnerRect := FManager.FrameMetrics.FrameToClientInnerRect(FCurrentRect);
     Values[0] := InnerRect.X;
     Values[1] := InnerRect.Y;
     Values[2] := InnerRect.Width;
@@ -1801,6 +1829,9 @@ begin
   FAtomNetWmStrutPartial := 0;
   FAtomWMChangeState := 0;
   FAtomWMState := 0;
+  FAtomNetWmExtendedClientArea := 0;
+  FAtomNetWmStateExtendedClientArea := 0;
+  FAtomNetWmWindowControlsInset := 0;
   FDragClient := nil;
   FDragMode := dmNone;
   FDragStartPointer := TXCBPoint.Create(0, 0);
@@ -1853,6 +1884,9 @@ begin
     FAtomNetWmStrutPartial := InternAtom(FConn, '_NET_WM_STRUT_PARTIAL');
     FAtomWMChangeState := InternAtom(FConn, 'WM_CHANGE_STATE');
     FAtomWMState := InternAtom(FConn, 'WM_STATE');
+    FAtomNetWmExtendedClientArea := InternAtom(FConn, '_NET_WM_EXTENDED_CLIENT_AREA');
+    FAtomNetWmStateExtendedClientArea := InternAtom(FConn, '_NET_WM_STATE_EXTENDED_CLIENT_AREA');
+    FAtomNetWmWindowControlsInset := InternAtom(FConn, '_NET_WM_WINDOW_CONTROLS_INSET');
     InitCursors();
   end;
 
@@ -2228,7 +2262,7 @@ end;
 procedure TXCBWindowManager.InitEWMH();
 var
   Cookies: Pxcb_intern_atom_cookie_t;
-  SuppAtoms: array[0..51] of xcb_atom_t;
+  SuppAtoms: array[0..54] of xcb_atom_t;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -2346,6 +2380,9 @@ begin
   SuppAtoms[49] := FEwmh._NET_WM_ACTION_CHANGE_DESKTOP;
   SuppAtoms[50] := FEwmh._NET_WM_ACTION_CLOSE;
   SuppAtoms[51] := FEwmh._NET_WM_ACTION_ABOVE;
+  SuppAtoms[52] := FAtomNetWmExtendedClientArea;
+  SuppAtoms[53] := FAtomNetWmStateExtendedClientArea;
+  SuppAtoms[54] := FAtomNetWmWindowControlsInset;
 
   xcb_change_property(
     FConn,
@@ -2354,7 +2391,7 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    52,
+    55,
     @SuppAtoms[0]
   );
 
@@ -3485,7 +3522,9 @@ begin
             else if AtomsPtr[I] = FEwmh._NET_WM_STATE_HIDDEN then
               Include(AClient.FState, wsMinimized)
             else if AtomsPtr[I] = FEwmh._NET_WM_STATE_ABOVE then
-              Include(AClient.FState, wsAbove);
+              Include(AClient.FState, wsAbove)
+            else if (FAtomNetWmStateExtendedClientArea <> 0) and (AtomsPtr[I] = FAtomNetWmStateExtendedClientArea) then
+              AClient.ExtendedClientArea := True;
           end;
         end;
       finally
@@ -3561,6 +3600,22 @@ begin
   end
   else
     AClient.TransientFor := 0;
+
+  // 14. _NET_WM_EXTENDED_CLIENT_AREA
+  if (FConn <> nil) and (FAtomNetWmExtendedClientArea <> 0) then
+  begin
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FAtomNetWmExtendedClientArea, XCB_ATOM_CARDINAL, 0, 1);
+    PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+    if PropReply <> nil then
+    begin
+      try
+        if xcb_get_property_value_length(PropReply) >= SizeOf(Cardinal) then
+          AClient.ExtendedClientArea := PCardinal(xcb_get_property_value(PropReply))^ <> 0;
+      finally
+        xcb_free(PropReply);
+      end;
+    end;
+  end;
 
   // Fixed-size window detection from WM_NORMAL_HINTS
   if (AClient.MinSize.X > 0) and (AClient.MaxSize.X > 0) and
@@ -3861,7 +3916,27 @@ begin
     end;
   end;
 
-  FrameRect := FFrameMetrics.ClientToFrameRect(AClient.CurrentRect);
+  if AClient.ExtendedClientArea then
+  begin
+    FrameRect := TXCBRect.Create(
+      AClient.CurrentRect.X,
+      AClient.CurrentRect.Y,
+      AClient.CurrentRect.Width + (FFrameMetrics.BorderWidth * 2),
+      AClient.CurrentRect.Height + (FFrameMetrics.BorderWidth * 2)
+    );
+    ClientInnerRect := TXCBRect.Create(
+      FFrameMetrics.BorderWidth,
+      FFrameMetrics.BorderWidth,
+      FrameRect.Width - (FFrameMetrics.BorderWidth * 2),
+      FrameRect.Height - (FFrameMetrics.BorderWidth * 2)
+    );
+  end
+  else
+  begin
+    FrameRect := FFrameMetrics.ClientToFrameRect(AClient.CurrentRect);
+    ClientInnerRect := FFrameMetrics.FrameToClientInnerRect(FrameRect);
+  end;
+
   // Ensure the frame window is not placed off-screen above the top
   if FrameRect.Y < 0 then
     FrameRect.Y := 0;
@@ -3876,8 +3951,6 @@ begin
     AClient.ResizeWindow := 0;
   AClient.CurrentRect := FrameRect;
   AClient.IsReparented := True;
-
-  ClientInnerRect := FFrameMetrics.FrameToClientInnerRect(FrameRect);
 
   xcb_reparent_window(
     FConn,
@@ -3925,10 +3998,20 @@ begin
 
   if FEwmhInitialized then
   begin
-    Values[0] := FFrameMetrics.Insets.Left;
-    Values[1] := FFrameMetrics.Insets.Right;
-    Values[2] := FFrameMetrics.Insets.Top;
-    Values[3] := FFrameMetrics.Insets.Bottom;
+    if AClient.ExtendedClientArea then
+    begin
+      Values[0] := FFrameMetrics.BorderWidth;
+      Values[1] := FFrameMetrics.BorderWidth;
+      Values[2] := 0;
+      Values[3] := FFrameMetrics.BorderWidth;
+    end
+    else
+    begin
+      Values[0] := FFrameMetrics.Insets.Left;
+      Values[1] := FFrameMetrics.Insets.Right;
+      Values[2] := FFrameMetrics.Insets.Top;
+      Values[3] := FFrameMetrics.Insets.Bottom;
+    end;
     xcb_change_property(
       FConn,
       XCB_PROP_MODE_REPLACE,
@@ -4077,7 +4160,17 @@ begin
       else
       begin
         // In offline/mock mode
-        Cli.CurrentRect := FFrameMetrics.ClientToFrameRect(Cli.CurrentRect);
+        if Cli.ExtendedClientArea then
+        begin
+          Cli.CurrentRect := TXCBRect.Create(
+            Cli.CurrentRect.X,
+            Cli.CurrentRect.Y,
+            Cli.CurrentRect.Width + (FFrameMetrics.BorderWidth * 2),
+            Cli.CurrentRect.Height + (FFrameMetrics.BorderWidth * 2)
+          );
+        end
+        else
+          Cli.CurrentRect := FFrameMetrics.ClientToFrameRect(Cli.CurrentRect);
         Cli.IsReparented := True;
       end;
     end;
@@ -4855,7 +4948,9 @@ begin
         else if (PropEv^.atom = FAtomMotifWmHints) or
                 (PropEv^.atom = XCB_ATOM_WM_NORMAL_HINTS) or
                 (PropEv^.atom = XCB_ATOM_WM_TRANSIENT_FOR) or
-                (FEwmhInitialized and (PropEv^.atom = FEwmh._NET_WM_WINDOW_TYPE)) then
+                (PropEv^.atom = FAtomNetWmExtendedClientArea) or
+                (PropEv^.atom = FAtomNetWmStateExtendedClientArea) or
+                (FEwmhInitialized and ((PropEv^.atom = FEwmh._NET_WM_WINDOW_TYPE) or (PropEv^.atom = FEwmh._NET_WM_STATE))) then
         begin
           ReadClientProperties(Cli);
           DoOnClientPropertiesChanged(Cli);

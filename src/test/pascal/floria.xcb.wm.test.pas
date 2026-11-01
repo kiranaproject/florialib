@@ -74,6 +74,7 @@ type
     procedure TestPumpDoesNotStallWithPendingEvents();
     procedure TestPumpBatchIsBounded();
     procedure TestConfigureRequestDoesNotClobberRestoreTarget();
+    procedure TestExtendedClientAreaOffline();
   end;
 
 implementation
@@ -2061,6 +2062,50 @@ begin
     AssertEquals('Restored height', original.Height, Cli.CurrentRect.Height);
     AssertEquals('Restored X', original.X, Cli.CurrentRect.X);
     AssertEquals('Restored Y', original.Y, Cli.CurrentRect.Y);
+  finally
+    Mgr.Free();
+  end;
+end;
+
+procedure TXCBWMTest.TestExtendedClientAreaOffline();
+var
+  Mgr: TXCBWindowManager;
+  CliSSD, CliECA: TXCBWMClient;
+begin
+  Mgr := TXCBWindowManager.Create(nil, 0);
+  try
+    Mgr.FrameMetrics := TXCBFrameMetrics.Create(32, 2);
+
+    // 1. Standard SSD Window
+    CliSSD := TXCBWMClient.Create(101, Mgr);
+    CliSSD.CurrentRect := TXCBRect.Create(100, 100, 500, 400);
+    CliSSD.ExtendedClientArea := False;
+    Mgr.Clients.Add(CliSSD);
+    CliSSD.CurrentRect := Mgr.FrameMetrics.ClientToFrameRect(CliSSD.CurrentRect);
+    CliSSD.IsReparented := True;
+
+    // SSD frame height includes exterior titlebar (32) + borders (2 * 2 = 4) => 400 + 36 = 436
+    AssertEquals('SSD Frame Height', 436, CliSSD.CurrentRect.Height);
+
+    // 2. Extended Client Area Window
+    CliECA := TXCBWMClient.Create(102, Mgr);
+    CliECA.CurrentRect := TXCBRect.Create(100, 100, 500, 400);
+    CliECA.ExtendedClientArea := True;
+    Mgr.Clients.Add(CliECA);
+
+    // Offline framing logic for ECA: no exterior titlebar, only borders
+    CliECA.CurrentRect := TXCBRect.Create(
+      CliECA.CurrentRect.X,
+      CliECA.CurrentRect.Y,
+      CliECA.CurrentRect.Width + (Mgr.FrameMetrics.BorderWidth * 2),
+      CliECA.CurrentRect.Height + (Mgr.FrameMetrics.BorderWidth * 2)
+    );
+    CliECA.IsReparented := True;
+
+    // ECA frame height has NO exterior titlebar: 400 + (2 * 2) = 404
+    AssertEquals('ECA Frame Height has no exterior titlebar', 404, CliECA.CurrentRect.Height);
+    AssertEquals('ECA Frame Width has borders', 504, CliECA.CurrentRect.Width);
+    AssertTrue('ECA property set', CliECA.ExtendedClientArea);
   finally
     Mgr.Free();
   end;
