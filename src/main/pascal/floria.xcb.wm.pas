@@ -1045,6 +1045,11 @@ begin
       NetStates[Count] := FManager.FEwmh._NET_WM_STATE_ABOVE;
       Inc(Count);
     end;
+    if FExtendedClientArea and (FManager.AtomNetWmStateExtendedClientArea <> 0) then
+    begin
+      NetStates[Count] := FManager.AtomNetWmStateExtendedClientArea;
+      Inc(Count);
+    end;
 
     if Count > 0 then
       xcb_change_property(
@@ -4053,7 +4058,15 @@ begin
 
   if AClient.IsReparented then
   begin
-    InnerRect := FFrameMetrics.FrameToClientInnerRect(AClient.CurrentRect);
+    if AClient.ExtendedClientArea then
+      InnerRect := TXCBRect.Create(
+        FFrameMetrics.BorderWidth,
+        FFrameMetrics.BorderWidth,
+        AClient.CurrentRect.Width - (FFrameMetrics.BorderWidth * 2),
+        AClient.CurrentRect.Height - (FFrameMetrics.BorderWidth * 2)
+      )
+    else
+      InnerRect := FFrameMetrics.FrameToClientInnerRect(AClient.CurrentRect);
     // Per ICCCM: coordinates must be in root window coordinate space
     Ce.x := SmallInt(AClient.CurrentRect.X + InnerRect.X);
     Ce.y := SmallInt(AClient.CurrentRect.Y + InnerRect.Y);
@@ -4472,17 +4485,37 @@ begin
 
         if (CfgEv^.window = Cli.ClientWindow) and Cli.IsReparented then
         begin
-          newX := Cli.CurrentRect.X + FFrameMetrics.Insets.Left;
-          newY := Cli.CurrentRect.Y + FFrameMetrics.Insets.Top;
-          newW := Cli.CurrentRect.Width - FFrameMetrics.Insets.Left - FFrameMetrics.Insets.Right;
-          newH := Cli.CurrentRect.Height - FFrameMetrics.Insets.Top - FFrameMetrics.Insets.Bottom;
+          if Cli.ExtendedClientArea then
+          begin
+            newX := Cli.CurrentRect.X + FFrameMetrics.BorderWidth;
+            newY := Cli.CurrentRect.Y + FFrameMetrics.BorderWidth;
+            newW := Cli.CurrentRect.Width - (FFrameMetrics.BorderWidth * 2);
+            newH := Cli.CurrentRect.Height - (FFrameMetrics.BorderWidth * 2);
+          end
+          else
+          begin
+            newX := Cli.CurrentRect.X + FFrameMetrics.Insets.Left;
+            newY := Cli.CurrentRect.Y + FFrameMetrics.Insets.Top;
+            newW := Cli.CurrentRect.Width - FFrameMetrics.Insets.Left - FFrameMetrics.Insets.Right;
+            newH := Cli.CurrentRect.Height - FFrameMetrics.Insets.Top - FFrameMetrics.Insets.Bottom;
+          end;
 
           if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_X) <> 0 then newX := CfgEv^.x;
           if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_Y) <> 0 then newY := CfgEv^.y;
           if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_WIDTH) <> 0 then newW := CfgEv^.width;
           if (CfgEv^.value_mask and XCB_CONFIG_WINDOW_HEIGHT) <> 0 then newH := CfgEv^.height;
 
-          FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
+          if Cli.ExtendedClientArea then
+          begin
+            FrameRect := TXCBRect.Create(
+              newX,
+              newY,
+              newW + (FFrameMetrics.BorderWidth * 2),
+              newH + (FFrameMetrics.BorderWidth * 2)
+            );
+          end
+          else
+            FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
           if FrameRect.Y < 0 then
             FrameRect.Y := 0;
 
@@ -4844,10 +4877,20 @@ begin
                                   (wsFullscreen in Cli.State) or (wsTiledLeft in Cli.State) or (wsTiledRight in Cli.State);
             if Cli.IsDecorated() then
             begin
-              newX := Cli.CurrentRect.X + FFrameMetrics.Insets.Left;
-              newY := Cli.CurrentRect.Y + FFrameMetrics.Insets.Top;
-              newW := Cli.CurrentRect.Width - FFrameMetrics.Insets.Left - FFrameMetrics.Insets.Right;
-              newH := Cli.CurrentRect.Height - FFrameMetrics.Insets.Top - FFrameMetrics.Insets.Bottom;
+              if Cli.ExtendedClientArea then
+              begin
+                newX := Cli.CurrentRect.X + FFrameMetrics.BorderWidth;
+                newY := Cli.CurrentRect.Y + FFrameMetrics.BorderWidth;
+                newW := Cli.CurrentRect.Width - (FFrameMetrics.BorderWidth * 2);
+                newH := Cli.CurrentRect.Height - (FFrameMetrics.BorderWidth * 2);
+              end
+              else
+              begin
+                newX := Cli.CurrentRect.X + FFrameMetrics.Insets.Left;
+                newY := Cli.CurrentRect.Y + FFrameMetrics.Insets.Top;
+                newW := Cli.CurrentRect.Width - FFrameMetrics.Insets.Left - FFrameMetrics.Insets.Right;
+                newH := Cli.CurrentRect.Height - FFrameMetrics.Insets.Top - FFrameMetrics.Insets.Bottom;
+              end;
 
               if (MsgData32^[0] and (1 shl 8)) <> 0 then newX := Integer(MsgData32^[1]);
               if (MsgData32^[0] and (1 shl 9)) <> 0 then newY := Integer(MsgData32^[2]);
@@ -4857,7 +4900,17 @@ begin
                 if (MsgData32^[0] and (1 shl 11)) <> 0 then newH := Integer(MsgData32^[4]);
               end;
 
-              FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
+              if Cli.ExtendedClientArea then
+              begin
+                FrameRect := TXCBRect.Create(
+                  newX,
+                  newY,
+                  newW + (FFrameMetrics.BorderWidth * 2),
+                  newH + (FFrameMetrics.BorderWidth * 2)
+                );
+              end
+              else
+                FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
               if FrameRect.Y < 0 then
                 FrameRect.Y := 0;
 
@@ -4909,6 +4962,13 @@ begin
             FrameExtentsData[1] := 0;
             FrameExtentsData[2] := 0;
             FrameExtentsData[3] := 0;
+          end
+          else if (Cli <> nil) and Cli.ExtendedClientArea then
+          begin
+            FrameExtentsData[0] := FFrameMetrics.BorderWidth;
+            FrameExtentsData[1] := FFrameMetrics.BorderWidth;
+            FrameExtentsData[2] := 0;
+            FrameExtentsData[3] := FFrameMetrics.BorderWidth;
           end
           else
           begin
