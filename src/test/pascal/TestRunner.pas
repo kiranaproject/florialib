@@ -13,6 +13,7 @@ uses
   Floria.CSS.Cascade.Test,
   Floria.XCB.Test,
   Floria.XCB.WM.Test,
+  Floria.XCB.Render.Pictures.Test,
   Floria.XML.Test,
   Floria.SVG.Test,
   Floria.HTML.Test,
