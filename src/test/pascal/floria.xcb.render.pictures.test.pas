@@ -33,10 +33,13 @@ type
     function PictureFor(APixmap: xcb_pixmap_t; ADepth: Byte): xcb_render_picture_t;
   published
     procedure TestPictFormatForDepth();
+    procedure TestPictFormatForVisual();
     procedure TestUnknownDepthHasNoFormat();
     procedure TestScaleHalvesAQuadrantPattern();
     procedure TestOverKeepsTheDestinationUnderTransparentSource();
     procedure TestUnscaledCompositeIsTheIdentity();
+    procedure TestDemultiply();
+    procedure TestReadPixmapReturnsRawBgra();
   end;
 
 implementation
@@ -93,6 +96,37 @@ begin
 
     // The cache must return the same answer the query did, not a re-query that drifts.
     AssertEquals('the cache is stable', format24, XcbRenderPictFormatForDepth(FConn, 24));
+  finally
+    xcb_disconnect(FConn);
+  end;
+end;
+
+procedure TXCBRenderPicturesTest.TestPictFormatForVisual();
+var
+  iter: xcb_screen_iterator_t;
+  visual: xcb_visualid_t;
+  byVisual, byDepth: xcb_render_pictformat_t;
+begin
+  if not Connect() then Exit;
+  try
+    iter := xcb_setup_roots_iterator(xcb_get_setup(FConn));
+    if iter.data = nil then Exit;
+    visual := iter.data^.root_visual;
+
+    byVisual := XcbRenderPictFormatForVisual(FConn, visual);
+    AssertTrue('the root visual has a format', byVisual <> 0);
+
+    // For the root visual the two lookups must agree. If they ever disagree, depth alone
+    // is picking a format with a different channel layout, which would swap red and blue
+    // in every preview.
+    byDepth := XcbRenderPictFormatForDepth(FConn, FDepth);
+    AssertEquals('the visual and depth lookups agree for the root visual',
+                 byDepth, byVisual);
+
+    AssertEquals('the cache is stable', byVisual,
+                 XcbRenderPictFormatForVisual(FConn, visual));
+    AssertEquals('an unknown visual resolves to nothing', 0,
+                 XcbRenderPictFormatForVisual(FConn, $7FFFFFF0));
   finally
     xcb_disconnect(FConn);
   end;
@@ -159,7 +193,7 @@ begin
       end;
 
       AssertTrue('the scaled composite succeeded',
-        XcbRenderCompositeScaled(FConn, src, FDepth, 4, 4, dst, dstFormat,
+        XcbRenderCompositeScaled(FConn, src, XcbRenderPictFormatForDepth(FConn, FDepth), 4, 4, dst, dstFormat,
                                  0, 0, 2, 2, XCB_RENDER_PICT_OP_OVER));
       xcb_flush(FConn);
 
@@ -230,7 +264,7 @@ begin
       FillBlue();
       // No operator argument: the default must be OVER.
       AssertTrue('the OVER composite succeeded',
-        XcbRenderCompositeScaled(FConn, src, 32, 2, 2, dst, dstFormat, 0, 0, 2, 2));
+        XcbRenderCompositeScaled(FConn, src, XcbRenderPictFormatForDepth(FConn, 32), 2, 2, dst, dstFormat, 0, 0, 2, 2));
       xcb_flush(FConn);
 
       image := XcbRenderPixmapToImage(FConn, dst, 2, 2, False);
@@ -247,7 +281,7 @@ begin
       // SRC must lose the blue, which is the behaviour the pipeline must avoid.
       FillBlue();
       AssertTrue('the SRC composite succeeded',
-        XcbRenderCompositeScaled(FConn, src, 32, 2, 2, dst, dstFormat,
+        XcbRenderCompositeScaled(FConn, src, XcbRenderPictFormatForDepth(FConn, 32), 2, 2, dst, dstFormat,
                                  0, 0, 2, 2, XCB_RENDER_PICT_OP_SRC));
       xcb_flush(FConn);
 
@@ -300,7 +334,7 @@ begin
       end;
 
       AssertTrue('the 1:1 composite succeeded',
-        XcbRenderCompositeScaled(FConn, src, FDepth, 2, 2, dst, dstFormat,
+        XcbRenderCompositeScaled(FConn, src, XcbRenderPictFormatForDepth(FConn, FDepth), 2, 2, dst, dstFormat,
                                  0, 0, 2, 2, XCB_RENDER_PICT_OP_OVER));
       xcb_flush(FConn);
 
@@ -317,6 +351,65 @@ begin
     finally
       xcb_free_pixmap(FConn, src);
       xcb_free_pixmap(FConn, dst);
+    end;
+  finally
+    xcb_disconnect(FConn);
+  end;
+end;
+
+procedure TXCBRenderPicturesTest.TestDemultiply();
+var
+  px: array[0..3] of TBgraPixel;
+begin
+  // Premultiplied 50% red is (0, 0, 128, 128); straight is (0, 0, 255, 128).
+  px[0].B := 0; px[0].G := 0; px[0].R := 128; px[0].A := 128;
+  // Opaque is untouched.
+  px[1].B := 10; px[1].G := 20; px[1].R := 30; px[1].A := 255;
+  // Fully transparent has no colour to recover.
+  px[2].B := 0; px[2].G := 0; px[2].R := 0; px[2].A := 0;
+  // Quarter alpha: premultiplied 64 becomes 255 when straightened.
+  px[3].B := 0; px[3].G := 0; px[3].R := 64; px[3].A := 64;
+
+  XcbDemultiplyBgra(@px[0], 4, 1);
+
+  AssertEquals('half alpha red recovers fully', 255, px[0].R);
+  AssertEquals('and alpha is left alone', 128, px[0].A);
+  AssertEquals('opaque red is untouched', 30, px[1].R);
+  AssertEquals('transparent stays black', 0, px[2].R);
+  AssertEquals('quarter alpha recovers fully', 255, px[3].R);
+end;
+
+procedure TXCBRenderPicturesTest.TestReadPixmapReturnsRawBgra();
+var
+  pm: xcb_pixmap_t;
+  pic: xcb_render_picture_t;
+  buf: array of Byte;
+  ok: Boolean;
+begin
+  if not Connect() then Exit;
+  try
+    pm := NewPixmap(4, 4);
+    try
+      pic := PictureFor(pm, FDepth);
+      try
+        XcbRenderFill(FConn, pic, 1, 0, 0, 1, 0, 0, 4, 4);
+      finally
+        XcbRenderFreePicture(FConn, pic);
+      end;
+      xcb_flush(FConn);
+
+      SetLength(buf, 4 * 4 * 4);
+      ok := XcbRenderReadPixmap(FConn, pm, 4, 4, @buf[0], Length(buf));
+      AssertTrue('the read succeeded', ok);
+      AssertEquals('red channel', 255, buf[2]);
+      AssertEquals('green channel', 0, buf[1]);
+      AssertEquals('blue channel', 0, buf[0]);
+
+      // A buffer that is too small must be refused rather than overrun.
+      AssertFalse('a short buffer is refused',
+        XcbRenderReadPixmap(FConn, pm, 4, 4, @buf[0], Length(buf) - 1));
+    finally
+      xcb_free_pixmap(FConn, pm);
     end;
   finally
     xcb_disconnect(FConn);
