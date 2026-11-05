@@ -326,6 +326,7 @@ type
     FHasCloseButton      : Boolean;
     FExtendedClientArea  : Boolean;
     FControlsWindow      : xcb_window_t;
+    FIgnoreUnmap         : Integer;
   public
     constructor Create(const AClientWin: xcb_window_t; const AManager: TXCBWindowManager);
     destructor Destroy(); override;
@@ -388,6 +389,7 @@ type
     property HasCloseButton      : Boolean           read FHasCloseButton write FHasCloseButton;
     property ExtendedClientArea  : Boolean           read FExtendedClientArea write FExtendedClientArea;
     property ControlsWindow      : xcb_window_t      read FControlsWindow write FControlsWindow;
+    property IgnoreUnmap         : Integer           read FIgnoreUnmap write FIgnoreUnmap;
   end;
 
   // TXCBWindowManager
@@ -502,9 +504,10 @@ type
     constructor Create(AConn: Pxcb_connection_t = nil; const AScreenNum: Integer = 0);
     destructor Destroy(); override;
 
-    function ClaimOwnership(): Boolean; virtual;    procedure InitEWMH();
+    function ClaimOwnership(): Boolean; virtual;
+    procedure InitEWMH();
     procedure UpdateAllowedActions(const AClient: TXCBWMClient);
-    procedure ScanWindows();
+    procedure ScanWindows(); virtual;
     function ManageWindow(const AWindow: xcb_window_t): TXCBWMClient;
     procedure UnmanageWindow(const AClient: TXCBWMClient);
     function FindClient(const AWindow: xcb_window_t): TXCBWMClient;
@@ -968,6 +971,7 @@ begin
   FHasCloseButton := True;
   FExtendedClientArea := False;
   FControlsWindow := 0;
+  FIgnoreUnmap := 0;
 end;
 
 destructor TXCBWMClient.Destroy();
@@ -3919,6 +3923,8 @@ var
   TargetMon: TXCBMonitor;
   PlaceX, PlaceY: Integer;
   ParentCli: TXCBWMClient;
+  AttrCookie: xcb_get_window_attributes_cookie_t;
+  AttrReply: Pxcb_get_window_attributes_reply_t;
 begin
   if (AClient = nil) or AClient.IsReparented or (FConn = nil) then Exit;
 
@@ -4074,6 +4080,18 @@ begin
     AClient.ResizeWindow := 0;
   AClient.CurrentRect := FrameRect;
   AClient.IsReparented := True;
+
+  // ICCCM 4.1.4: If the client window was already mapped before reparenting,
+  // the server unmaps it during reparenting and generates an UnmapNotify.
+  // Increment IgnoreUnmap so this event does not prematurely unmanage the client.
+  AttrCookie := xcb_get_window_attributes(FConn, AClient.ClientWindow);
+  AttrReply := xcb_get_window_attributes_reply(FConn, AttrCookie, nil);
+  if AttrReply <> nil then
+  begin
+    if AttrReply^.map_state <> XCB_MAP_STATE_UNMAPPED then
+      Inc(AClient.FIgnoreUnmap);
+    xcb_free(AttrReply);
+  end;
 
   xcb_reparent_window(
     FConn,
@@ -4505,6 +4523,10 @@ var
   I: Integer;
   AttrCookie: xcb_get_window_attributes_cookie_t;
   AttrReply: Pxcb_get_window_attributes_reply_t;
+  WmStateCookie: xcb_get_property_cookie_t;
+  WmStateReply: Pxcb_get_property_reply_t;
+  WmState: Cardinal;
+  Cli: TXCBWMClient;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -4525,10 +4547,29 @@ begin
       if AttrReply <> nil then
       begin
         try
-          if (AttrReply^.override_redirect = 0) and
-             (AttrReply^.map_state <> XCB_MAP_STATE_UNMAPPED) then
+          if AttrReply^.override_redirect = 0 then
           begin
-            ManageWindow(Children[I]);
+            if AttrReply^.map_state <> XCB_MAP_STATE_UNMAPPED then
+              ManageWindow(Children[I])
+            else if FAtomWMState <> 0 then
+            begin
+              // ICCCM 4.1.4: Check for windows in NormalState (1) or IconicState (3)
+              WmStateCookie := xcb_get_property(FConn, 0, Children[I], FAtomWMState, FAtomWMState, 0, 2);
+              WmStateReply := xcb_get_property_reply(FConn, WmStateCookie, nil);
+              if WmStateReply <> nil then
+              begin
+                try
+                  if xcb_get_property_value_length(WmStateReply) >= SizeOf(Cardinal) then
+                  begin
+                    WmState := PCardinal(xcb_get_property_value(WmStateReply))^;
+                    if WmState in [1, 3] then
+                      ManageWindow(Children[I]);
+                  end;
+                finally
+                  xcb_free(WmStateReply);
+                end;
+              end;
+            end;
           end;
         finally
           xcb_free(AttrReply);
@@ -4539,6 +4580,17 @@ begin
     xcb_free(Reply);
   end;
   RecomputeWorkarea();
+
+  // Focus the topmost managed normal or dialog client
+  for I := FClients.Count - 1 downto 0 do
+  begin
+    Cli := TXCBWMClient(FClients[I]);
+    if (Cli <> nil) and (Cli.WindowType in [wtNormal, wtDialog]) and not (wsMinimized in Cli.State) then
+    begin
+      SetActiveClient(Cli);
+      Break;
+    end;
+  end;
 end;
 
 function TXCBWindowManager.ProcessEvent(const AEvent: Pxcb_generic_event_t): Boolean;
@@ -4746,6 +4798,22 @@ begin
       Cli := FindClientByClientWindow(UnmapEv^.window);
       if Cli <> nil then
       begin
+        // ICCCM 4.1.4: If the window was already mapped when the window manager
+        // reparented it, the server generates an UnmapNotify event on the client's
+        // old parent (the root window). The window manager must ignore this event.
+        if Cli.IsReparented and (UnmapEv^.event = FRootWindow) then
+        begin
+          Result := True;
+          Exit;
+        end;
+
+        if Cli.IgnoreUnmap > 0 then
+        begin
+          Dec(Cli.FIgnoreUnmap);
+          Result := True;
+          Exit;
+        end;
+
         if not (wsMinimized in Cli.State) then
           UnmanageWindow(Cli);
       end;
