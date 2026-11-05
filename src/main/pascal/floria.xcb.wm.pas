@@ -1092,7 +1092,17 @@ begin
         xcb_map_window(FManager.Connection, FFrameWindow);
       xcb_map_window(FManager.Connection, FClientWindow);
       if (FResizeWindow <> 0) and not ((wsMaximizedHorz in FState) or (wsFullscreen in FState)) then
+      begin
         xcb_map_window(FManager.Connection, FResizeWindow);
+        if FFrameWindow <> 0 then
+        begin
+          Values[0] := FFrameWindow;
+          Values[1] := XCB_STACK_MODE_BELOW;
+          xcb_configure_window(FManager.Connection, FResizeWindow,
+                               XCB_CONFIG_WINDOW_SIBLING or XCB_CONFIG_WINDOW_STACK_MODE,
+                               @Values[0]);
+        end;
+      end;
     end;
     UpdateEWMHState();
     if (FManager <> nil) and (FManager.Clients <> nil) then
@@ -1375,7 +1385,17 @@ begin
         xcb_map_window(FManager.Connection, FFrameWindow);
       xcb_map_window(FManager.Connection, FClientWindow);
       if (FResizeWindow <> 0) and not ((wsMaximizedHorz in FState) or (wsFullscreen in FState)) then
+      begin
         xcb_map_window(FManager.Connection, FResizeWindow);
+        if FFrameWindow <> 0 then
+        begin
+          Values[0] := FFrameWindow;
+          Values[1] := XCB_STACK_MODE_BELOW;
+          xcb_configure_window(FManager.Connection, FResizeWindow,
+                               XCB_CONFIG_WINDOW_SIBLING or XCB_CONFIG_WINDOW_STACK_MODE,
+                               @Values[0]);
+        end;
+      end;
     end;
     UpdateEWMHState();
     if FManager <> nil then
