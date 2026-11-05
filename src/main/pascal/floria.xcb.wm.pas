@@ -583,6 +583,7 @@ type
     procedure MoveClientToMonitor(const AClient: TXCBWMClient; const ATargetMonitor: TXCBMonitor);
 
     // Reparenting and framing
+    function ConstrainFrameToWorkingDisplay(const AFrameRect: TXCBRect; const AClient: TXCBWMClient = nil): TXCBRect; virtual;
     function CreateResizeWindow(const AClient: TXCBWMClient; const ARect: TXCBRect): xcb_window_t;
     procedure ReparentClient(const AClient: TXCBWMClient);
     procedure UnparentClient(const AClient: TXCBWMClient);
@@ -2753,6 +2754,15 @@ begin
     begin
       HalfW := MonWorkarea.Width div 2;
       Cli.SetGeometry(MonWorkarea.X + HalfW, MonWorkarea.Y, MonWorkarea.Width - HalfW, MonWorkarea.Height);
+    end
+    else
+    begin
+      // Floating window: ensure its titlebar is not covered by newly registered struts
+      if (not (Cli.WindowType in [wtDesktop, wtDock, wtNotification, wtTooltip])) and
+         (Cli.CurrentRect.Y < MonWorkarea.Y) then
+      begin
+        Cli.Move(Cli.CurrentRect.X, MonWorkarea.Y);
+      end;
     end;
   end;
 end;
@@ -3829,6 +3839,76 @@ begin
   Result := ResizeWin;
 end;
 
+function TXCBWindowManager.ConstrainFrameToWorkingDisplay(const AFrameRect: TXCBRect; const AClient: TXCBWMClient = nil): TXCBRect;
+var
+  TargetMon: TXCBMonitor;
+  wa: TXCBRect;
+  ParentCli: TXCBWMClient;
+begin
+  Result := AFrameRect;
+  TargetMon := nil;
+
+  if (AClient <> nil) and (AClient.TransientFor <> 0) then
+  begin
+    ParentCli := FindClientByClientWindow(AClient.TransientFor);
+    if ParentCli = nil then
+      ParentCli := FindClient(AClient.TransientFor);
+    if (ParentCli <> nil) and (ParentCli.WindowType <> wtDock) then
+      TargetMon := MonitorForClient(ParentCli);
+  end;
+
+  if TargetMon = nil then
+    TargetMon := MonitorForRect(AFrameRect);
+  if TargetMon = nil then
+    TargetMon := MonitorForPoint(AFrameRect.X, AFrameRect.Y);
+  if TargetMon = nil then
+    TargetMon := FPrimaryMonitor;
+  if (TargetMon = nil) and (FMonitors <> nil) and (FMonitors.Count > 0) then
+    TargetMon := TXCBMonitor(FMonitors[0]);
+
+  if TargetMon <> nil then
+  begin
+    if (TargetMon.Workarea.Width > 0) and (TargetMon.Workarea.Height > 0) then
+      wa := TargetMon.Workarea
+    else
+      wa := TargetMon.Rect;
+
+    if (TargetMon.Rect.Width > 0) and (TargetMon.Rect.Height > 0) then
+    begin
+      if wa.X < TargetMon.Rect.X then wa.X := TargetMon.Rect.X;
+      if wa.Y < TargetMon.Rect.Y then wa.Y := TargetMon.Rect.Y;
+      if wa.Right() > TargetMon.Rect.Right() then
+        wa.Width := TargetMon.Rect.Right() - wa.X;
+      if wa.Bottom() > TargetMon.Rect.Bottom() then
+        wa.Height := TargetMon.Rect.Bottom() - wa.Y;
+    end;
+  end
+  else if (FWorkarea.Width > 0) and (FWorkarea.Height > 0) then
+    wa := FWorkarea
+  else if FScreen <> nil then
+    wa := TXCBRect.Create(0, 0, FScreen^.width_in_pixels, FScreen^.height_in_pixels)
+  else
+    wa := TXCBRect.Create(0, 0, 1920, 1080);
+
+  // 1. Clamp size so frame does not exceed working display dimensions
+  if (wa.Width > 0) and (Result.Width > wa.Width) then
+    Result.Width := wa.Width;
+  if (wa.Height > 0) and (Result.Height > wa.Height) then
+    Result.Height := wa.Height;
+
+  // 2. Clamp right and bottom edges
+  if Result.Right() > wa.Right() then
+    Result.X := wa.Right() - Result.Width;
+  if Result.Bottom() > wa.Bottom() then
+    Result.Y := wa.Bottom() - Result.Height;
+
+  // 3. Clamp left and top edges (ensures titlebar never goes above topbar/struts)
+  if Result.X < wa.X then
+    Result.X := wa.X;
+  if Result.Y < wa.Y then
+    Result.Y := wa.Y;
+end;
+
 procedure TXCBWindowManager.ReparentClient(const AClient: TXCBWMClient);
 var
   FrameRect, ClientInnerRect: TXCBRect;
@@ -3906,7 +3986,7 @@ begin
   end
   // Case B: Regular windows without explicit coordinates: follow pointer
   else if (AClient.CurrentRect.X = 0) and (AClient.CurrentRect.Y = 0) and
-          not AClient.HasUserPosition and not AClient.HasProgramPosition and
+          not AClient.HasUserPosition and
           not (wsMaximizedHorz in AClient.State) and not (wsFullscreen in AClient.State) then
   begin
     PtrCookie := xcb_query_pointer(FConn, FRootWindow);
@@ -3926,20 +4006,34 @@ begin
         PlaceX := PtrReply^.root_x;
         PlaceY := PtrReply^.root_y;
       end;
-
+      xcb_free(PtrReply);
+    end
+    else
+    begin
+      TargetMon := FPrimaryMonitor;
       if TargetMon <> nil then
       begin
-        if PlaceX + AClient.CurrentRect.Width > TargetMon.Workarea.Right() then
-          PlaceX := Max(TargetMon.Workarea.X, TargetMon.Workarea.Right() - AClient.CurrentRect.Width);
-        if PlaceY + AClient.CurrentRect.Height > TargetMon.Workarea.Bottom() then
-          PlaceY := Max(TargetMon.Workarea.Y, TargetMon.Workarea.Bottom() - AClient.CurrentRect.Height);
-        if PlaceX < TargetMon.Workarea.X then PlaceX := TargetMon.Workarea.X;
-        if PlaceY < TargetMon.Workarea.Y then PlaceY := TargetMon.Workarea.Y;
+        PlaceX := TargetMon.Workarea.X + 50;
+        PlaceY := TargetMon.Workarea.Y + 50;
+      end
+      else
+      begin
+        PlaceX := 50;
+        PlaceY := 50;
       end;
-
-      AClient.CurrentRect := TXCBRect.Create(PlaceX, PlaceY, AClient.CurrentRect.Width, AClient.CurrentRect.Height);
-      xcb_free(PtrReply);
     end;
+
+    if TargetMon <> nil then
+    begin
+      if PlaceX + AClient.CurrentRect.Width > TargetMon.Workarea.Right() then
+        PlaceX := Max(TargetMon.Workarea.X, TargetMon.Workarea.Right() - AClient.CurrentRect.Width);
+      if PlaceY + AClient.CurrentRect.Height > TargetMon.Workarea.Bottom() then
+        PlaceY := Max(TargetMon.Workarea.Y, TargetMon.Workarea.Bottom() - AClient.CurrentRect.Height);
+      if PlaceX < TargetMon.Workarea.X then PlaceX := TargetMon.Workarea.X;
+      if PlaceY < TargetMon.Workarea.Y then PlaceY := TargetMon.Workarea.Y;
+    end;
+
+    AClient.CurrentRect := TXCBRect.Create(PlaceX, PlaceY, AClient.CurrentRect.Width, AClient.CurrentRect.Height);
   end;
 
   if AClient.ExtendedClientArea then
@@ -3950,6 +4044,16 @@ begin
       AClient.CurrentRect.Width + (FFrameMetrics.BorderWidth * 2),
       AClient.CurrentRect.Height + (FFrameMetrics.BorderWidth * 2)
     );
+  end
+  else
+    FrameRect := FFrameMetrics.ClientToFrameRect(AClient.CurrentRect);
+
+  // Ensure the frame window is strictly constrained to the working display
+  if not (wsFullscreen in AClient.State) then
+    FrameRect := ConstrainFrameToWorkingDisplay(FrameRect, AClient);
+
+  if AClient.ExtendedClientArea then
+  begin
     ClientInnerRect := TXCBRect.Create(
       FFrameMetrics.BorderWidth,
       FFrameMetrics.BorderWidth,
@@ -3958,14 +4062,7 @@ begin
     );
   end
   else
-  begin
-    FrameRect := FFrameMetrics.ClientToFrameRect(AClient.CurrentRect);
     ClientInnerRect := FFrameMetrics.FrameToClientInnerRect(FrameRect);
-  end;
-
-  // Ensure the frame window is not placed off-screen above the top
-  if FrameRect.Y < 0 then
-    FrameRect.Y := 0;
 
   FrameWin := CreateFrameWindow(AClient, FrameRect);
   if FrameWin = 0 then Exit;
@@ -4212,6 +4309,8 @@ begin
         end
         else
           Cli.CurrentRect := FFrameMetrics.ClientToFrameRect(Cli.CurrentRect);
+        if not (wsFullscreen in Cli.State) then
+          Cli.CurrentRect := ConstrainFrameToWorkingDisplay(Cli.CurrentRect, Cli);
         Cli.IsReparented := True;
       end;
     end;
@@ -4536,8 +4635,9 @@ begin
           end
           else
             FrameRect := FFrameMetrics.ClientToFrameRect(TXCBRect.Create(newX, newY, newW, newH));
-          if FrameRect.Y < 0 then
-            FrameRect.Y := 0;
+
+          if not (wsFullscreen in Cli.State) then
+            FrameRect := ConstrainFrameToWorkingDisplay(FrameRect, Cli);
 
           if isMaximizedOrTiled then
           begin
