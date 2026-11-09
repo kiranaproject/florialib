@@ -4980,6 +4980,7 @@ begin
                 2: if (wsAbove in Cli.State) then Exclude(Cli.FState, wsAbove) else Include(Cli.FState, wsAbove);
               end;
               Cli.UpdateEWMHState();
+              DoOnClientPropertiesChanged(Cli);
             end;
           end;
         end
