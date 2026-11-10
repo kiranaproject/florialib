@@ -203,7 +203,8 @@ type
     wsHidden,
     wsFocused,
     wsTiledLeft,
-    wsTiledRight
+    wsTiledRight,
+    wsShaded
   );
   TXCBWindowState = set of TXCBWindowStateFlag;
 
@@ -303,6 +304,7 @@ type
     FState               : TXCBWindowState;
     FCurrentRect         : TXCBRect;
     FRestoredRect        : TXCBRect;
+    FUnshadedHeight      : Integer;
     FMinSize             : TXCBPoint;
     FMaxSize             : TXCBPoint;
     FBaseSize            : TXCBPoint;
@@ -366,6 +368,7 @@ type
     property State               : TXCBWindowState   read FState write FState;
     property CurrentRect         : TXCBRect          read FCurrentRect write FCurrentRect;
     property RestoredRect        : TXCBRect          read FRestoredRect write FRestoredRect;
+    property UnshadedHeight     : Integer           read FUnshadedHeight write FUnshadedHeight;
     property MinSize             : TXCBPoint         read FMinSize write FMinSize;
     property MaxSize             : TXCBPoint         read FMaxSize write FMaxSize;
     property BaseSize            : TXCBPoint         read FBaseSize write FBaseSize;
@@ -948,6 +951,7 @@ begin
   FState := [];
   FCurrentRect := TXCBRect.Create(0, 0, 100, 100);
   FRestoredRect := FCurrentRect;
+  FUnshadedHeight := 0;
   FMinSize := TXCBPoint.Create(0, 0);
   FMaxSize := TXCBPoint.Create(0, 0);
   FBaseSize := TXCBPoint.Create(0, 0);
@@ -994,7 +998,7 @@ end;
 
 procedure TXCBWMClient.UpdateEWMHState();
 var
-  NetStates: array[0..7] of xcb_atom_t;
+  NetStates: array[0..15] of xcb_atom_t;
   Count: Integer;
   WmStateData: array[0..1] of Cardinal;
 begin
@@ -1048,6 +1052,21 @@ begin
     if wsAbove in FState then
     begin
       NetStates[Count] := FManager.FEwmh._NET_WM_STATE_ABOVE;
+      Inc(Count);
+    end;
+    if wsBelow in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_BELOW;
+      Inc(Count);
+    end;
+    if wsSticky in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_STICKY;
+      Inc(Count);
+    end;
+    if wsShaded in FState then
+    begin
+      NetStates[Count] := FManager.FEwmh._NET_WM_STATE_SHADED;
       Inc(Count);
     end;
     if FExtendedClientArea and (FManager.AtomNetWmStateExtendedClientArea <> 0) then
@@ -1234,7 +1253,16 @@ begin
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
           (wsTiledLeft in FState) or (wsTiledRight in FState) or
           (wsFullscreen in FState)) then
-    FRestoredRect := FCurrentRect;
+  begin
+    if wsShaded in FState then
+    begin
+      FRestoredRect.X := FCurrentRect.X;
+      FRestoredRect.Y := FCurrentRect.Y;
+      FRestoredRect.Width := FCurrentRect.Width;
+    end
+    else
+      FRestoredRect := FCurrentRect;
+  end;
 
   Exclude(FState, wsTiledLeft);
   Exclude(FState, wsTiledRight);
@@ -1280,7 +1308,16 @@ begin
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
           (wsTiledLeft in FState) or (wsTiledRight in FState) or
           (wsFullscreen in FState)) then
-    FRestoredRect := FCurrentRect;
+  begin
+    if wsShaded in FState then
+    begin
+      FRestoredRect.X := FCurrentRect.X;
+      FRestoredRect.Y := FCurrentRect.Y;
+      FRestoredRect.Width := FCurrentRect.Width;
+    end
+    else
+      FRestoredRect := FCurrentRect;
+  end;
 
   Exclude(FState, wsMaximizedHorz);
   Exclude(FState, wsMaximizedVert);
@@ -1334,7 +1371,16 @@ begin
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
           (wsTiledLeft in FState) or (wsTiledRight in FState) or
           (wsFullscreen in FState)) then
-    FRestoredRect := FCurrentRect;
+  begin
+    if wsShaded in FState then
+    begin
+      FRestoredRect.X := FCurrentRect.X;
+      FRestoredRect.Y := FCurrentRect.Y;
+      FRestoredRect.Width := FCurrentRect.Width;
+    end
+    else
+      FRestoredRect := FCurrentRect;
+  end;
 
   Exclude(FState, wsMaximizedHorz);
   Exclude(FState, wsMaximizedVert);
@@ -1419,7 +1465,7 @@ begin
     if (FRestoredRect.Width > 0) and (FRestoredRect.Height > 0) then
       SetGeometry(FRestoredRect.X, FRestoredRect.Y, FRestoredRect.Width, FRestoredRect.Height);
 
-    if (FManager <> nil) and (FManager.Connection <> nil) and (FResizeWindow <> 0) then
+    if (FManager <> nil) and (FManager.Connection <> nil) and (FResizeWindow <> 0) and not (wsShaded in FState) then
     begin
       xcb_map_window(FManager.Connection, FResizeWindow);
       if FFrameWindow <> 0 then
@@ -1522,8 +1568,18 @@ begin
     if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
             (wsTiledLeft in FState) or (wsTiledRight in FState) or
             (wsFullscreen in FState)) then
-      FRestoredRect := FCurrentRect;
+    begin
+      if wsShaded in FState then
+      begin
+        FRestoredRect.X := FCurrentRect.X;
+        FRestoredRect.Y := FCurrentRect.Y;
+        FRestoredRect.Width := FCurrentRect.Width;
+      end
+      else
+        FRestoredRect := FCurrentRect;
+    end;
 
+    Exclude(FState, wsShaded);
     Include(FState, wsFullscreen);
     if FManager <> nil then
     begin
@@ -1578,111 +1634,167 @@ var
   InnerRect: TXCBRect;
   Rects: array[0..3] of xcb_rectangle_t;
   Margin: Integer;
+  th: Integer;
 begin
-  FCurrentRect.X := AX;
-  FCurrentRect.Y := AY;
-  FCurrentRect.Width := AWidth;
-  FCurrentRect.Height := AHeight;
+  if FManager <> nil then
+    th := FManager.FrameMetrics.TitlebarHeight
+  else
+    th := 24;
+
+  if wsShaded in FState then
+  begin
+    if AHeight > th then
+      FUnshadedHeight := AHeight;
+    FCurrentRect.X := AX;
+    FCurrentRect.Y := AY;
+    FCurrentRect.Width := AWidth;
+    FCurrentRect.Height := th;
+  end
+  else
+  begin
+    FCurrentRect.X := AX;
+    FCurrentRect.Y := AY;
+    FCurrentRect.Width := AWidth;
+    FCurrentRect.Height := AHeight;
+    FUnshadedHeight := AHeight;
+  end;
 
   // Keep FRestoredRect updated whenever the window is in normal (floating) state
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
           (wsFullscreen in FState) or (wsTiledLeft in FState) or (wsTiledRight in FState)) then
-    FRestoredRect := FCurrentRect;
+  begin
+    if wsShaded in FState then
+    begin
+      FRestoredRect.X := FCurrentRect.X;
+      FRestoredRect.Y := FCurrentRect.Y;
+      FRestoredRect.Width := FCurrentRect.Width;
+    end
+    else
+      FRestoredRect := FCurrentRect;
+  end;
 
   if FManager = nil then Exit;
-  if FManager.Connection = nil then Exit;
 
-  if FIsReparented and (FFrameWindow <> 0) then
+  if FManager.Connection <> nil then
   begin
-    // Outer frame geometry
-    Values[0] := AX;
-    Values[1] := AY;
-    Values[2] := AWidth;
-    Values[3] := AHeight;
-    xcb_configure_window(
-      FManager.Connection,
-      FFrameWindow,
-      XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
-      XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
-      @Values[0]
-    );
-
-    // Inner client geometry
-    if FExtendedClientArea then
-      InnerRect := TXCBRect.Create(
-        FManager.FrameMetrics.BorderWidth,
-        FManager.FrameMetrics.BorderWidth,
-        AWidth - (FManager.FrameMetrics.BorderWidth * 2),
-        AHeight - (FManager.FrameMetrics.BorderWidth * 2)
-      )
-    else
-      InnerRect := FManager.FrameMetrics.FrameToClientInnerRect(FCurrentRect);
-    Values[0] := InnerRect.X;
-    Values[1] := InnerRect.Y;
-    Values[2] := InnerRect.Width;
-    Values[3] := InnerRect.Height;
-    xcb_configure_window(
-      FManager.Connection,
-      FClientWindow,
-      XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
-      XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
-      @Values[0]
-    );
-
-    // Outer input-only resize frame geometry
-    if FResizeWindow <> 0 then
+    if FIsReparented and (FFrameWindow <> 0) then
     begin
-      Margin := 8;
-      Values[0] := AX - Margin;
-      Values[1] := AY - Margin;
-      Values[2] := AWidth + (Margin * 2);
-      Values[3] := AHeight + (Margin * 2);
+      // Outer frame geometry
+      Values[0] := AX;
+      Values[1] := AY;
+      Values[2] := AWidth;
+      Values[3] := FCurrentRect.Height;
       xcb_configure_window(
         FManager.Connection,
-        FResizeWindow,
+        FFrameWindow,
         XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
         XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
         @Values[0]
       );
 
-      // Keep input shape in sync with the new window dimensions so outer
-      // resize margins along right, bottom, and bottom-right remain active.
-      Rects[0].x := 0;                       Rects[0].y := 0;
-      Rects[0].width := AWidth + (Margin * 2);
-      Rects[0].height := Margin;                       // top strip
+      // Inner client geometry
+      if wsShaded in FState then
+      begin
+        Values[0] := 0;
+        Values[1] := FCurrentRect.Height;
+        Values[2] := AWidth;
+        Values[3] := 1;
+        xcb_configure_window(
+          FManager.Connection,
+          FClientWindow,
+          XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
+          XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
+          @Values[0]
+        );
+      end
+      else
+      begin
+        if FExtendedClientArea then
+          InnerRect := TXCBRect.Create(
+            FManager.FrameMetrics.BorderWidth,
+            FManager.FrameMetrics.BorderWidth,
+            AWidth - (FManager.FrameMetrics.BorderWidth * 2),
+            AHeight - (FManager.FrameMetrics.BorderWidth * 2)
+          )
+        else
+          InnerRect := FManager.FrameMetrics.FrameToClientInnerRect(FCurrentRect);
+        Values[0] := InnerRect.X;
+        Values[1] := InnerRect.Y;
+        Values[2] := InnerRect.Width;
+        Values[3] := InnerRect.Height;
+        xcb_configure_window(
+          FManager.Connection,
+          FClientWindow,
+          XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
+          XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
+          @Values[0]
+        );
+      end;
 
-      Rects[1].x := 0;                       Rects[1].y := AHeight + Margin;
-      Rects[1].width := AWidth + (Margin * 2);
-      Rects[1].height := Margin;                       // bottom strip
+      // Outer input-only resize frame geometry
+      if FResizeWindow <> 0 then
+      begin
+        if (wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
+           (wsFullscreen in FState) or (wsShaded in FState) then
+        begin
+          xcb_unmap_window(FManager.Connection, FResizeWindow);
+        end
+        else
+        begin
+          Margin := 8;
+          Values[0] := AX - Margin;
+          Values[1] := AY - Margin;
+          Values[2] := AWidth + (Margin * 2);
+          Values[3] := AHeight + (Margin * 2);
+          xcb_configure_window(
+            FManager.Connection,
+            FResizeWindow,
+            XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
+            XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
+            @Values[0]
+          );
 
-      Rects[2].x := 0;                       Rects[2].y := Margin;
-      Rects[2].width := Margin;
-      Rects[2].height := AHeight;                      // left strip
+          // Keep input shape in sync with the new window dimensions so outer
+          // resize margins along right, bottom, and bottom-right remain active.
+          Rects[0].x := 0;                       Rects[0].y := 0;
+          Rects[0].width := AWidth + (Margin * 2);
+          Rects[0].height := Margin;                       // top strip
 
-      Rects[3].x := AWidth + Margin;         Rects[3].y := Margin;
-      Rects[3].width := Margin;
-      Rects[3].height := AHeight;                      // right strip
+          Rects[1].x := 0;                       Rects[1].y := AHeight + Margin;
+          Rects[1].width := AWidth + (Margin * 2);
+          Rects[1].height := Margin;                       // bottom strip
 
-      xcb_shape_rectangles(FManager.Connection, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT,
-                           XCB_SHAPE_SO_SET, FResizeWindow, 0, 0, 4, @Rects[0]);
+          Rects[2].x := 0;                       Rects[2].y := Margin;
+          Rects[2].width := Margin;
+          Rects[2].height := AHeight;                      // left strip
+
+          Rects[3].x := AWidth + Margin;         Rects[3].y := Margin;
+          Rects[3].width := Margin;
+          Rects[3].height := AHeight;                      // right strip
+
+          xcb_shape_rectangles(FManager.Connection, XCB_SHAPE_SO_SET, XCB_SHAPE_SK_INPUT,
+                               XCB_SHAPE_SO_SET, FResizeWindow, 0, 0, 4, @Rects[0]);
+        end;
+      end;
+    end
+    else
+    begin
+      Values[0] := AX;
+      Values[1] := AY;
+      Values[2] := AWidth;
+      Values[3] := AHeight;
+      xcb_configure_window(
+        FManager.Connection,
+        FClientWindow,
+        XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
+        XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
+        @Values[0]
+      );
     end;
-  end
-  else
-  begin
-    Values[0] := AX;
-    Values[1] := AY;
-    Values[2] := AWidth;
-    Values[3] := AHeight;
-    xcb_configure_window(
-      FManager.Connection,
-      FClientWindow,
-      XCB_CONFIG_WINDOW_X or XCB_CONFIG_WINDOW_Y or
-      XCB_CONFIG_WINDOW_WIDTH or XCB_CONFIG_WINDOW_HEIGHT,
-      @Values[0]
-    );
+
+    xcb_flush(FManager.Connection);
   end;
 
-  xcb_flush(FManager.Connection);
   FManager.DoOnClientConfigure(Self);
 end;
 
@@ -2293,7 +2405,7 @@ end;
 procedure TXCBWindowManager.InitEWMH();
 var
   Cookies: Pxcb_intern_atom_cookie_t;
-  SuppAtoms: array[0..54] of xcb_atom_t;
+  SuppAtoms: array[0..55] of xcb_atom_t;
 begin
   if (FConn = nil) or (FRootWindow = 0) then Exit;
 
@@ -2414,6 +2526,7 @@ begin
   SuppAtoms[52] := FAtomNetWmExtendedClientArea;
   SuppAtoms[53] := FAtomNetWmStateExtendedClientArea;
   SuppAtoms[54] := FAtomNetWmWindowControlsInset;
+  SuppAtoms[55] := FEwmh._NET_WM_STATE_SHADED;
 
   xcb_change_property(
     FConn,
@@ -2422,7 +2535,7 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    55,
+    56,
     @SuppAtoms[0]
   );
 
@@ -3142,7 +3255,13 @@ begin
     if NewY < ATargetMonitor.Rect.Y then NewY := ATargetMonitor.Rect.Y;
 
     AClient.Move(NewX, NewY);
-    AClient.RestoredRect := AClient.CurrentRect;
+    if not (wsShaded in AClient.State) then
+      AClient.RestoredRect := AClient.CurrentRect
+    else
+    begin
+      AClient.FRestoredRect.X := AClient.CurrentRect.X;
+      AClient.FRestoredRect.Y := AClient.CurrentRect.Y;
+    end;
   end;
 end;
 
@@ -3563,6 +3682,12 @@ begin
               Include(AClient.FState, wsMinimized)
             else if AtomsPtr[I] = FEwmh._NET_WM_STATE_ABOVE then
               Include(AClient.FState, wsAbove)
+            else if AtomsPtr[I] = FEwmh._NET_WM_STATE_BELOW then
+              Include(AClient.FState, wsBelow)
+            else if AtomsPtr[I] = FEwmh._NET_WM_STATE_STICKY then
+              Include(AClient.FState, wsSticky)
+            else if AtomsPtr[I] = FEwmh._NET_WM_STATE_SHADED then
+              Include(AClient.FState, wsShaded)
             else if (FAtomNetWmStateExtendedClientArea <> 0) and (AtomsPtr[I] = FAtomNetWmStateExtendedClientArea) then
               AClient.ExtendedClientArea := True;
           end;
@@ -4652,7 +4777,8 @@ begin
       if Cli <> nil then
       begin
         isMaximizedOrTiled := (wsMaximizedHorz in Cli.State) or (wsMaximizedVert in Cli.State) or
-                              (wsFullscreen in Cli.State) or (wsTiledLeft in Cli.State) or (wsTiledRight in Cli.State);
+                              (wsFullscreen in Cli.State) or (wsTiledLeft in Cli.State) or (wsTiledRight in Cli.State) or
+                              (wsShaded in Cli.State);
 
         if (CfgEv^.window = Cli.ClientWindow) and Cli.IsReparented then
         begin
@@ -4981,6 +5107,17 @@ begin
               end;
               Cli.UpdateEWMHState();
               DoOnClientPropertiesChanged(Cli);
+            end
+            else if (MsgData32^[1] = FEwmh._NET_WM_STATE_SHADED) or
+                    (MsgData32^[2] = FEwmh._NET_WM_STATE_SHADED) then
+            begin
+              case MsgData32^[0] of
+                0: Exclude(Cli.FState, wsShaded);
+                1: Include(Cli.FState, wsShaded);
+                2: if (wsShaded in Cli.State) then Exclude(Cli.FState, wsShaded) else Include(Cli.FState, wsShaded);
+              end;
+              Cli.UpdateEWMHState();
+              DoOnClientPropertiesChanged(Cli);
             end;
           end;
         end
@@ -5063,7 +5200,8 @@ begin
           if Cli <> nil then
           begin
             isMaximizedOrTiled := (wsMaximizedHorz in Cli.State) or (wsMaximizedVert in Cli.State) or
-                                  (wsFullscreen in Cli.State) or (wsTiledLeft in Cli.State) or (wsTiledRight in Cli.State);
+                                  (wsFullscreen in Cli.State) or (wsTiledLeft in Cli.State) or (wsTiledRight in Cli.State) or
+                                  (wsShaded in Cli.State);
             if Cli.IsDecorated() then
             begin
               if Cli.ExtendedClientArea then
@@ -5105,7 +5243,8 @@ begin
 
               if isMaximizedOrTiled then
               begin
-                Cli.RestoredRect := FrameRect;
+                if not (wsShaded in Cli.State) then
+                  Cli.RestoredRect := FrameRect;
                 SendSyntheticConfigureNotify(Cli);
               end
               else
@@ -5131,7 +5270,8 @@ begin
 
               if isMaximizedOrTiled then
               begin
-                Cli.RestoredRect := TXCBRect.Create(newX, newY, newW, newH);
+                if not (wsShaded in Cli.State) then
+                  Cli.RestoredRect := TXCBRect.Create(newX, newY, newW, newH);
                 SendSyntheticConfigureNotify(Cli);
               end
               else
@@ -5762,7 +5902,14 @@ begin
           (wsFullscreen in FDragClient.State) or (wsTiledLeft in FDragClient.State) or
           (wsTiledRight in FDragClient.State)) then
   begin
-    FDragClient.RestoredRect := FDragClient.CurrentRect;
+    if wsShaded in FDragClient.State then
+    begin
+      FDragClient.FRestoredRect.X := FDragClient.FCurrentRect.X;
+      FDragClient.FRestoredRect.Y := FDragClient.FCurrentRect.Y;
+      FDragClient.FRestoredRect.Width := FDragClient.FCurrentRect.Width;
+    end
+    else
+      FDragClient.RestoredRect := FDragClient.CurrentRect;
   end;
 
   if FConn <> nil then
