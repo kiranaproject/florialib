@@ -179,7 +179,7 @@ type
     // client sits.
     property FrameImage     : TFloriaImage           read FImage write FImage;
     // Client surface image, nil when undecorated.
-    property ClientImage    : TFloriaImage           read FClientImage;
+    property ClientImage    : TFloriaImage           read FClientImage write FClientImage;
     // Where the client surface sits, relative to the frame's top-left.
     property ClientOffset   : TXCBPoint              read FClientOffset;
     property HasAlphaChannel: Boolean                read FHasAlphaChannel write FHasAlphaChannel;

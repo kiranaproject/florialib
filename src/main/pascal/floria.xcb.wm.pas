@@ -305,6 +305,7 @@ type
     FCurrentRect         : TXCBRect;
     FRestoredRect        : TXCBRect;
     FUnshadedHeight      : Integer;
+    FIconGeometry        : TXCBRect;
     FMinSize             : TXCBPoint;
     FMaxSize             : TXCBPoint;
     FBaseSize            : TXCBPoint;
@@ -369,6 +370,7 @@ type
     property CurrentRect         : TXCBRect          read FCurrentRect write FCurrentRect;
     property RestoredRect        : TXCBRect          read FRestoredRect write FRestoredRect;
     property UnshadedHeight     : Integer           read FUnshadedHeight write FUnshadedHeight;
+    property IconGeometry        : TXCBRect          read FIconGeometry write FIconGeometry;
     property MinSize             : TXCBPoint         read FMinSize write FMinSize;
     property MaxSize             : TXCBPoint         read FMaxSize write FMaxSize;
     property BaseSize            : TXCBPoint         read FBaseSize write FBaseSize;
@@ -952,6 +954,7 @@ begin
   FCurrentRect := TXCBRect.Create(0, 0, 100, 100);
   FRestoredRect := FCurrentRect;
   FUnshadedHeight := 0;
+  FIconGeometry := TXCBRect.Create(0, 0, 0, 0);
   FMinSize := TXCBPoint.Create(0, 0);
   FMaxSize := TXCBPoint.Create(0, 0);
   FBaseSize := TXCBPoint.Create(0, 0);
@@ -2527,6 +2530,7 @@ begin
   SuppAtoms[53] := FAtomNetWmStateExtendedClientArea;
   SuppAtoms[54] := FAtomNetWmWindowControlsInset;
   SuppAtoms[55] := FEwmh._NET_WM_STATE_SHADED;
+  SuppAtoms[56] := FEwmh._NET_WM_ICON_GEOMETRY;
 
   xcb_change_property(
     FConn,
@@ -2535,7 +2539,7 @@ begin
     FEwmh._NET_SUPPORTED,
     XCB_ATOM_ATOM,
     32,
-    56,
+    57,
     @SuppAtoms[0]
   );
 
@@ -3315,6 +3319,7 @@ var
   P1, P2: PAnsiChar;
   MwmHintsPtr: PXCBMwmHints;
   SizeHints: xcb_size_hints_t;
+  CardPtr: PCardinal;
 begin
   if (FConn = nil) or (AClient = nil) then Exit;
 
@@ -3708,6 +3713,28 @@ begin
       try
         if xcb_get_property_value_length(PropReply) >= SizeOf(Cardinal) then
           AClient.FDesktop := Integer(PCardinal(xcb_get_property_value(PropReply))^);
+      finally
+        xcb_free(PropReply);
+      end;
+    end;
+  end;
+
+  // 12. _NET_WM_ICON_GEOMETRY
+  if (FConn <> nil) and FEwmhInitialized and (FEwmh._NET_WM_ICON_GEOMETRY <> 0) then
+  begin
+    PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FEwmh._NET_WM_ICON_GEOMETRY, XCB_ATOM_CARDINAL, 0, 4);
+    PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
+    if PropReply <> nil then
+    begin
+      try
+        if (PropReply^.type_ = XCB_ATOM_CARDINAL) and
+           (xcb_get_property_value_length(PropReply) >= (4 * SizeOf(Cardinal))) then
+        begin
+          CardPtr := PCardinal(xcb_get_property_value(PropReply));
+          AClient.FIconGeometry := TXCBRect.Create(CardPtr[0], CardPtr[1], CardPtr[2], CardPtr[3]);
+        end
+        else
+          AClient.FIconGeometry := TXCBRect.Create(0, 0, 0, 0);
       finally
         xcb_free(PropReply);
       end;
@@ -5354,6 +5381,11 @@ begin
           DoOnClientPropertiesChanged(Cli);
         end
         else if FEwmhInitialized and ((PropEv^.atom = FEwmh._NET_WM_NAME) or (PropEv^.atom = XCB_ATOM_WM_NAME)) then
+        begin
+          ReadClientProperties(Cli);
+          DoOnClientPropertiesChanged(Cli);
+        end
+        else if FEwmhInitialized and (PropEv^.atom = FEwmh._NET_WM_ICON_GEOMETRY) then
         begin
           ReadClientProperties(Cli);
           DoOnClientPropertiesChanged(Cli);
