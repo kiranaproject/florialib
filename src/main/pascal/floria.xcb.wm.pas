@@ -501,6 +501,11 @@ type
     procedure DoOnClientConfigure(const AClient: TXCBWMClient); virtual;
     procedure DoOnClientMinimized(const AClient: TXCBWMClient); virtual;
     procedure DoOnClientRestored(const AClient: TXCBWMClient); virtual;
+    procedure DoOnBeforeClientStateChange(const AClient: TXCBWMClient); virtual;
+    procedure DoOnClientMaximized(const AClient: TXCBWMClient; const AOldRect: TXCBRect); virtual;
+    procedure DoOnClientRestoredFromMaximized(const AClient: TXCBWMClient; const AOldRect: TXCBRect); virtual;
+    procedure DoOnClientTiled(const AClient: TXCBWMClient; const AOldRect: TXCBRect); virtual;
+    procedure DoOnClientRestoredFromTiled(const AClient: TXCBWMClient; const AOldRect: TXCBRect); virtual;
     procedure DoOnDesktopChanged(const AOldDesktop, ANewDesktop: Integer); virtual;
     procedure DoOnWorkareaChanged(const AOldWorkarea, ANewWorkarea: TXCBRect); virtual;
     procedure DoOnFramePaint(const AClient: TXCBWMClient; const ARect: TXCBRect); virtual;
@@ -1248,10 +1253,15 @@ end;
 
 procedure TXCBWMClient.Maximize();
 var
-  TargetRect: TXCBRect;
+  TargetRect, OldRect: TXCBRect;
   TargetMon: TXCBMonitor;
 begin
   if not FCanMaximize then Exit;
+  OldRect := FCurrentRect;
+
+  if FManager <> nil then
+    FManager.DoOnBeforeClientStateChange(Self);
+
   // Only update FRestoredRect if not already tiled, maximized, or fullscreen
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
           (wsTiledLeft in FState) or (wsTiledRight in FState) or
@@ -1287,12 +1297,14 @@ begin
       else
         TargetRect := TXCBRect.Create(0, 0, 1920, 1080);
     end;
+
     SetGeometry(TargetRect.X, TargetRect.Y, TargetRect.Width, TargetRect.Height);
     if (FManager.Connection <> nil) and (FResizeWindow <> 0) then
     begin
       xcb_unmap_window(FManager.Connection, FResizeWindow);
       xcb_flush(FManager.Connection);
     end;
+    FManager.DoOnClientMaximized(Self, OldRect);
   end;
 
   UpdateEWMHState();
@@ -1300,12 +1312,16 @@ end;
 
 procedure TXCBWMClient.TileLeft();
 var
-  TargetRect: TXCBRect;
+  TargetRect, OldRect: TXCBRect;
   TargetMon: TXCBMonitor;
   sw, sh: Integer;
 begin
   if not FCanResize then Exit;
   if (wsTiledLeft in FState) then Exit;
+  OldRect := FCurrentRect;
+
+  if FManager <> nil then
+    FManager.DoOnBeforeClientStateChange(Self);
 
   // Only update FRestoredRect if not already tiled, maximized, or fullscreen
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
@@ -1342,6 +1358,7 @@ begin
       sh := TargetRect.Height;
       SetGeometry(TargetRect.X, TargetRect.Y, sw div 2, sh);
       UpdateEWMHState();
+      FManager.DoOnClientTiled(Self, OldRect);
       Exit;
     end;
 
@@ -1356,6 +1373,9 @@ begin
       sh := 1080;
     end;
     SetGeometry(0, 0, sw div 2, sh);
+    UpdateEWMHState();
+    FManager.DoOnClientTiled(Self, OldRect);
+    Exit;
   end;
 
   UpdateEWMHState();
@@ -1363,12 +1383,16 @@ end;
 
 procedure TXCBWMClient.TileRight();
 var
-  TargetRect: TXCBRect;
+  TargetRect, OldRect: TXCBRect;
   TargetMon: TXCBMonitor;
   sw, sh: Integer;
 begin
   if not FCanResize then Exit;
   if (wsTiledRight in FState) then Exit;
+  OldRect := FCurrentRect;
+
+  if FManager <> nil then
+    FManager.DoOnBeforeClientStateChange(Self);
 
   // Only update FRestoredRect if not already tiled, maximized, or fullscreen
   if not ((wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or
@@ -1405,6 +1429,7 @@ begin
       sh := TargetRect.Height;
       SetGeometry(TargetRect.X + (sw div 2), TargetRect.Y, sw - (sw div 2), sh);
       UpdateEWMHState();
+      FManager.DoOnClientTiled(Self, OldRect);
       Exit;
     end;
 
@@ -1419,6 +1444,9 @@ begin
       sh := 1080;
     end;
     SetGeometry(sw div 2, 0, sw - (sw div 2), sh);
+    UpdateEWMHState();
+    FManager.DoOnClientTiled(Self, OldRect);
+    Exit;
   end;
 
   UpdateEWMHState();
@@ -1427,8 +1455,10 @@ end;
 procedure TXCBWMClient.Restore();
 var
   Values: array[0..1] of Cardinal;
-  WasMinimized: Boolean;
+  WasMinimized, WasMaximized, WasTiled: Boolean;
+  OldRect: TXCBRect;
 begin
+  OldRect := FCurrentRect;
   WasMinimized := wsMinimized in FState;
   if WasMinimized then
   begin
@@ -1456,9 +1486,14 @@ begin
       FManager.DoOnClientRestored(Self);
   end;
 
-  if (wsMaximizedHorz in FState) or (wsMaximizedVert in FState) or (wsFullscreen in FState) or
-     (wsTiledLeft in FState) or (wsTiledRight in FState) then
+  WasMaximized := (wsMaximizedHorz in FState) or (wsMaximizedVert in FState);
+  WasTiled := (wsTiledLeft in FState) or (wsTiledRight in FState);
+
+  if WasMaximized or (wsFullscreen in FState) or WasTiled then
   begin
+    if FManager <> nil then
+      FManager.DoOnBeforeClientStateChange(Self);
+
     Exclude(FState, wsMaximizedHorz);
     Exclude(FState, wsMaximizedVert);
     Exclude(FState, wsFullscreen);
@@ -1466,7 +1501,16 @@ begin
     Exclude(FState, wsTiledRight);
 
     if (FRestoredRect.Width > 0) and (FRestoredRect.Height > 0) then
+    begin
       SetGeometry(FRestoredRect.X, FRestoredRect.Y, FRestoredRect.Width, FRestoredRect.Height);
+      if FManager <> nil then
+      begin
+        if WasMaximized then
+          FManager.DoOnClientRestoredFromMaximized(Self, OldRect)
+        else if WasTiled then
+          FManager.DoOnClientRestoredFromTiled(Self, OldRect);
+      end;
+    end;
 
     if (FManager <> nil) and (FManager.Connection <> nil) and (FResizeWindow <> 0) and not (wsShaded in FState) then
     begin
@@ -6004,6 +6048,31 @@ begin
 end;
 
 procedure TXCBWindowManager.DoOnClientRestored(const AClient: TXCBWMClient);
+begin
+  // Subclasses override
+end;
+
+procedure TXCBWindowManager.DoOnBeforeClientStateChange(const AClient: TXCBWMClient);
+begin
+  // Subclasses override
+end;
+
+procedure TXCBWindowManager.DoOnClientMaximized(const AClient: TXCBWMClient; const AOldRect: TXCBRect);
+begin
+  // Subclasses override
+end;
+
+procedure TXCBWindowManager.DoOnClientRestoredFromMaximized(const AClient: TXCBWMClient; const AOldRect: TXCBRect);
+begin
+  // Subclasses override
+end;
+
+procedure TXCBWindowManager.DoOnClientTiled(const AClient: TXCBWMClient; const AOldRect: TXCBRect);
+begin
+  // Subclasses override
+end;
+
+procedure TXCBWindowManager.DoOnClientRestoredFromTiled(const AClient: TXCBWMClient; const AOldRect: TXCBRect);
 begin
   // Subclasses override
 end;
