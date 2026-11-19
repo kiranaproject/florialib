@@ -74,6 +74,7 @@ type
   // Base image writer codec class
   TFloriaImageWriter = class
   public
+    constructor Create(); virtual;
     class function Format(): TFloriaImageFormat; virtual;
     procedure WriteImage(AStream: TStream; AImage: TFloriaImage); virtual; abstract;
   end;
@@ -228,6 +229,11 @@ end;
 class function TFloriaImageReader.Format(): TFloriaImageFormat;
 begin
   Result := fifUnknown;
+end;
+
+constructor TFloriaImageWriter.Create();
+begin
+  inherited Create();
 end;
 
 class function TFloriaImageWriter.Format(): TFloriaImageFormat;
