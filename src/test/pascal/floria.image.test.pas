@@ -15,7 +15,8 @@ uses
   Floria.Image.Core,
   Floria.Image.BMP,
   Floria.Image.PNG,
-  Floria.Image.JPEG;
+  Floria.Image.JPEG,
+  Floria.Image.WebP;
 
 type
   TFakeImageReader = class(TFloriaImageReader)
@@ -42,6 +43,8 @@ type
     procedure TestPremultipliedAlpha();
     procedure TestBaselineJPEGDecode();
     procedure TestProgressiveJPEGDecode();
+    procedure TestWebPDecode();
+    procedure TestWebPRoundTrip();
   end;
 
 implementation
@@ -437,6 +440,7 @@ var
   DummyBMP: array[0..1] of Byte = ($42, $4D); // 'BM'
   DummyPNG: array[0..7] of Byte = ($89, $50, $4E, $47, $0D, $0A, $1A, $0A);
   DummyJPEG: array[0..2] of Byte = ($FF, $D8, $FF);
+  DummyWebP: array[0..11] of Byte = ($52, $49, $46, $46, $00, $00, $00, $00, $57, $45, $42, $50);
   DummyRandom: array[0..3] of Byte = ($12, $34, $56, $78);
 begin
   MS := TMemoryStream.Create();
@@ -454,6 +458,11 @@ begin
     MS.WriteBuffer(DummyJPEG[0], 3);
     MS.Position := 0;
     AssertEquals('Autodetect JPEG', Integer(fifJPEG), Integer(DetectImageFormat(MS)));
+
+    MS.Clear();
+    MS.WriteBuffer(DummyWebP[0], 12);
+    MS.Position := 0;
+    AssertEquals('Autodetect WebP', Integer(fifWebP), Integer(DetectImageFormat(MS)));
 
     MS.Clear();
     MS.WriteBuffer(DummyRandom[0], 4);
@@ -637,6 +646,91 @@ begin
     AssertEquals('Stride matches 4 bytes per pixel', img.Width * 4, img.Stride);
   finally
     img.Free();
+  end;
+end;
+
+procedure TFloriaImageTest.TestWebPDecode();
+var
+  TestPath: string;
+  Img: TFloriaImage;
+  Pix: TBgraPixel;
+  FS: TFileStream;
+begin
+  if not IsWebPAvailable() then Exit;
+
+  TestPath := '/home/afumi/Documents/projects/kirana/configsama/scratch/cfsettings.webp';
+  if not FileExists(TestPath) then Exit;
+
+  FS := TFileStream.Create(TestPath, fmOpenRead or fmShareDenyNone);
+  try
+    AssertEquals('DetectImageFormat identifies WebP', Integer(fifWebP), Integer(DetectImageFormat(FS)));
+  finally
+    FS.Free();
+  end;
+
+  Img := TFloriaImage.CreateFromFile(TestPath);
+  try
+    AssertEquals('WebP Decoded Width', 1200, Img.Width);
+    AssertEquals('WebP Decoded Height', 675, Img.Height);
+    AssertEquals('WebP Decoded Stride', 1200 * 4, Img.Stride);
+    AssertNotNull('WebP PixelBuffer allocated', Img.PixelBuffer);
+
+    Pix := Img.Pixels[600, 337];
+    AssertEquals('WebP center pixel alpha is 255', 255, Pix.A);
+  finally
+    Img.Free();
+  end;
+end;
+
+procedure TFloriaImageTest.TestWebPRoundTrip();
+var
+  OrigImg, DecodedImg: TFloriaImage;
+  MS: TMemoryStream;
+  Pix, DecPix: TBgraPixel;
+  X, Y: Integer;
+begin
+  if not IsWebPAvailable() then Exit;
+
+  OrigImg := TFloriaImage.Create(32, 32, fpfBGRA32);
+  try
+    for Y := 0 to 31 do
+      for X := 0 to 31 do
+        OrigImg.Pixels[X, Y] := TBgraPixel.Create(Byte(X * 8), Byte(Y * 8), Byte((X + Y) * 4), 255);
+
+    MS := TMemoryStream.Create();
+    try
+      OrigImg.SaveToStream(MS, fifWebP);
+      AssertTrue('WebP stream size > 0', MS.Size > 0);
+
+      MS.Position := 0;
+      AssertEquals('DetectImageFormat on encoded WebP', Integer(fifWebP), Integer(DetectImageFormat(MS)));
+
+      MS.Position := 0;
+      DecodedImg := TFloriaImage.CreateFromStream(MS);
+      try
+        AssertEquals('Roundtrip Width', 32, DecodedImg.Width);
+        AssertEquals('Roundtrip Height', 32, DecodedImg.Height);
+        AssertEquals('Roundtrip Stride', 32 * 4, DecodedImg.Stride);
+
+        // Verify lossless reproduction
+        for Y := 0 to 31 do
+          for X := 0 to 31 do
+          begin
+            Pix := OrigImg.Pixels[X, Y];
+            DecPix := DecodedImg.Pixels[X, Y];
+            AssertEquals(Format('R at %d,%d', [X, Y]), Pix.R, DecPix.R);
+            AssertEquals(Format('G at %d,%d', [X, Y]), Pix.G, DecPix.G);
+            AssertEquals(Format('B at %d,%d', [X, Y]), Pix.B, DecPix.B);
+            AssertEquals(Format('A at %d,%d', [X, Y]), Pix.A, DecPix.A);
+          end;
+      finally
+        DecodedImg.Free();
+      end;
+    finally
+      MS.Free();
+    end;
+  finally
+    OrigImg.Free();
   end;
 end;
 

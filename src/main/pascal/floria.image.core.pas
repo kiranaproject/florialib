@@ -55,7 +55,8 @@ type
     fifUnknown,
     fifBMP,
     fifPNG,
-    fifJPEG
+    fifJPEG,
+    fifWebP
   );
 
   // Forward declaration
@@ -918,6 +919,7 @@ begin
     if (Ext = '.bmp') then Fmt := fifBMP
     else if (Ext = '.png') then Fmt := fifPNG
     else if (Ext = '.jpg') or (Ext = '.jpeg') then Fmt := fifJPEG
+    else if (Ext = '.webp') then Fmt := fifWebP
     else Fmt := fifBMP;
   end;
 
