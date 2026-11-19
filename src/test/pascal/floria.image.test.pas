@@ -41,6 +41,7 @@ type
     procedure TestInvalidStreamHandling();
     procedure TestPremultipliedAlpha();
     procedure TestBaselineJPEGDecode();
+    procedure TestProgressiveJPEGDecode();
   end;
 
 implementation
@@ -602,6 +603,40 @@ begin
     AssertEquals('Decoded center pixel alpha is 255', 255, Pix.A);
   finally
     Img.Free();
+  end;
+end;
+
+procedure TFloriaImageTest.TestProgressiveJPEGDecode();
+var
+  candidatePaths: array[0..2] of string;
+  foundPath: string;
+  i: Integer;
+  img: TFloriaImage;
+begin
+  candidatePaths[0] := '/usr/share/backgrounds/ubuntu-mate-common/Grey-Jazz.jpg';
+  candidatePaths[1] := '/usr/share/backgrounds/ubuntu-mate-common/Ubuntu-MATE-Splash.jpg';
+  candidatePaths[2] := '/usr/share/backgrounds/afumi/wp5327130-winter-alps-wallpapers.jpg';
+
+  foundPath := '';
+  for i := 0 to High(candidatePaths) do
+  begin
+    if FileExists(candidatePaths[i]) then
+    begin
+      foundPath := candidatePaths[i];
+      Break;
+    end;
+  end;
+
+  if foundPath = '' then Exit;
+
+  img := TFloriaImage.CreateFromFile(foundPath);
+  try
+    AssertTrue('Decoded width must be > 0', img.Width > 0);
+    AssertTrue('Decoded height must be > 0', img.Height > 0);
+    AssertNotNull('PixelBuffer must be allocated', img.PixelBuffer);
+    AssertEquals('Stride matches 4 bytes per pixel', img.Width * 4, img.Stride);
+  finally
+    img.Free();
   end;
 end;
 
