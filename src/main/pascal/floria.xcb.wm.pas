@@ -4539,6 +4539,23 @@ begin
                    XCB_EVENT_MASK_FOCUS_CHANGE;
       xcb_change_window_attributes(FConn, Cli.ClientWindow, XCB_CW_EVENT_MASK, @EventMask);
 
+      // Passive grab on mouse button 1 for click-to-focus on unparented/borderless windows
+      if not Cli.IsReparented then
+      begin
+        xcb_grab_button(
+          FConn,
+          0,
+          Cli.ClientWindow,
+          XCB_EVENT_MASK_BUTTON_PRESS,
+          XCB_GRAB_MODE_SYNC,
+          XCB_GRAB_MODE_ASYNC,
+          XCB_NONE,
+          XCB_NONE,
+          XCB_BUTTON_INDEX_1,
+          XCB_MOD_MASK_ANY
+        );
+      end;
+
       // Passive grabs on <Alt> + Button1 (move) and <Alt> + Button3 (resize).
       // The modifier comes from the resolved map, not the hardcoded Mod1, and the
       // NumLock variant is included so a locked keypad does not defeat the grab.
@@ -5739,7 +5756,9 @@ begin
   if AClient = FActiveClient then Exit;
 
   // Only manage real, visible clients.
-  if not AClient.IsReparented and (AClient.WindowType <> wtDesktop) then Exit;
+  if not AClient.IsReparented and not AClient.Borderless and
+     not (AClient.WindowType in [wtNormal, wtDialog, wtUtility]) and
+     (AClient.WindowType <> wtDesktop) then Exit;
   if wsMinimized in AClient.State then Exit;
 
   FSyncingFocus := True;
