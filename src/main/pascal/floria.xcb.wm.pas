@@ -1891,6 +1891,7 @@ begin
   begin
     if FManager.Connection <> nil then
     begin
+      Inc(FIgnoreUnmap);
       if FIsReparented and (FFrameWindow <> 0) then
         xcb_unmap_window(FManager.Connection, FFrameWindow);
       xcb_unmap_window(FManager.Connection, FClientWindow);
@@ -5092,7 +5093,8 @@ begin
           Exit;
         end;
 
-        if not (wsMinimized in Cli.State) then
+        if (not (wsMinimized in Cli.State)) and
+           Cli.ShouldBeVisibleOnDesktop(FCurrentDesktop) then
           UnmanageWindow(Cli);
       end;
       Result := True;
@@ -5780,6 +5782,7 @@ begin
     begin
       if FConn <> nil then
       begin
+        Inc(Cli.FIgnoreUnmap);
         if Cli.IsReparented and (Cli.FrameWindow <> 0) then
           xcb_unmap_window(FConn, Cli.FrameWindow);
         xcb_unmap_window(FConn, Cli.ClientWindow);
