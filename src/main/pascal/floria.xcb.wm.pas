@@ -1893,7 +1893,10 @@ begin
     begin
       Inc(FIgnoreUnmap);
       if FIsReparented and (FFrameWindow <> 0) then
+      begin
+        Inc(FIgnoreUnmap);
         xcb_unmap_window(FManager.Connection, FFrameWindow);
+      end;
       xcb_unmap_window(FManager.Connection, FClientWindow);
       if FResizeWindow <> 0 then
         xcb_unmap_window(FManager.Connection, FResizeWindow);
@@ -1902,6 +1905,8 @@ begin
     if FManager.ActiveClient = Self then
       FManager.ActiveClient := nil;
   end;
+
+  FManager.DoOnClientPropertiesChanged(Self);
 end;
 
 procedure TXCBWMClient.SetSticky(const ASticky: Boolean);
