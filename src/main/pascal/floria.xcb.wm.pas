@@ -364,7 +364,7 @@ type
     property WindowClass         : AnsiString        read FWindowClass write FWindowClass;
     property WindowInstance      : AnsiString        read FWindowInstance write FWindowInstance;
     property Pid                 : Cardinal          read FPid write FPid;
-    property Desktop             : Integer           read FDesktop write FDesktop;
+    property Desktop             : Integer           read FDesktop write SetDesktop;
     property WindowType          : TXCBWindowType    read FWindowType write FWindowType;
     property State               : TXCBWindowState   read FState write FState;
     property CurrentRect         : TXCBRect          read FCurrentRect write FCurrentRect;
@@ -1846,9 +1846,26 @@ begin
 end;
 
 procedure TXCBWMClient.SetDesktop(const ADesktopIndex: Integer);
+var
+  d: Cardinal;
 begin
   FDesktop := ADesktopIndex;
   if FManager = nil then Exit;
+
+  if (FManager.Connection <> nil) and FManager.FEwmhInitialized and (FClientWindow <> 0) then
+  begin
+    d := Cardinal(FDesktop);
+    xcb_change_property(
+      FManager.Connection,
+      XCB_PROP_MODE_REPLACE,
+      FClientWindow,
+      FManager.FEwmh._NET_WM_DESKTOP,
+      XCB_ATOM_CARDINAL,
+      32,
+      1,
+      @d
+    );
+  end;
 
   if ShouldBeVisibleOnDesktop(FManager.CurrentDesktop) then
   begin
@@ -1857,6 +1874,8 @@ begin
       if FIsReparented and (FFrameWindow <> 0) then
         xcb_map_window(FManager.Connection, FFrameWindow);
       xcb_map_window(FManager.Connection, FClientWindow);
+      if FResizeWindow <> 0 then
+        xcb_map_window(FManager.Connection, FResizeWindow);
       xcb_flush(FManager.Connection);
     end;
   end
@@ -1866,6 +1885,9 @@ begin
     begin
       if FIsReparented and (FFrameWindow <> 0) then
         xcb_unmap_window(FManager.Connection, FFrameWindow);
+      xcb_unmap_window(FManager.Connection, FClientWindow);
+      if FResizeWindow <> 0 then
+        xcb_unmap_window(FManager.Connection, FResizeWindow);
       xcb_flush(FManager.Connection);
     end;
     if FManager.ActiveClient = Self then
@@ -3364,6 +3386,8 @@ var
   MwmHintsPtr: PXCBMwmHints;
   SizeHints: xcb_size_hints_t;
   CardPtr: PCardinal;
+  HasDesktopProp: Boolean;
+  CardVal: Cardinal;
 begin
   if (FConn = nil) or (AClient = nil) then Exit;
 
@@ -3750,16 +3774,36 @@ begin
   // 11. Initial _NET_WM_DESKTOP
   if FEwmhInitialized then
   begin
+    HasDesktopProp := False;
     PropCookie := xcb_get_property(FConn, 0, AClient.ClientWindow, FEwmh._NET_WM_DESKTOP, XCB_ATOM_CARDINAL, 0, 1);
     PropReply := xcb_get_property_reply(FConn, PropCookie, nil);
     if PropReply <> nil then
     begin
       try
         if xcb_get_property_value_length(PropReply) >= SizeOf(Cardinal) then
+        begin
           AClient.FDesktop := Integer(PCardinal(xcb_get_property_value(PropReply))^);
+          HasDesktopProp := True;
+        end;
       finally
         xcb_free(PropReply);
       end;
+    end;
+
+    if not HasDesktopProp then
+    begin
+      AClient.FDesktop := FCurrentDesktop;
+      CardVal := Cardinal(FCurrentDesktop);
+      xcb_change_property(
+        FConn,
+        XCB_PROP_MODE_REPLACE,
+        AClient.ClientWindow,
+        FEwmh._NET_WM_DESKTOP,
+        XCB_ATOM_CARDINAL,
+        32,
+        1,
+        @CardVal
+      );
     end;
   end;
 
@@ -5141,6 +5185,12 @@ begin
       begin
         if MsgEv^.type_ = FEwmh._NET_CURRENT_DESKTOP then
           SwitchDesktop(MsgData32^[0])
+        else if MsgEv^.type_ = FEwmh._NET_WM_DESKTOP then
+        begin
+          Cli := FindClientByClientWindow(MsgEv^.window);
+          if Cli <> nil then
+            Cli.Desktop := MsgData32^[0];
+        end
         else if MsgEv^.type_ = FEwmh._NET_ACTIVE_WINDOW then
         begin
           Cli := FindClientByClientWindow(MsgEv^.window);
