@@ -1956,6 +1956,7 @@ end;
 function TXCBWMClient.ShouldBeVisibleOnDesktop(const ACurrentDesktop: Integer): Boolean;
 begin
   Result := (wsSticky in FState) or
+            (FWindowType in [wtDock, wtDesktop]) or
             (Cardinal(FDesktop) = XCB_ALL_DESKTOPS) or
             (FDesktop = ACurrentDesktop);
 end;
@@ -3813,8 +3814,11 @@ begin
 
     if not HasDesktopProp then
     begin
-      AClient.FDesktop := FCurrentDesktop;
-      CardVal := Cardinal(FCurrentDesktop);
+      if (AClient.WindowType in [wtDock, wtDesktop]) or (wsSticky in AClient.State) then
+        AClient.FDesktop := Integer($FFFFFFFF)
+      else
+        AClient.FDesktop := FCurrentDesktop;
+      CardVal := Cardinal(AClient.FDesktop);
       xcb_change_property(
         FConn,
         XCB_PROP_MODE_REPLACE,
