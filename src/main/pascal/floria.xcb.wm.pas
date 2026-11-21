@@ -434,6 +434,10 @@ type
     FKeycodeAltL       : xcb_keycode_t;
     FKeycodeD          : xcb_keycode_t;
     FKeycodeAltR       : xcb_keycode_t;
+    FKeycode1          : xcb_keycode_t;
+    FKeycode2          : xcb_keycode_t;
+    FKeycode3          : xcb_keycode_t;
+    FKeycode4          : xcb_keycode_t;
     FModAlt            : Word;
     FModSuper          : Word;
     FModNumLock        : Word;
@@ -561,6 +565,10 @@ type
     property KeycodeAltL       : xcb_keycode_t read FKeycodeAltL;
     property KeycodeD          : xcb_keycode_t read FKeycodeD;
     property KeycodeAltR       : xcb_keycode_t read FKeycodeAltR;
+    property Keycode1          : xcb_keycode_t read FKeycode1;
+    property Keycode2          : xcb_keycode_t read FKeycode2;
+    property Keycode3          : xcb_keycode_t read FKeycode3;
+    property Keycode4          : xcb_keycode_t read FKeycode4;
     property ModAlt            : Word          read FModAlt;
     property ModSuper          : Word          read FModSuper;
     property ModNumLock        : Word          read FModNumLock;
@@ -2026,6 +2034,10 @@ begin
   FKeycodeAltL := 0;
   FKeycodeAltR := 0;
   FKeycodeD := 0;
+  FKeycode1 := 0;
+  FKeycode2 := 0;
+  FKeycode3 := 0;
+  FKeycode4 := 0;
   FModAlt := 0;
   FModSuper := 0;
   FModNumLock := 0;
@@ -2352,6 +2364,10 @@ begin
     FKeycodeAltL := 64;
     FKeycodeAltR := 108;
     FKeycodeD := 40;
+    FKeycode1 := 10;
+    FKeycode2 := 11;
+    FKeycode3 := 12;
+    FKeycode4 := 13;
     FModAlt := XCB_MOD_MASK_1;
     FModSuper := XCB_MOD_MASK_4;
     FModNumLock := XCB_MOD_MASK_2;
@@ -2371,6 +2387,10 @@ begin
   FKeycodeAltL := KeysymToKeycode(XK_Alt_L);
   FKeycodeAltR := KeysymToKeycode(XK_Alt_R);
   FKeycodeD := KeysymToKeycode(XK_d_);
+  FKeycode1 := KeysymToKeycode(XK_1);
+  FKeycode2 := KeysymToKeycode(XK_2);
+  FKeycode3 := KeysymToKeycode(XK_3);
+  FKeycode4 := KeysymToKeycode(XK_4);
 
   // Alt is conventionally Mod1 and Super Mod4, but neither is guaranteed: a user
   // can remap them, and on some layouts Alt lives on Mod5. Ask the server.
