@@ -1267,6 +1267,9 @@ begin
   begin
     Result.UpdateGeometry(AGeometry.X, AGeometry.Y, AGeometry.Width, AGeometry.Height);
     Result.ClientWindow := AClientWindow;
+    Result.HasAlphaChannel := WindowHasAlpha(AWindow);
+    if AClientWindow <> 0 then
+      Result.ClientHasAlphaChannel := WindowHasAlpha(AClientWindow);
     Result.UpdateSurfaces();
     Exit;
   end;
