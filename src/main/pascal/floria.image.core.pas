@@ -162,6 +162,8 @@ type
     FRenderingBuf: rendering_buffer;
     FPixFormat   : pixel_formats;
     FIsPremultiplied: Boolean;
+    FTextureID   : Cardinal;
+    FTextureDirty: Boolean;
 
     function GetPixel(const X, Y: Integer): TBgraPixel;
     procedure SetPixel(const X, Y: Integer; const AValue: TBgraPixel);
@@ -191,6 +193,7 @@ type
     procedure BlendFrom(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
     procedure PremultiplyAlpha();
     procedure DemultiplyAlpha();
+    procedure InvalidateTexture();
 
     function PixFormatPtr(): pixel_formats_ptr;
     function RenderingBufPtr(): rendering_buffer_ptr;
@@ -208,6 +211,8 @@ type
     property Data        : Pointer            read FPixelBuffer;
     property PixelFormat : TFloriaPixelFormat read FPixelFormat;
     property IsPremultiplied: Boolean         read FIsPremultiplied write FIsPremultiplied;
+    property TextureID   : Cardinal           read FTextureID write FTextureID;
+    property TextureDirty: Boolean            read FTextureDirty write FTextureDirty;
     property Pixels[const X, Y: Integer]: TBgraPixel read GetPixel write SetPixel;
     property Scanline[const Y: Integer]: Pointer     read GetScanline;
   end;
@@ -220,6 +225,9 @@ function DetectImageFormat(AStream: TStream): TFloriaImageFormat;
 function DetectAnimationFormat(AStream: TStream): TFloriaImageFormat;
 
 implementation
+
+uses
+  Floria.GL;
 
 type
   TReaderRegistry = array of TFloriaImageReaderClass;
@@ -370,6 +378,9 @@ begin
   FStride := 0;
   FPixelBuffer := nil;
   FPixelFormat := fpfBGRA32;
+  FIsPremultiplied := False;
+  FTextureID := 0;
+  FTextureDirty := True;
 end;
 
 constructor TFloriaImage.Create(const AWidth, AHeight: Integer; const AFormat: TFloriaPixelFormat = fpfBGRA32);
@@ -429,7 +440,16 @@ begin
 end;
 
 destructor TFloriaImage.Destroy();
+var
+  gl: TGLEngine;
 begin
+  if FTextureID <> 0 then
+  begin
+    gl := FloriaGL();
+    if gl.Available and Assigned(gl.DeleteTextures) then
+      gl.DeleteTextures(1, @FTextureID);
+    FTextureID := 0;
+  end;
   if Assigned(FPixelBuffer) then
   begin
     FreeMem(FPixelBuffer);
@@ -442,7 +462,17 @@ end;
 procedure TFloriaImage.Allocate(const AWidth, AHeight: Integer; const AFormat: TFloriaPixelFormat = fpfBGRA32);
 var
   TotalBytes: Int64;
+  gl: TGLEngine;
 begin
+  if FTextureID <> 0 then
+  begin
+    gl := FloriaGL();
+    if gl.Available and Assigned(gl.DeleteTextures) then
+      gl.DeleteTextures(1, @FTextureID);
+    FTextureID := 0;
+  end;
+  FTextureDirty := True;
+
   if Assigned(FPixelBuffer) then
   begin
     FreeMem(FPixelBuffer);
@@ -492,6 +522,11 @@ begin
   Result := @FRenderingBuf;
 end;
 
+procedure TFloriaImage.InvalidateTexture();
+begin
+  FTextureDirty := True;
+end;
+
 procedure TFloriaImage.ClearRect(const AX, AY, AWidth, AHeight: Integer;
                                  const R, G, B: Byte; const A: Byte = 255);
 var
@@ -528,6 +563,7 @@ begin
     for y := y0 to y1 - 1 do
       FillChar(PByte(Scanline[y])[x0 * 4], (x1 - x0) * 4, 0);
   end;
+  FTextureDirty := True;
 end;
 
 procedure TFloriaImage.Clear(const R, G, B: Byte; const A: Byte = 255);
@@ -551,6 +587,7 @@ begin
   end
   else
     FillChar(FPixelBuffer^, FHeight * FStride, 0);
+  FTextureDirty := True;
 end;
 
 function TFloriaImage.GetPixel(const X, Y: Integer): TBgraPixel;
@@ -579,6 +616,7 @@ begin
   Row := PByte(FPixelBuffer) + Y * FStride;
   P := PBgraPixel(Row + X * 4);
   P^ := AValue;
+  FTextureDirty := True;
 end;
 
 function TFloriaImage.GetScanline(const Y: Integer): Pointer;
@@ -897,6 +935,7 @@ begin
     DstRow := PByte(GetScanline(DstY + Row)) + DstX * 4;
     Move(SrcRow^, DstRow^, ActualW * 4);
   end;
+  FTextureDirty := True;
 end;
 
 procedure TFloriaImage.CopyMasked(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
@@ -927,6 +966,7 @@ begin
         DstRow[Col] := Sp^;
     end;
   end;
+  FTextureDirty := True;
 end;
 
 procedure TFloriaImage.BlendFrom(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
@@ -978,6 +1018,7 @@ begin
       end;
     end;
   end;
+  FTextureDirty := True;
 end;
 
 procedure TFloriaImage.PremultiplyAlpha();
@@ -1007,6 +1048,7 @@ begin
     Inc(P);
   end;
   FIsPremultiplied := True;
+  FTextureDirty := True;
 end;
 
 procedure TFloriaImage.DemultiplyAlpha();
@@ -1040,6 +1082,7 @@ begin
     Inc(P);
   end;
   FIsPremultiplied := False;
+  FTextureDirty := True;
 end;
 
 procedure TFloriaImage.LoadFromFile(const AFileName: string);

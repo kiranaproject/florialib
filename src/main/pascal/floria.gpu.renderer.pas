@@ -745,26 +745,47 @@ end;
 
 procedure TFloriaGPURenderer.OnDrawImage(AImage: TFloriaImage; const ADstRect, ASrcRect: TRectD; AOpacity: Double);
 var
-  Alloc: TFloriaAtlasAlloc;
   TexRect, DstRect: TRectD;
-  Page: TFloriaAtlasPage;
+  texID: Cardinal;
 begin
-  if not Assigned(AImage) then Exit;
+  if not Assigned(AImage) or (AImage.Width <= 0) or (AImage.Height <= 0) or (AImage.PixelBuffer = nil) then Exit;
+  if ASrcRect.IsEmpty then Exit;
 
-  if FAtlas.AddImagePart(AImage, ASrcRect, Alloc) then
+  // 1. Ensure GPU texture exists and is up to date on the image itself
+  if AImage.TextureID = 0 then
   begin
-    Page := FAtlas.Pages[Alloc.PageIndex];
-    if (Page.TextureID = 0) and FGL.Available then
-      Page.SyncToGPU(FGL);
-
-    TexRect.Left   := Alloc.U1;
-    TexRect.Top    := Alloc.V1;
-    TexRect.Right  := Alloc.U2;
-    TexRect.Bottom := Alloc.V2;
-    DstRect := TransformRect(ADstRect);
-    FBatch.EmitTexturedRect(DstRect, TexRect, Page.TextureID,
-                            AOpacity * FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
+    if FGL.Available then
+    begin
+      texID := 0;
+      FGL.GenTextures(1, @texID);
+      if texID <> 0 then
+      begin
+        FGL.BindTexture(GL_TEXTURE_2D, texID);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        FGL.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        FGL.TexImage2D(GL_TEXTURE_2D, 0, GL_BGRA_EXT, AImage.Width, AImage.Height, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, AImage.PixelBuffer);
+        AImage.TextureID := texID;
+        AImage.TextureDirty := False;
+      end;
+    end;
+  end
+  else if AImage.TextureDirty and FGL.Available then
+  begin
+    FGL.BindTexture(GL_TEXTURE_2D, AImage.TextureID);
+    FGL.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, AImage.Width, AImage.Height, GL_BGRA_EXT, GL_UNSIGNED_BYTE, AImage.PixelBuffer);
+    AImage.TextureDirty := False;
   end;
+
+  // 2. Emit textured quad to batch using the image's dedicated texture
+  TexRect.Left   := ASrcRect.Left / AImage.Width;
+  TexRect.Top    := ASrcRect.Top / AImage.Height;
+  TexRect.Right  := ASrcRect.Right / AImage.Width;
+  TexRect.Bottom := ASrcRect.Bottom / AImage.Height;
+  DstRect := TransformRect(ADstRect);
+  FBatch.EmitTexturedRect(DstRect, TexRect, AImage.TextureID,
+                          AOpacity * FCurrentAlpha, FBlendMode, FClipChain.CurrentNode);
 end;
 
 procedure TFloriaGPURenderer.OnDrawPicture(APicture: TFloriaPicture; AX, AY: Double);

@@ -30,7 +30,7 @@ uses
   Floria.GL;
 
 const
-  DEFAULT_ATLAS_PAGE_SIZE = 2048;
+  DEFAULT_ATLAS_PAGE_SIZE = 1024;
   DEFAULT_ATLAS_PADDING   = 1;
 
 type
