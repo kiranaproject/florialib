@@ -24,12 +24,14 @@ uses
   Floria.Compression.Zlib;
 
 type
-  // PNG Reader Codec
-  TFloriaPNGReader = class(TFloriaImageReader)
+  // PNG and APNG Reader Codec
+  TFloriaPNGReader = class(TFloriaAnimatedReader)
   public
     class function CanRead(AStream: TStream): Boolean; override;
+    class function CanReadAnimation(AStream: TStream): Boolean; override;
     class function Format(): TFloriaImageFormat; override;
     procedure ReadImage(AStream: TStream; AImage: TFloriaImage); override;
+    procedure ReadAnimation(AStream: TStream; AAnim: TFloriaAnimatedImage); override;
   end;
 
   // PNG Writer Codec
@@ -85,9 +87,177 @@ begin
   end;
 end;
 
+class function TFloriaPNGReader.CanReadAnimation(AStream: TStream): Boolean;
+var
+  Sig: array[0..7] of Byte;
+  ChunkLen: Cardinal;
+  ChunkType: array[0..3] of AnsiChar;
+  OldPos: Int64;
+begin
+  Result := False;
+  if not Assigned(AStream) or (AStream.Size - AStream.Position < 8) then Exit;
+
+  OldPos := AStream.Position;
+  try
+    if AStream.Read(Sig[0], 8) <> 8 then Exit;
+    if not CompareMem(@Sig[0], @PNG_SIGNATURE[0], 8) then Exit;
+
+    while AStream.Position < AStream.Size do
+    begin
+      if AStream.Read(ChunkLen, 4) <> 4 then Break;
+      ChunkLen := BEtoN(ChunkLen);
+      if AStream.Read(ChunkType[0], 4) <> 4 then Break;
+
+      if ChunkType = 'acTL' then
+      begin
+        Result := True;
+        Exit;
+      end;
+
+      if (ChunkType = 'IDAT') or (ChunkType = 'IEND') then
+        Break;
+
+      AStream.Seek(Int64(ChunkLen) + 4, soFromCurrent);
+    end;
+  finally
+    AStream.Position := OldPos;
+  end;
+end;
+
 class function TFloriaPNGReader.Format(): TFloriaImageFormat;
 begin
   Result := fifPNG;
+end;
+
+function DecodePNGScanlines(const CompressedData: Pointer; const CompressedSize: Integer;
+                            const W, H: Integer;
+                            const ColorType: Byte;
+                            const HasPalette: Boolean;
+                            const Palette: array of TRgbaPixel;
+                            const HasTrnsKey: Boolean;
+                            const TrnsGray, TrnsR, TrnsG, TrnsB: Word): TFloriaImage;
+var
+  Bpp: Integer;
+  RowBytes: Integer;
+  Uncompressed: TBytes;
+  PriorRow, CurrentRow: array of Byte;
+  FilterType: Byte;
+  Row, X, SrcIdx: Integer;
+  A, B, C: Byte;
+  DstPixel: PBgraPixel;
+  PalIdx: Byte;
+begin
+  Result := nil;
+  if (W <= 0) or (H <= 0) or (CompressedData = nil) or (CompressedSize <= 0) then Exit;
+
+  case ColorType of
+    0: Bpp := 1; // Gray
+    2: Bpp := 3; // RGB
+    3: Bpp := 1; // Palette
+    4: Bpp := 2; // Gray + Alpha
+    6: Bpp := 4; // RGBA
+  else
+    Bpp := 4;
+  end;
+
+  RowBytes := W * Bpp;
+  Uncompressed := ZlibDecompress(CompressedData, CompressedSize, H * (RowBytes + 1));
+  if Length(Uncompressed) < H * (RowBytes + 1) then Exit;
+
+  Result := TFloriaImage.Create(W, H, fpfBGRA32);
+  SetLength(PriorRow, RowBytes);
+  SetLength(CurrentRow, RowBytes);
+  FillChar(PriorRow[0], RowBytes, 0);
+
+  SrcIdx := 0;
+  for Row := 0 to H - 1 do
+  begin
+    if SrcIdx >= Length(Uncompressed) then Break;
+    FilterType := Uncompressed[SrcIdx];
+    Inc(SrcIdx);
+
+    for X := 0 to RowBytes - 1 do
+    begin
+      if X >= Bpp then A := CurrentRow[X - Bpp] else A := 0;
+      B := PriorRow[X];
+      if X >= Bpp then C := PriorRow[X - Bpp] else C := 0;
+
+      case FilterType of
+        0: CurrentRow[X] := Uncompressed[SrcIdx];
+        1: CurrentRow[X] := Byte(Uncompressed[SrcIdx] + A);
+        2: CurrentRow[X] := Byte(Uncompressed[SrcIdx] + B);
+        3: CurrentRow[X] := Byte(Uncompressed[SrcIdx] + ((A + B) div 2));
+        4: CurrentRow[X] := Byte(Uncompressed[SrcIdx] + PaethPredictor(A, B, C));
+      else
+        CurrentRow[X] := Uncompressed[SrcIdx];
+      end;
+      Inc(SrcIdx);
+    end;
+
+    DstPixel := PBgraPixel(Result.Scanline[Row]);
+    for X := 0 to W - 1 do
+    begin
+      case ColorType of
+        0: // Grayscale
+          begin
+            DstPixel^.B := CurrentRow[X];
+            DstPixel^.G := CurrentRow[X];
+            DstPixel^.R := CurrentRow[X];
+            if HasTrnsKey and (CurrentRow[X] = Byte(TrnsGray)) then
+              DstPixel^.A := 0
+            else
+              DstPixel^.A := 255;
+          end;
+        2: // RGB
+          begin
+            DstPixel^.R := CurrentRow[X * 3 + 0];
+            DstPixel^.G := CurrentRow[X * 3 + 1];
+            DstPixel^.B := CurrentRow[X * 3 + 2];
+            if HasTrnsKey and (DstPixel^.R = Byte(TrnsR)) and
+                              (DstPixel^.G = Byte(TrnsG)) and
+                              (DstPixel^.B = Byte(TrnsB)) then
+              DstPixel^.A := 0
+            else
+              DstPixel^.A := 255;
+          end;
+        3: // Indexed Palette
+          begin
+            PalIdx := CurrentRow[X];
+            if HasPalette and (PalIdx < Length(Palette)) then
+            begin
+              DstPixel^.R := Palette[PalIdx].R;
+              DstPixel^.G := Palette[PalIdx].G;
+              DstPixel^.B := Palette[PalIdx].B;
+              DstPixel^.A := Palette[PalIdx].A;
+            end
+            else
+            begin
+              DstPixel^.R := PalIdx;
+              DstPixel^.G := PalIdx;
+              DstPixel^.B := PalIdx;
+              DstPixel^.A := 255;
+            end;
+          end;
+        4: // Gray + Alpha
+          begin
+            DstPixel^.B := CurrentRow[X * 2 + 0];
+            DstPixel^.G := CurrentRow[X * 2 + 0];
+            DstPixel^.R := CurrentRow[X * 2 + 0];
+            DstPixel^.A := CurrentRow[X * 2 + 1];
+          end;
+        6: // RGBA
+          begin
+            DstPixel^.R := CurrentRow[X * 4 + 0];
+            DstPixel^.G := CurrentRow[X * 4 + 1];
+            DstPixel^.B := CurrentRow[X * 4 + 2];
+            DstPixel^.A := CurrentRow[X * 4 + 3];
+          end;
+      end;
+      Inc(DstPixel);
+    end;
+
+    Move(CurrentRow[0], PriorRow[0], RowBytes);
+  end;
 end;
 
 procedure TFloriaPNGReader.ReadImage(AStream: TStream; AImage: TFloriaImage);
@@ -105,15 +275,8 @@ var
   TrnsGray: Word;
   TrnsR, TrnsG, TrnsB: Word;
   NumAlpha: Integer;
-  Uncompressed: TBytes;
-  Bpp: Integer;
-  RowBytes: Integer;
-  PriorRow, CurrentRow: array of Byte;
-  FilterType: Byte;
-  Row, X, SrcIdx: Integer;
-  A, B, C: Byte;
-  DstPixel: PBgraPixel;
-  PalIdx: Byte;
+  X: Integer;
+  Decoded: TFloriaImage;
 begin
   if AStream.Read(Sig, 8) <> 8 then
     raise Exception.Create('Premature end of PNG signature');
@@ -163,7 +326,6 @@ begin
       begin
         if ColorType = 3 then
         begin
-          // For indexed palette, tRNS contains alpha bytes for each palette entry
           NumAlpha := ChunkLen;
           if NumAlpha > Length(Palette) then
             NumAlpha := Length(Palette);
@@ -174,7 +336,6 @@ begin
         end
         else if ColorType = 0 then
         begin
-          // Grayscale: 2 bytes gray key
           if ChunkLen >= 2 then
           begin
             HasTrnsKey := True;
@@ -188,7 +349,6 @@ begin
         end
         else if ColorType = 2 then
         begin
-          // Truecolor RGB: 6 bytes (R, G, B key)
           if ChunkLen >= 6 then
           begin
             HasTrnsKey := True;
@@ -215,11 +375,9 @@ begin
       end
       else
       begin
-        // Skip unknown chunk data
         AStream.Seek(ChunkLen, soFromCurrent);
       end;
 
-      // Skip Chunk CRC
       AStream.ReadBuffer(ChunkCRC, 4);
     end;
 
@@ -229,123 +387,236 @@ begin
       Exit;
     end;
 
-    // Bytes per pixel in raw scanlines
-    case ColorType of
-      0: Bpp := 1; // Gray
-      2: Bpp := 3; // RGB
-      3: Bpp := 1; // Palette
-      4: Bpp := 2; // Gray + Alpha
-      6: Bpp := 4; // RGBA
-    else
-      Bpp := 4;
-    end;
-
-    RowBytes := W * Bpp;
-    Uncompressed := ZlibDecompress(IDATStream.Memory, IDATStream.Size, H * (RowBytes + 1));
-
-    AImage.Allocate(W, H, fpfBGRA32);
-    SetLength(PriorRow, RowBytes);
-    SetLength(CurrentRow, RowBytes);
-    FillChar(PriorRow[0], RowBytes, 0);
-
-    SrcIdx := 0;
-    for Row := 0 to H - 1 do
+    Decoded := DecodePNGScanlines(IDATStream.Memory, IDATStream.Size, W, H, ColorType,
+                                  HasPalette, Palette, HasTrnsKey, TrnsGray, TrnsR, TrnsG, TrnsB);
+    if Assigned(Decoded) then
     begin
-      if SrcIdx >= Length(Uncompressed) then Break;
-      FilterType := Uncompressed[SrcIdx];
-      Inc(SrcIdx);
+      AImage.Allocate(W, H, fpfBGRA32);
+      AImage.CopyFrom(Decoded, 0, 0, 0, 0, W, H);
+      Decoded.Free();
+    end
+    else
+      AImage.Allocate(0, 0);
 
-      // Unfilter current row
-      for X := 0 to RowBytes - 1 do
-      begin
-        if X >= Bpp then A := CurrentRow[X - Bpp] else A := 0;
-        B := PriorRow[X];
-        if X >= Bpp then C := PriorRow[X - Bpp] else C := 0;
-
-        case FilterType of
-          0: // None
-            CurrentRow[X] := Uncompressed[SrcIdx];
-          1: // Sub
-            CurrentRow[X] := Byte(Uncompressed[SrcIdx] + A);
-          2: // Up
-            CurrentRow[X] := Byte(Uncompressed[SrcIdx] + B);
-          3: // Average
-            CurrentRow[X] := Byte(Uncompressed[SrcIdx] + ((A + B) div 2));
-          4: // Paeth
-            CurrentRow[X] := Byte(Uncompressed[SrcIdx] + PaethPredictor(A, B, C));
-        else
-          CurrentRow[X] := Uncompressed[SrcIdx];
-        end;
-        Inc(SrcIdx);
-      end;
-
-      // Convert unfiltered scanline to 32-bit BGRA
-      DstPixel := PBgraPixel(AImage.Scanline[Row]);
-      for X := 0 to W - 1 do
-      begin
-        case ColorType of
-          0: // Grayscale
-            begin
-              DstPixel^.B := CurrentRow[X];
-              DstPixel^.G := CurrentRow[X];
-              DstPixel^.R := CurrentRow[X];
-              if HasTrnsKey and (CurrentRow[X] = Byte(TrnsGray)) then
-                DstPixel^.A := 0
-              else
-                DstPixel^.A := 255;
-            end;
-          2: // RGB
-            begin
-              DstPixel^.R := CurrentRow[X * 3 + 0];
-              DstPixel^.G := CurrentRow[X * 3 + 1];
-              DstPixel^.B := CurrentRow[X * 3 + 2];
-              if HasTrnsKey and (DstPixel^.R = Byte(TrnsR)) and
-                                (DstPixel^.G = Byte(TrnsG)) and
-                                (DstPixel^.B = Byte(TrnsB)) then
-                DstPixel^.A := 0
-              else
-                DstPixel^.A := 255;
-            end;
-          3: // Indexed Palette
-            begin
-              PalIdx := CurrentRow[X];
-              if HasPalette and (PalIdx < Length(Palette)) then
-              begin
-                DstPixel^.R := Palette[PalIdx].R;
-                DstPixel^.G := Palette[PalIdx].G;
-                DstPixel^.B := Palette[PalIdx].B;
-                DstPixel^.A := Palette[PalIdx].A;
-              end
-              else
-              begin
-                DstPixel^.R := PalIdx;
-                DstPixel^.G := PalIdx;
-                DstPixel^.B := PalIdx;
-                DstPixel^.A := 255;
-              end;
-            end;
-          4: // Gray + Alpha
-            begin
-              DstPixel^.B := CurrentRow[X * 2 + 0];
-              DstPixel^.G := CurrentRow[X * 2 + 0];
-              DstPixel^.R := CurrentRow[X * 2 + 0];
-              DstPixel^.A := CurrentRow[X * 2 + 1];
-            end;
-          6: // RGBA
-            begin
-              DstPixel^.R := CurrentRow[X * 4 + 0];
-              DstPixel^.G := CurrentRow[X * 4 + 1];
-              DstPixel^.B := CurrentRow[X * 4 + 2];
-              DstPixel^.A := CurrentRow[X * 4 + 3];
-            end;
-        end;
-        Inc(DstPixel);
-      end;
-
-      Move(CurrentRow[0], PriorRow[0], RowBytes);
-    end;
   finally
     IDATStream.Free();
+  end;
+end;
+
+procedure TFloriaPNGReader.ReadAnimation(AStream: TStream; AAnim: TFloriaAnimatedImage);
+var
+  Sig: array[0..7] of Byte;
+  ChunkLen: Cardinal;
+  ChunkType: array[0..3] of AnsiChar;
+  ChunkCRC: Cardinal;
+  W, H: Integer;
+  BitDepth, ColorType, CompMethod, FilterMethod, Interlace: Byte;
+  Palette: array of TRgbaPixel;
+  HasPalette: Boolean;
+  HasTrnsKey: Boolean;
+  TrnsGray: Word;
+  TrnsR, TrnsG, TrnsB: Word;
+  NumAlpha: Integer;
+  X: Integer;
+
+  HasAnimation: Boolean;
+  NumFrames, NumPlays: Cardinal;
+
+  HasFcTL: Boolean;
+  FrameW, FrameH, FrameX, FrameY: Cardinal;
+  DelayNum, DelayDen: Word;
+  DisposeOp, BlendOp: Byte;
+  FrameDelayMs: Cardinal;
+  FrameDisposal: TFloriaDisposalMethod;
+  FrameBlendOver: Boolean;
+
+  FrameDataStream: TMemoryStream;
+  FrameImg: TFloriaImage;
+
+  procedure FlushCurrentFrame();
+  begin
+    if HasFcTL and (FrameDataStream.Size > 0) then
+    begin
+      FrameImg := DecodePNGScanlines(FrameDataStream.Memory, FrameDataStream.Size,
+                                     FrameW, FrameH, ColorType, HasPalette, Palette,
+                                     HasTrnsKey, TrnsGray, TrnsR, TrnsG, TrnsB);
+      if Assigned(FrameImg) then
+        AAnim.AddFrame(FrameImg, FrameDelayMs, FrameX, FrameY, FrameDisposal, FrameBlendOver);
+      FrameDataStream.Clear();
+      HasFcTL := False;
+    end;
+  end;
+
+begin
+  if AStream.Read(Sig, 8) <> 8 then
+    raise Exception.Create('Premature end of PNG signature');
+
+  if not CompareMem(@Sig[0], @PNG_SIGNATURE[0], 8) then
+    raise Exception.Create('Invalid PNG signature');
+
+  W := 0; H := 0;
+  BitDepth := 8; ColorType := 6; CompMethod := 0; FilterMethod := 0; Interlace := 0;
+  HasPalette := False;
+  HasTrnsKey := False;
+  TrnsGray := 0; TrnsR := 0; TrnsG := 0; TrnsB := 0;
+  HasAnimation := False;
+  HasFcTL := False;
+  FrameW := 0; FrameH := 0; FrameX := 0; FrameY := 0;
+  DelayNum := 0; DelayDen := 0;
+  DisposeOp := 0; BlendOp := 0;
+  FrameDelayMs := 100;
+  FrameDisposal := fdmDoNotDispose;
+  FrameBlendOver := False;
+
+  FrameDataStream := TMemoryStream.Create();
+  try
+    while AStream.Position < AStream.Size do
+    begin
+      if AStream.Read(ChunkLen, 4) <> 4 then Break;
+      ChunkLen := BEtoN(ChunkLen);
+      if AStream.Read(ChunkType, 4) <> 4 then Break;
+
+      if ChunkType = 'IHDR' then
+      begin
+        AStream.ReadBuffer(W, 4); W := BEtoN(Cardinal(W));
+        AStream.ReadBuffer(H, 4); H := BEtoN(Cardinal(H));
+        AStream.ReadBuffer(BitDepth, 1);
+        AStream.ReadBuffer(ColorType, 1);
+        AStream.ReadBuffer(CompMethod, 1);
+        AStream.ReadBuffer(FilterMethod, 1);
+        AStream.ReadBuffer(Interlace, 1);
+
+        AAnim.Width := W;
+        AAnim.Height := H;
+      end
+      else if ChunkType = 'acTL' then
+      begin
+        HasAnimation := True;
+        AStream.ReadBuffer(NumFrames, 4); NumFrames := BEtoN(NumFrames);
+        AStream.ReadBuffer(NumPlays, 4); NumPlays := BEtoN(NumPlays);
+        AAnim.LoopCount := NumPlays;
+      end
+      else if ChunkType = 'PLTE' then
+      begin
+        SetLength(Palette, ChunkLen div 3);
+        HasPalette := True;
+        for X := 0 to High(Palette) do
+        begin
+          AStream.ReadBuffer(Palette[X].R, 1);
+          AStream.ReadBuffer(Palette[X].G, 1);
+          AStream.ReadBuffer(Palette[X].B, 1);
+          Palette[X].A := 255;
+        end;
+      end
+      else if ChunkType = 'tRNS' then
+      begin
+        if ColorType = 3 then
+        begin
+          NumAlpha := ChunkLen;
+          if NumAlpha > Length(Palette) then NumAlpha := Length(Palette);
+          for X := 0 to NumAlpha - 1 do
+            AStream.ReadBuffer(Palette[X].A, 1);
+          if ChunkLen > Cardinal(NumAlpha) then
+            AStream.Seek(ChunkLen - Cardinal(NumAlpha), soFromCurrent);
+        end
+        else if ColorType = 0 then
+        begin
+          if ChunkLen >= 2 then
+          begin
+            HasTrnsKey := True;
+            AStream.ReadBuffer(TrnsGray, 2); TrnsGray := BEtoN(TrnsGray);
+            if ChunkLen > 2 then AStream.Seek(ChunkLen - 2, soFromCurrent);
+          end
+          else AStream.Seek(ChunkLen, soFromCurrent);
+        end
+        else if ColorType = 2 then
+        begin
+          if ChunkLen >= 6 then
+          begin
+            HasTrnsKey := True;
+            AStream.ReadBuffer(TrnsR, 2); TrnsR := BEtoN(TrnsR);
+            AStream.ReadBuffer(TrnsG, 2); TrnsG := BEtoN(TrnsG);
+            AStream.ReadBuffer(TrnsB, 2); TrnsB := BEtoN(TrnsB);
+            if ChunkLen > 6 then AStream.Seek(ChunkLen - 6, soFromCurrent);
+          end
+          else AStream.Seek(ChunkLen, soFromCurrent);
+        end
+        else
+          AStream.Seek(ChunkLen, soFromCurrent);
+      end
+      else if ChunkType = 'fcTL' then
+      begin
+        FlushCurrentFrame();
+
+        AStream.Seek(4, soFromCurrent); // Sequence number
+        AStream.ReadBuffer(FrameW, 4); FrameW := BEtoN(FrameW);
+        AStream.ReadBuffer(FrameH, 4); FrameH := BEtoN(FrameH);
+        AStream.ReadBuffer(FrameX, 4); FrameX := BEtoN(FrameX);
+        AStream.ReadBuffer(FrameY, 4); FrameY := BEtoN(FrameY);
+        AStream.ReadBuffer(DelayNum, 2); DelayNum := BEtoN(DelayNum);
+        AStream.ReadBuffer(DelayDen, 2); DelayDen := BEtoN(DelayDen);
+        AStream.ReadBuffer(DisposeOp, 1);
+        AStream.ReadBuffer(BlendOp, 1);
+
+        if DelayDen = 0 then DelayDen := 100;
+        FrameDelayMs := (Cardinal(DelayNum) * 1000) div DelayDen;
+        if FrameDelayMs <= 10 then FrameDelayMs := 100;
+
+        case DisposeOp of
+          0: FrameDisposal := fdmDoNotDispose;
+          1: FrameDisposal := fdmRestoreBackground;
+          2: FrameDisposal := fdmRestorePrevious;
+        else
+          FrameDisposal := fdmDoNotDispose;
+        end;
+
+        FrameBlendOver := (BlendOp = 1);
+        HasFcTL := True;
+      end
+      else if ChunkType = 'IDAT' then
+      begin
+        if HasAnimation then
+        begin
+          if HasFcTL then
+            FrameDataStream.CopyFrom(AStream, ChunkLen)
+          else
+            AStream.Seek(ChunkLen, soFromCurrent);
+        end
+        else
+          FrameDataStream.CopyFrom(AStream, ChunkLen);
+      end
+      else if ChunkType = 'fdAT' then
+      begin
+        if ChunkLen >= 4 then
+        begin
+          AStream.Seek(4, soFromCurrent); // Skip 4-byte sequence number
+          FrameDataStream.CopyFrom(AStream, ChunkLen - 4);
+        end
+        else
+          AStream.Seek(ChunkLen, soFromCurrent);
+      end
+      else if ChunkType = 'IEND' then
+      begin
+        FlushCurrentFrame();
+        AStream.ReadBuffer(ChunkCRC, 4);
+        Break;
+      end
+      else
+        AStream.Seek(ChunkLen, soFromCurrent);
+
+      AStream.ReadBuffer(ChunkCRC, 4);
+    end;
+
+    if not HasAnimation and (FrameDataStream.Size > 0) and (W > 0) and (H > 0) then
+    begin
+      FrameImg := DecodePNGScanlines(FrameDataStream.Memory, FrameDataStream.Size,
+                                     W, H, ColorType, HasPalette, Palette,
+                                     HasTrnsKey, TrnsGray, TrnsR, TrnsG, TrnsB);
+      if Assigned(FrameImg) then
+        AAnim.AddFrame(FrameImg, 100, 0, 0, fdmDoNotDispose, False);
+    end;
+  finally
+    FrameDataStream.Free();
   end;
 end;
 
@@ -460,6 +731,7 @@ end;
 
 initialization
   RegisterImageReader(TFloriaPNGReader);
+  RegisterAnimatedReader(TFloriaPNGReader);
   RegisterImageWriter(fifPNG, TFloriaPNGWriter);
 
 end.

@@ -83,6 +83,16 @@ type
     FComputedStyle: TSVGStyleRecord;
     FAccumulatedMatrix: TSVGMatrix;
     FDocument: TSVGDocument;
+    FAnimatedTransform: TSVGMatrix;
+    FHasAnimatedTransform: Boolean;
+    FAnimatedOpacity: Double;
+    FHasAnimatedOpacity: Boolean;
+    FAnimatedFill: TSVGPaint;
+    FHasAnimatedFill: Boolean;
+    FAnimatedStroke: TSVGPaint;
+    FHasAnimatedStroke: Boolean;
+    FAnimatedStrokeWidth: Double;
+    FHasAnimatedStrokeWidth: Boolean;
   public
     constructor Create(const ATagName: string; ADoc: TSVGDocument = nil); virtual;
     destructor Destroy(); override;
@@ -90,6 +100,8 @@ type
     procedure ComputeStyles(const AParentStyle: TSVGStyleRecord; const AParentMatrix: TSVGMatrix); virtual;
     function GetLocalBoundingBox(): TSVGRect; virtual;
     function GetWorldBoundingBox(): TSVGRect;
+    function GetEffectiveTransform(): TSVGMatrix; virtual;
+    procedure ResetAnimationState(); virtual;
 
     property Id: string read FId write FId;
     property TagName: string read FTagName;
@@ -99,6 +111,16 @@ type
     property ComputedStyle: TSVGStyleRecord read FComputedStyle;
     property AccumulatedMatrix: TSVGMatrix read FAccumulatedMatrix;
     property Document: TSVGDocument read FDocument write FDocument;
+    property AnimatedTransform: TSVGMatrix read FAnimatedTransform write FAnimatedTransform;
+    property HasAnimatedTransform: Boolean read FHasAnimatedTransform write FHasAnimatedTransform;
+    property AnimatedOpacity: Double read FAnimatedOpacity write FAnimatedOpacity;
+    property HasAnimatedOpacity: Boolean read FHasAnimatedOpacity write FHasAnimatedOpacity;
+    property AnimatedFill: TSVGPaint read FAnimatedFill write FAnimatedFill;
+    property HasAnimatedFill: Boolean read FHasAnimatedFill write FHasAnimatedFill;
+    property AnimatedStroke: TSVGPaint read FAnimatedStroke write FAnimatedStroke;
+    property HasAnimatedStroke: Boolean read FHasAnimatedStroke write FHasAnimatedStroke;
+    property AnimatedStrokeWidth: Double read FAnimatedStrokeWidth write FAnimatedStrokeWidth;
+    property HasAnimatedStrokeWidth: Boolean read FHasAnimatedStrokeWidth write FHasAnimatedStrokeWidth;
   end;
 
   TSVGNode = TSVGElement; // Alias for flexibility
@@ -119,6 +141,7 @@ type
 
     procedure ComputeStyles(const AParentStyle: TSVGStyleRecord; const AParentMatrix: TSVGMatrix); override;
     function GetLocalBoundingBox(): TSVGRect; override;
+    procedure ResetAnimationState(); override;
 
     property Children: TObjectList read FChildren;
   end;
@@ -204,66 +227,112 @@ type
   TSVGRectElement = class(TSVGShapeElement)
   private
     FX, FY, FWidth, FHeight, FRx, FRy: TSVGLength;
+    FBaseX, FBaseY, FBaseWidth, FBaseHeight, FBaseRx, FBaseRy: TSVGLength;
     FCachedPath: TSVGPathData;
+    procedure SetX(const AVal: TSVGLength);
+    procedure SetY(const AVal: TSVGLength);
+    procedure SetWidth(const AVal: TSVGLength);
+    procedure SetHeight(const AVal: TSVGLength);
+    procedure SetRx(const AVal: TSVGLength);
+    procedure SetRy(const AVal: TSVGLength);
   public
     constructor Create(ADoc: TSVGDocument = nil); reintroduce;
     destructor Destroy(); override;
 
     function GetPath(): TSVGPathData; override;
+    procedure ResetAnimationState(); override;
 
-    property X: TSVGLength read FX write FX;
-    property Y: TSVGLength read FY write FY;
-    property Width: TSVGLength read FWidth write FWidth;
-    property Height: TSVGLength read FHeight write FHeight;
-    property Rx: TSVGLength read FRx write FRx;
-    property Ry: TSVGLength read FRy write FRy;
+    procedure SetAnimatedX(AVal: Double);
+    procedure SetAnimatedY(AVal: Double);
+    procedure SetAnimatedWidth(AVal: Double);
+    procedure SetAnimatedHeight(AVal: Double);
+    procedure SetAnimatedRx(AVal: Double);
+    procedure SetAnimatedRy(AVal: Double);
+
+    property X: TSVGLength read FX write SetX;
+    property Y: TSVGLength read FY write SetY;
+    property Width: TSVGLength read FWidth write SetWidth;
+    property Height: TSVGLength read FHeight write SetHeight;
+    property Rx: TSVGLength read FRx write SetRx;
+    property Ry: TSVGLength read FRy write SetRy;
   end;
 
   TSVGCircleElement = class(TSVGShapeElement)
   private
     FCx, FCy, FR: TSVGLength;
+    FBaseCx, FBaseCy, FBaseR: TSVGLength;
     FCachedPath: TSVGPathData;
+    procedure SetCx(const AVal: TSVGLength);
+    procedure SetCy(const AVal: TSVGLength);
+    procedure SetR(const AVal: TSVGLength);
   public
     constructor Create(ADoc: TSVGDocument = nil); reintroduce;
     destructor Destroy(); override;
 
     function GetPath(): TSVGPathData; override;
+    procedure ResetAnimationState(); override;
 
-    property Cx: TSVGLength read FCx write FCx;
-    property Cy: TSVGLength read FCy write FCy;
-    property R: TSVGLength read FR write FR;
+    procedure SetAnimatedCx(AVal: Double);
+    procedure SetAnimatedCy(AVal: Double);
+    procedure SetAnimatedR(AVal: Double);
+
+    property Cx: TSVGLength read FCx write SetCx;
+    property Cy: TSVGLength read FCy write SetCy;
+    property R: TSVGLength read FR write SetR;
   end;
 
   TSVGEllipseElement = class(TSVGShapeElement)
   private
     FCx, FCy, FRx, FRy: TSVGLength;
+    FBaseCx, FBaseCy, FBaseRx, FBaseRy: TSVGLength;
     FCachedPath: TSVGPathData;
+    procedure SetCx(const AVal: TSVGLength);
+    procedure SetCy(const AVal: TSVGLength);
+    procedure SetRx(const AVal: TSVGLength);
+    procedure SetRy(const AVal: TSVGLength);
   public
     constructor Create(ADoc: TSVGDocument = nil); reintroduce;
     destructor Destroy(); override;
 
     function GetPath(): TSVGPathData; override;
+    procedure ResetAnimationState(); override;
 
-    property Cx: TSVGLength read FCx write FCx;
-    property Cy: TSVGLength read FCy write FCy;
-    property Rx: TSVGLength read FRx write FRx;
-    property Ry: TSVGLength read FRy write FRy;
+    procedure SetAnimatedCx(AVal: Double);
+    procedure SetAnimatedCy(AVal: Double);
+    procedure SetAnimatedRx(AVal: Double);
+    procedure SetAnimatedRy(AVal: Double);
+
+    property Cx: TSVGLength read FCx write SetCx;
+    property Cy: TSVGLength read FCy write SetCy;
+    property Rx: TSVGLength read FRx write SetRx;
+    property Ry: TSVGLength read FRy write SetRy;
   end;
 
   TSVGLineElement = class(TSVGShapeElement)
   private
     FX1, FY1, FX2, FY2: TSVGLength;
+    FBaseX1, FBaseY1, FBaseX2, FBaseY2: TSVGLength;
     FCachedPath: TSVGPathData;
+    procedure SetX1(const AVal: TSVGLength);
+    procedure SetY1(const AVal: TSVGLength);
+    procedure SetX2(const AVal: TSVGLength);
+    procedure SetY2(const AVal: TSVGLength);
   public
     constructor Create(ADoc: TSVGDocument = nil); reintroduce;
     destructor Destroy(); override;
 
     function GetPath(): TSVGPathData; override;
+    procedure ResetAnimationState(); override;
 
-    property X1: TSVGLength read FX1 write FX1;
-    property Y1: TSVGLength read FY1 write FY1;
-    property X2: TSVGLength read FX2 write FX2;
-    property Y2: TSVGLength read FY2 write FY2;
+    procedure SetAnimatedX1(AVal: Double);
+    procedure SetAnimatedY1(AVal: Double);
+    procedure SetAnimatedX2(AVal: Double);
+    procedure SetAnimatedY2(AVal: Double);
+
+    property X1: TSVGLength read FX1 write SetX1;
+    property Y1: TSVGLength read FY1 write SetY1;
+    property X2: TSVGLength read FX2 write SetX2;
+    property Y2: TSVGLength read FY2 write SetY2;
   end;
 
   TSVGPointArray = array of TSVGPoint;
@@ -360,6 +429,87 @@ type
     property Fy: TSVGLength read FFy write FFy;
   end;
 
+  // ── Animation Elements ─────────────────────────────────────────────────────
+
+  TSVGTransformType = (
+    attTranslate,
+    attScale,
+    attRotate,
+    attSkewX,
+    attSkewY
+  );
+
+  TSVGAnimationFillMode = (
+    afmRemove,
+    afmFreeze
+  );
+
+  TSVGAnimationAdditive = (
+    ataReplace,
+    ataSum
+  );
+
+  TSVGAnimationElement = class(TSVGElement)
+  protected
+    FAttributeName: string;
+    FValues: TStringList;
+    FFromVal: string;
+    FToVal: string;
+    FByVal: string;
+    FBeginSec: Double;
+    FDurSec: Double;
+    FRepeatCount: Double;
+    FRepeatIndefinite: Boolean;
+    FFillMode: TSVGAnimationFillMode;
+    FAdditive: TSVGAnimationAdditive;
+    FHref: string;
+    FTargetElement: TSVGElement;
+
+    function GetNormalizedProgress(CurrentTimeSec: Double; out IsActive: Boolean): Double;
+  public
+    constructor Create(const ATagName: string; ADoc: TSVGDocument = nil); override;
+    destructor Destroy(); override;
+
+    procedure ApplyAtTime(CurrentTimeSec: Double); virtual; abstract;
+    function GetEffectiveDuration(): Double; virtual;
+
+    property AttributeName: string read FAttributeName write FAttributeName;
+    property FromVal: string read FFromVal write FFromVal;
+    property ToVal: string read FToVal write FToVal;
+    property ByVal: string read FByVal write FByVal;
+    property BeginSec: Double read FBeginSec write FBeginSec;
+    property DurSec: Double read FDurSec write FDurSec;
+    property RepeatCount: Double read FRepeatCount write FRepeatCount;
+    property RepeatIndefinite: Boolean read FRepeatIndefinite write FRepeatIndefinite;
+    property FillMode: TSVGAnimationFillMode read FFillMode write FFillMode;
+    property Additive: TSVGAnimationAdditive read FAdditive write FAdditive;
+    property Href: string read FHref write FHref;
+    property TargetElement: TSVGElement read FTargetElement write FTargetElement;
+    property Values: TStringList read FValues;
+  end;
+
+  TSVGAnimateTransformElement = class(TSVGAnimationElement)
+  private
+    FTransformType: TSVGTransformType;
+  public
+    constructor Create(ADoc: TSVGDocument = nil); reintroduce;
+    procedure ApplyAtTime(CurrentTimeSec: Double); override;
+
+    property TransformType: TSVGTransformType read FTransformType write FTransformType;
+  end;
+
+  TSVGAnimateElement = class(TSVGAnimationElement)
+  public
+    constructor Create(ADoc: TSVGDocument = nil); reintroduce;
+    procedure ApplyAtTime(CurrentTimeSec: Double); override;
+  end;
+
+  TSVGSetElement = class(TSVGAnimateElement)
+  public
+    constructor Create(ADoc: TSVGDocument = nil); reintroduce;
+    procedure ApplyAtTime(CurrentTimeSec: Double); override;
+  end;
+
   // ── Complete SVG Document ──────────────────────────────────────────────────
 
   TSVGDocument = class
@@ -367,6 +517,10 @@ type
     FRoot: TSVGSvgElement;
     FIdMap: TStringList; // Maps ID to TSVGElement
     FStylesheets: TObjectList; // Owns TCSSStylesheet
+    FAnimations: TObjectList; // Owns TSVGAnimationElement
+    FCurrentTimeSec: Double;
+    FLastTargetW: Double;
+    FLastTargetH: Double;
   public
     constructor Create();
     destructor Destroy(); override;
@@ -374,6 +528,13 @@ type
     procedure RegisterElement(const AId: string; AElement: TSVGElement);
     function FindElementById(const AId: string): TSVGElement;
     procedure AddStylesheet(ASheet: TCSSStylesheet);
+
+    procedure RegisterAnimation(AAnim: TSVGAnimationElement);
+    function HasAnimation(): Boolean;
+    function GetAnimationDuration(): Double;
+    procedure ResetAnimation();
+    procedure ResetElementAnimationState();
+    procedure SetCurrentTime(TimeSec: Double);
 
     procedure ResolveReferences();
     procedure ComputeStyles(TargetW, TargetH: Double);
@@ -383,7 +544,17 @@ type
 
     property Root: TSVGSvgElement read FRoot write FRoot;
     property Stylesheets: TObjectList read FStylesheets;
+    property Animations: TObjectList read FAnimations;
+    property CurrentTime: Double read FCurrentTimeSec;
   end;
+
+type
+  TDoubleArray = array of Double;
+
+function ParseSVGDuration(const S: string): Double;
+function ParseFloatList(const S: string): TDoubleArray;
+procedure ParseSemicolonList(const S: string; AList: TStrings);
+function InterpolateColor(const C1, C2: TCSSColor; U: Double): TCSSColor;
 
 implementation
 
@@ -673,6 +844,16 @@ begin
   FDocument := ADoc;
   FStyle.InitDefaults();
   FComputedStyle.InitDefaults();
+  FAnimatedTransform := SVGMatrixIdentity();
+  FHasAnimatedTransform := False;
+  FAnimatedOpacity := 1.0;
+  FHasAnimatedOpacity := False;
+  FAnimatedFill.Kind := pkNone;
+  FHasAnimatedFill := False;
+  FAnimatedStroke.Kind := pkNone;
+  FHasAnimatedStroke := False;
+  FAnimatedStrokeWidth := 0.0;
+  FHasAnimatedStrokeWidth := False;
 end;
 
 destructor TSVGElement.Destroy();
@@ -680,12 +861,46 @@ begin
   inherited Destroy();
 end;
 
+function TSVGElement.GetEffectiveTransform(): TSVGMatrix;
+begin
+  if FHasAnimatedTransform then
+    Result := FAnimatedTransform
+  else
+    Result := FTransform;
+end;
+
+procedure TSVGElement.ResetAnimationState();
+begin
+  FHasAnimatedTransform := False;
+  FAnimatedTransform := SVGMatrixIdentity();
+  FHasAnimatedOpacity := False;
+  FAnimatedOpacity := 1.0;
+  FHasAnimatedFill := False;
+  FHasAnimatedStroke := False;
+  FHasAnimatedStrokeWidth := False;
+  FAnimatedStrokeWidth := 0.0;
+end;
+
 procedure TSVGElement.ComputeStyles(const AParentStyle: TSVGStyleRecord; const AParentMatrix: TSVGMatrix);
 begin
   FComputedStyle := FStyle;
   FComputedStyle.InheritFrom(AParentStyle);
-  FComputedStyle.Opacity := FStyle.Opacity * AParentStyle.Opacity;
-  FAccumulatedMatrix := SVGMatrixMultiply(AParentMatrix, FTransform);
+
+  if FHasAnimatedOpacity then
+    FComputedStyle.Opacity := FAnimatedOpacity * AParentStyle.Opacity
+  else
+    FComputedStyle.Opacity := FStyle.Opacity * AParentStyle.Opacity;
+
+  if FHasAnimatedFill then
+    FComputedStyle.Fill := FAnimatedFill;
+
+  if FHasAnimatedStroke then
+    FComputedStyle.Stroke := FAnimatedStroke;
+
+  if FHasAnimatedStrokeWidth then
+    FComputedStyle.StrokeWidth := FAnimatedStrokeWidth;
+
+  FAccumulatedMatrix := SVGMatrixMultiply(AParentMatrix, GetEffectiveTransform());
 end;
 
 function TSVGElement.GetLocalBoundingBox(): TSVGRect;
@@ -713,6 +928,15 @@ destructor TSVGContainerElement.Destroy();
 begin
   FChildren.Free();
   inherited Destroy();
+end;
+
+procedure TSVGContainerElement.ResetAnimationState();
+var
+  I: Integer;
+begin
+  inherited ResetAnimationState();
+  for I := 0 to FChildren.Count - 1 do
+    TSVGElement(FChildren[I]).ResetAnimationState();
 end;
 
 procedure TSVGContainerElement.AddChild(AChild: TSVGElement);
@@ -890,7 +1114,7 @@ procedure TSVGSvgElement.ComputeStyles(const AParentStyle: TSVGStyleRecord; cons
 var
   EffectiveMatrix: TSVGMatrix;
 begin
-  EffectiveMatrix := SVGMatrixMultiply(AParentMatrix, FTransform);
+  EffectiveMatrix := SVGMatrixMultiply(AParentMatrix, GetEffectiveTransform());
   EffectiveMatrix := SVGMatrixMultiply(EffectiveMatrix, FViewBoxTransform);
   inherited ComputeStyles(AParentStyle, EffectiveMatrix);
 end;
@@ -913,7 +1137,7 @@ var
   TMat, InstMatrix: TSVGMatrix;
 begin
   TMat := SVGMatrixTranslate(SVGLengthToPixels(FX), SVGLengthToPixels(FY));
-  InstMatrix := SVGMatrixMultiply(FTransform, TMat);
+  InstMatrix := SVGMatrixMultiply(GetEffectiveTransform(), TMat);
   inherited ComputeStyles(AParentStyle, AParentMatrix);
 
   if Assigned(FReferencedElement) then
@@ -978,6 +1202,12 @@ begin
   FHeight := SVGLength(0.0);
   FRx := SVGLength(0.0);
   FRy := SVGLength(0.0);
+  FBaseX := FX;
+  FBaseY := FY;
+  FBaseWidth := FWidth;
+  FBaseHeight := FHeight;
+  FBaseRx := FRx;
+  FBaseRy := FRy;
   FCachedPath := nil;
 end;
 
@@ -985,6 +1215,96 @@ destructor TSVGRectElement.Destroy();
 begin
   if Assigned(FCachedPath) then FCachedPath.Free();
   inherited Destroy();
+end;
+
+procedure TSVGRectElement.SetX(const AVal: TSVGLength);
+begin
+  FX := AVal;
+  FBaseX := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetY(const AVal: TSVGLength);
+begin
+  FY := AVal;
+  FBaseY := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetWidth(const AVal: TSVGLength);
+begin
+  FWidth := AVal;
+  FBaseWidth := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetHeight(const AVal: TSVGLength);
+begin
+  FHeight := AVal;
+  FBaseHeight := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetRx(const AVal: TSVGLength);
+begin
+  FRx := AVal;
+  FBaseRx := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetRy(const AVal: TSVGLength);
+begin
+  FRy := AVal;
+  FBaseRy := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.ResetAnimationState();
+begin
+  inherited ResetAnimationState();
+  FX := FBaseX;
+  FY := FBaseY;
+  FWidth := FBaseWidth;
+  FHeight := FBaseHeight;
+  FRx := FBaseRx;
+  FRy := FBaseRy;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetAnimatedX(AVal: Double);
+begin
+  FX := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetAnimatedY(AVal: Double);
+begin
+  FY := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetAnimatedWidth(AVal: Double);
+begin
+  FWidth := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetAnimatedHeight(AVal: Double);
+begin
+  FHeight := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetAnimatedRx(AVal: Double);
+begin
+  FRx := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGRectElement.SetAnimatedRy(AVal: Double);
+begin
+  FRy := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
 end;
 
 function TSVGRectElement.GetPath(): TSVGPathData;
@@ -1006,6 +1326,9 @@ begin
   FCx := SVGLength(0.0);
   FCy := SVGLength(0.0);
   FR := SVGLength(0.0);
+  FBaseCx := FCx;
+  FBaseCy := FCy;
+  FBaseR := FR;
   FCachedPath := nil;
 end;
 
@@ -1013,6 +1336,54 @@ destructor TSVGCircleElement.Destroy();
 begin
   if Assigned(FCachedPath) then FCachedPath.Free();
   inherited Destroy();
+end;
+
+procedure TSVGCircleElement.SetCx(const AVal: TSVGLength);
+begin
+  FCx := AVal;
+  FBaseCx := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGCircleElement.SetCy(const AVal: TSVGLength);
+begin
+  FCy := AVal;
+  FBaseCy := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGCircleElement.SetR(const AVal: TSVGLength);
+begin
+  FR := AVal;
+  FBaseR := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGCircleElement.ResetAnimationState();
+begin
+  inherited ResetAnimationState();
+  FCx := FBaseCx;
+  FCy := FBaseCy;
+  FR := FBaseR;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGCircleElement.SetAnimatedCx(AVal: Double);
+begin
+  FCx := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGCircleElement.SetAnimatedCy(AVal: Double);
+begin
+  FCy := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGCircleElement.SetAnimatedR(AVal: Double);
+begin
+  FR := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
 end;
 
 function TSVGCircleElement.GetPath(): TSVGPathData;
@@ -1033,6 +1404,10 @@ begin
   FCy := SVGLength(0.0);
   FRx := SVGLength(0.0);
   FRy := SVGLength(0.0);
+  FBaseCx := FCx;
+  FBaseCy := FCy;
+  FBaseRx := FRx;
+  FBaseRy := FRy;
   FCachedPath := nil;
 end;
 
@@ -1040,6 +1415,68 @@ destructor TSVGEllipseElement.Destroy();
 begin
   if Assigned(FCachedPath) then FCachedPath.Free();
   inherited Destroy();
+end;
+
+procedure TSVGEllipseElement.SetCx(const AVal: TSVGLength);
+begin
+  FCx := AVal;
+  FBaseCx := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.SetCy(const AVal: TSVGLength);
+begin
+  FCy := AVal;
+  FBaseCy := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.SetRx(const AVal: TSVGLength);
+begin
+  FRx := AVal;
+  FBaseRx := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.SetRy(const AVal: TSVGLength);
+begin
+  FRy := AVal;
+  FBaseRy := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.ResetAnimationState();
+begin
+  inherited ResetAnimationState();
+  FCx := FBaseCx;
+  FCy := FBaseCy;
+  FRx := FBaseRx;
+  FRy := FBaseRy;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.SetAnimatedCx(AVal: Double);
+begin
+  FCx := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.SetAnimatedCy(AVal: Double);
+begin
+  FCy := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.SetAnimatedRx(AVal: Double);
+begin
+  FRx := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGEllipseElement.SetAnimatedRy(AVal: Double);
+begin
+  FRy := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
 end;
 
 function TSVGEllipseElement.GetPath(): TSVGPathData;
@@ -1061,6 +1498,10 @@ begin
   FY1 := SVGLength(0.0);
   FX2 := SVGLength(0.0);
   FY2 := SVGLength(0.0);
+  FBaseX1 := FX1;
+  FBaseY1 := FY1;
+  FBaseX2 := FX2;
+  FBaseY2 := FY2;
   FCachedPath := nil;
 end;
 
@@ -1068,6 +1509,68 @@ destructor TSVGLineElement.Destroy();
 begin
   if Assigned(FCachedPath) then FCachedPath.Free();
   inherited Destroy();
+end;
+
+procedure TSVGLineElement.SetX1(const AVal: TSVGLength);
+begin
+  FX1 := AVal;
+  FBaseX1 := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.SetY1(const AVal: TSVGLength);
+begin
+  FY1 := AVal;
+  FBaseY1 := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.SetX2(const AVal: TSVGLength);
+begin
+  FX2 := AVal;
+  FBaseX2 := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.SetY2(const AVal: TSVGLength);
+begin
+  FY2 := AVal;
+  FBaseY2 := AVal;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.ResetAnimationState();
+begin
+  inherited ResetAnimationState();
+  FX1 := FBaseX1;
+  FY1 := FBaseY1;
+  FX2 := FBaseX2;
+  FY2 := FBaseY2;
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.SetAnimatedX1(AVal: Double);
+begin
+  FX1 := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.SetAnimatedY1(AVal: Double);
+begin
+  FY1 := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.SetAnimatedX2(AVal: Double);
+begin
+  FX2 := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
+end;
+
+procedure TSVGLineElement.SetAnimatedY2(AVal: Double);
+begin
+  FY2 := SVGLength(AVal);
+  if Assigned(FCachedPath) then begin FCachedPath.Free(); FCachedPath := nil; end;
 end;
 
 function TSVGLineElement.GetPath(): TSVGPathData;
@@ -1239,6 +1742,531 @@ begin
   FFy := SVGLength(50.0, suPercent);
 end;
 
+// ── Animation Helpers ────────────────────────────────────────────────────────
+
+function ParseSVGDuration(const S: string): Double;
+var
+  TrimS: string;
+  ValD: Double;
+  Code: Integer;
+begin
+  Result := 0.0;
+  TrimS := LowerCase(Trim(S));
+  if TrimS = '' then Exit;
+  if (TrimS = 'indefinite') or (TrimS = 'media') then
+    Exit(1e9);
+
+  if (Length(TrimS) > 2) and (Copy(TrimS, Length(TrimS) - 1, 2) = 'ms') then
+  begin
+    TrimS := Copy(TrimS, 1, Length(TrimS) - 2);
+    ValD := 0.0;
+    System.Val(TrimS, ValD, Code);
+    if Code = 0 then Result := ValD * 0.001;
+  end
+  else if (Length(TrimS) > 1) and (TrimS[Length(TrimS)] = 's') then
+  begin
+    TrimS := Copy(TrimS, 1, Length(TrimS) - 1);
+    ValD := 0.0;
+    System.Val(TrimS, ValD, Code);
+    if Code = 0 then Result := ValD;
+  end
+  else if (Length(TrimS) > 3) and (Copy(TrimS, Length(TrimS) - 2, 3) = 'min') then
+  begin
+    TrimS := Copy(TrimS, 1, Length(TrimS) - 3);
+    ValD := 0.0;
+    System.Val(TrimS, ValD, Code);
+    if Code = 0 then Result := ValD * 60.0;
+  end
+  else if (Length(TrimS) > 1) and (TrimS[Length(TrimS)] = 'h') then
+  begin
+    TrimS := Copy(TrimS, 1, Length(TrimS) - 1);
+    ValD := 0.0;
+    System.Val(TrimS, ValD, Code);
+    if Code = 0 then Result := ValD * 3600.0;
+  end
+  else
+  begin
+    ValD := 0.0;
+    System.Val(TrimS, ValD, Code);
+    if Code = 0 then Result := ValD;
+  end;
+end;
+
+function ParseFloatList(const S: string): TDoubleArray;
+var
+  I, Len, StartPos, Count: Integer;
+  NumStr: string;
+  DVal: Double;
+  Code: Integer;
+begin
+  SetLength(Result, 4);
+  Count := 0;
+  I := 1;
+  Len := Length(S);
+  while I <= Len do
+  begin
+    while (I <= Len) and (S[I] in [' ', #9, #10, #13, ',']) do Inc(I);
+    if I > Len then Break;
+
+    StartPos := I;
+    if S[I] in ['+', '-'] then Inc(I);
+    while (I <= Len) and (S[I] in ['0'..'9']) do Inc(I);
+    if (I <= Len) and (S[I] = '.') then
+    begin
+      Inc(I);
+      while (I <= Len) and (S[I] in ['0'..'9']) do Inc(I);
+    end;
+    if (I <= Len) and (S[I] in ['e', 'E']) then
+    begin
+      Inc(I);
+      if (I <= Len) and (S[I] in ['+', '-']) then Inc(I);
+      while (I <= Len) and (S[I] in ['0'..'9']) do Inc(I);
+    end;
+
+    if I > StartPos then
+    begin
+      NumStr := Copy(S, StartPos, I - StartPos);
+      DVal := 0.0;
+      System.Val(NumStr, DVal, Code);
+      if Code = 0 then
+      begin
+        if Count >= Length(Result) then
+          SetLength(Result, Length(Result) * 2);
+        Result[Count] := DVal;
+        Inc(Count);
+      end;
+    end
+    else
+      Inc(I);
+  end;
+  SetLength(Result, Count);
+end;
+
+procedure ParseSemicolonList(const S: string; AList: TStrings);
+var
+  I, StartPos, Len: Integer;
+  Token: string;
+begin
+  AList.Clear();
+  Len := Length(S);
+  StartPos := 1;
+  for I := 1 to Len do
+  begin
+    if S[I] = ';' then
+    begin
+      Token := Trim(Copy(S, StartPos, I - StartPos));
+      if Token <> '' then
+        AList.Add(Token);
+      StartPos := I + 1;
+    end;
+  end;
+  if StartPos <= Len then
+  begin
+    Token := Trim(Copy(S, StartPos, Len - StartPos + 1));
+    if Token <> '' then
+      AList.Add(Token);
+  end;
+end;
+
+function InterpolateColor(const C1, C2: TCSSColor; U: Double): TCSSColor;
+var
+  R, G, B, A: Byte;
+begin
+  R := EnsureRange(Round(C1.R + (C2.R - C1.R) * U), 0, 255);
+  G := EnsureRange(Round(C1.G + (C2.G - C1.G) * U), 0, 255);
+  B := EnsureRange(Round(C1.B + (C2.B - C1.B) * U), 0, 255);
+  A := EnsureRange(Round(C1.A + (C2.A - C1.A) * U), 0, 255);
+  Result := TCSSColor.FromRGBA(R, G, B, A);
+end;
+
+procedure GetInterpolationEndpoints(Values: TStrings; const FromV, ToV: string;
+  Progress: Double; out V1, V2: string; out SubProgress: Double);
+var
+  N, Idx: Integer;
+  D: Double;
+begin
+  SubProgress := Progress;
+  V1 := '';
+  V2 := '';
+  if Values.Count >= 2 then
+  begin
+    N := Values.Count;
+    if Progress >= 1.0 then
+    begin
+      V1 := Values[N - 2];
+      V2 := Values[N - 1];
+      SubProgress := 1.0;
+    end
+    else
+    begin
+      D := Progress * (N - 1);
+      Idx := Trunc(D);
+      if Idx > N - 2 then Idx := N - 2;
+      SubProgress := D - Idx;
+      V1 := Values[Idx];
+      V2 := Values[Idx + 1];
+    end;
+  end
+  else if (FromV <> '') and (ToV <> '') then
+  begin
+    V1 := FromV;
+    V2 := ToV;
+    SubProgress := Progress;
+  end
+  else if ToV <> '' then
+  begin
+    V1 := '';
+    V2 := ToV;
+    SubProgress := Progress;
+  end;
+end;
+
+// ── TSVGAnimationElement Implementation ──────────────────────────────────────
+
+constructor TSVGAnimationElement.Create(const ATagName: string; ADoc: TSVGDocument = nil);
+begin
+  inherited Create(ATagName, ADoc);
+  FAttributeName := '';
+  FValues := TStringList.Create();
+  FFromVal := '';
+  FToVal := '';
+  FByVal := '';
+  FBeginSec := 0.0;
+  FDurSec := 0.0;
+  FRepeatCount := 1.0;
+  FRepeatIndefinite := False;
+  FFillMode := afmRemove;
+  FAdditive := ataReplace;
+  FHref := '';
+  FTargetElement := nil;
+end;
+
+destructor TSVGAnimationElement.Destroy();
+begin
+  FValues.Free();
+  inherited Destroy();
+end;
+
+function TSVGAnimationElement.GetEffectiveDuration(): Double;
+begin
+  if FRepeatIndefinite then
+    Result := 1e9
+  else if FRepeatCount > 0.0 then
+    Result := FBeginSec + FDurSec * FRepeatCount
+  else
+    Result := FBeginSec + FDurSec;
+end;
+
+function TSVGAnimationElement.GetNormalizedProgress(CurrentTimeSec: Double; out IsActive: Boolean): Double;
+var
+  RelTime, ActiveDur, CycleTime: Double;
+begin
+  IsActive := False;
+  Result := 0.0;
+
+  if FDurSec <= 0.000001 then
+  begin
+    if CurrentTimeSec >= FBeginSec then
+    begin
+      IsActive := True;
+      Result := 1.0;
+    end;
+    Exit;
+  end;
+
+  if CurrentTimeSec < FBeginSec then
+    Exit;
+
+  RelTime := CurrentTimeSec - FBeginSec;
+
+  if FRepeatIndefinite then
+  begin
+    IsActive := True;
+    CycleTime := RelTime - (Trunc(RelTime / FDurSec) * FDurSec);
+    Result := CycleTime / FDurSec;
+    Exit;
+  end;
+
+  ActiveDur := FDurSec * Max(1.0, FRepeatCount);
+  if RelTime < ActiveDur then
+  begin
+    IsActive := True;
+    CycleTime := RelTime - (Trunc(RelTime / FDurSec) * FDurSec);
+    Result := CycleTime / FDurSec;
+  end
+  else
+  begin
+    if FFillMode = afmFreeze then
+    begin
+      IsActive := True;
+      Result := 1.0;
+    end
+    else
+      IsActive := False;
+  end;
+end;
+
+// ── TSVGAnimateTransformElement Implementation ───────────────────────────────
+
+constructor TSVGAnimateTransformElement.Create(ADoc: TSVGDocument = nil);
+begin
+  inherited Create('animateTransform', ADoc);
+  FTransformType := attRotate;
+end;
+
+procedure TSVGAnimateTransformElement.ApplyAtTime(CurrentTimeSec: Double);
+var
+  IsActive: Boolean;
+  Progress, SubProgress: Double;
+  V1, V2: string;
+  P1, P2: TDoubleArray;
+  A1, A2, A, CX1, CX2, CX, CY1, CY2, CY: Double;
+  TX1, TX2, TX, TY1, TY2, TY: Double;
+  SX1, SX2, SX, SY1, SY2, SY: Double;
+  Mat: TSVGMatrix;
+begin
+  if FTargetElement = nil then Exit;
+
+  Progress := GetNormalizedProgress(CurrentTimeSec, IsActive);
+  if not IsActive then Exit;
+
+  GetInterpolationEndpoints(FValues, FFromVal, FToVal, Progress, V1, V2, SubProgress);
+  if (V1 = '') and (V2 = '') then Exit;
+
+  P1 := ParseFloatList(V1);
+  P2 := ParseFloatList(V2);
+
+  Mat := SVGMatrixIdentity();
+
+  case FTransformType of
+    attRotate:
+    begin
+      A1 := 0.0; CX1 := 0.0; CY1 := 0.0;
+      if Length(P1) > 0 then A1 := P1[0];
+      if Length(P1) > 1 then CX1 := P1[1];
+      if Length(P1) > 2 then CY1 := P1[2];
+
+      A2 := 0.0; CX2 := 0.0; CY2 := 0.0;
+      if Length(P2) > 0 then A2 := P2[0];
+      if Length(P2) > 1 then CX2 := P2[1];
+      if Length(P2) > 2 then CY2 := P2[2];
+
+      A := A1 + (A2 - A1) * SubProgress;
+      CX := CX1 + (CX2 - CX1) * SubProgress;
+      CY := CY1 + (CY2 - CY1) * SubProgress;
+
+      if (CX <> 0.0) or (CY <> 0.0) then
+        Mat := SVGMatrixRotateAt(A, CX, CY)
+      else
+        Mat := SVGMatrixRotate(A);
+    end;
+
+    attTranslate:
+    begin
+      TX1 := 0.0; TY1 := 0.0;
+      if Length(P1) > 0 then TX1 := P1[0];
+      if Length(P1) > 1 then TY1 := P1[1];
+
+      TX2 := 0.0; TY2 := 0.0;
+      if Length(P2) > 0 then TX2 := P2[0];
+      if Length(P2) > 1 then TY2 := P2[1];
+
+      TX := TX1 + (TX2 - TX1) * SubProgress;
+      TY := TY1 + (TY2 - TY1) * SubProgress;
+      Mat := SVGMatrixTranslate(TX, TY);
+    end;
+
+    attScale:
+    begin
+      SX1 := 1.0; SY1 := 1.0;
+      if Length(P1) > 0 then begin SX1 := P1[0]; SY1 := P1[0]; end;
+      if Length(P1) > 1 then SY1 := P1[1];
+
+      SX2 := 1.0; SY2 := 1.0;
+      if Length(P2) > 0 then begin SX2 := P2[0]; SY2 := P2[0]; end;
+      if Length(P2) > 1 then SY2 := P2[1];
+
+      SX := SX1 + (SX2 - SX1) * SubProgress;
+      SY := SY1 + (SY2 - SY1) * SubProgress;
+      Mat := SVGMatrixScale(SX, SY);
+    end;
+
+    attSkewX:
+    begin
+      A1 := 0.0; A2 := 0.0;
+      if Length(P1) > 0 then A1 := P1[0];
+      if Length(P2) > 0 then A2 := P2[0];
+      A := A1 + (A2 - A1) * SubProgress;
+      Mat := SVGMatrixSkewX(A);
+    end;
+
+    attSkewY:
+    begin
+      A1 := 0.0; A2 := 0.0;
+      if Length(P1) > 0 then A1 := P1[0];
+      if Length(P2) > 0 then A2 := P2[0];
+      A := A1 + (A2 - A1) * SubProgress;
+      Mat := SVGMatrixSkewY(A);
+    end;
+  end;
+
+  if FAdditive = ataSum then
+  begin
+    if FTargetElement.HasAnimatedTransform then
+      FTargetElement.AnimatedTransform := SVGMatrixMultiply(FTargetElement.AnimatedTransform, Mat)
+    else
+      FTargetElement.AnimatedTransform := SVGMatrixMultiply(FTargetElement.Transform, Mat);
+  end
+  else
+  begin
+    FTargetElement.AnimatedTransform := Mat;
+  end;
+  FTargetElement.HasAnimatedTransform := True;
+end;
+
+// ── TSVGAnimateElement Implementation ────────────────────────────────────────
+
+constructor TSVGAnimateElement.Create(ADoc: TSVGDocument = nil);
+begin
+  inherited Create('animate', ADoc);
+end;
+
+procedure TSVGAnimateElement.ApplyAtTime(CurrentTimeSec: Double);
+var
+  IsActive: Boolean;
+  Progress, SubProgress, D1, D2, InterpD: Double;
+  V1, V2, LowAttr: string;
+  Code: Integer;
+  Paint1, Paint2: TSVGPaint;
+  InterpCol: TCSSColor;
+begin
+  if FTargetElement = nil then Exit;
+
+  Progress := GetNormalizedProgress(CurrentTimeSec, IsActive);
+  if not IsActive then Exit;
+
+  GetInterpolationEndpoints(FValues, FFromVal, FToVal, Progress, V1, V2, SubProgress);
+  if (V1 = '') and (V2 = '') then Exit;
+
+  LowAttr := LowerCase(Trim(FAttributeName));
+
+  if (LowAttr = 'opacity') or (LowAttr = 'fill-opacity') or (LowAttr = 'stroke-opacity') then
+  begin
+    D1 := 1.0; D2 := 1.0;
+    if V1 <> '' then System.Val(V1, D1, Code);
+    if V2 <> '' then System.Val(V2, D2, Code);
+    InterpD := D1 + (D2 - D1) * SubProgress;
+    FTargetElement.AnimatedOpacity := Max(0.0, Min(1.0, InterpD));
+    FTargetElement.HasAnimatedOpacity := True;
+  end
+  else if LowAttr = 'fill' then
+  begin
+    Paint1 := SVGParsePaint(V1);
+    Paint2 := SVGParsePaint(V2);
+    if (Paint1.Kind = pkColor) and (Paint2.Kind = pkColor) then
+    begin
+      InterpCol := InterpolateColor(Paint1.Color, Paint2.Color, SubProgress);
+      Paint1.Kind := pkColor;
+      Paint1.Color := InterpCol;
+      Paint1.UriId := '';
+      FTargetElement.AnimatedFill := Paint1;
+      FTargetElement.HasAnimatedFill := True;
+    end
+    else if Paint2.Kind <> pkNone then
+    begin
+      FTargetElement.AnimatedFill := Paint2;
+      FTargetElement.HasAnimatedFill := True;
+    end;
+  end
+  else if LowAttr = 'stroke' then
+  begin
+    Paint1 := SVGParsePaint(V1);
+    Paint2 := SVGParsePaint(V2);
+    if (Paint1.Kind = pkColor) and (Paint2.Kind = pkColor) then
+    begin
+      InterpCol := InterpolateColor(Paint1.Color, Paint2.Color, SubProgress);
+      Paint1.Kind := pkColor;
+      Paint1.Color := InterpCol;
+      Paint1.UriId := '';
+      FTargetElement.AnimatedStroke := Paint1;
+      FTargetElement.HasAnimatedStroke := True;
+    end
+    else if Paint2.Kind <> pkNone then
+    begin
+      FTargetElement.AnimatedStroke := Paint2;
+      FTargetElement.HasAnimatedStroke := True;
+    end;
+  end
+  else if LowAttr = 'stroke-width' then
+  begin
+    D1 := 1.0; D2 := 1.0;
+    if V1 <> '' then System.Val(V1, D1, Code);
+    if V2 <> '' then System.Val(V2, D2, Code);
+    InterpD := D1 + (D2 - D1) * SubProgress;
+    FTargetElement.AnimatedStrokeWidth := Max(0.0, InterpD);
+    FTargetElement.HasAnimatedStrokeWidth := True;
+  end
+  else
+  begin
+    D1 := 0.0; D2 := 0.0;
+    if V1 <> '' then System.Val(V1, D1, Code);
+    if V2 <> '' then System.Val(V2, D2, Code);
+    InterpD := D1 + (D2 - D1) * SubProgress;
+
+    if FTargetElement is TSVGRectElement then
+    begin
+      if LowAttr = 'x' then TSVGRectElement(FTargetElement).SetAnimatedX(InterpD)
+      else if LowAttr = 'y' then TSVGRectElement(FTargetElement).SetAnimatedY(InterpD)
+      else if LowAttr = 'width' then TSVGRectElement(FTargetElement).SetAnimatedWidth(InterpD)
+      else if LowAttr = 'height' then TSVGRectElement(FTargetElement).SetAnimatedHeight(InterpD)
+      else if LowAttr = 'rx' then TSVGRectElement(FTargetElement).SetAnimatedRx(InterpD)
+      else if LowAttr = 'ry' then TSVGRectElement(FTargetElement).SetAnimatedRy(InterpD);
+    end
+    else if FTargetElement is TSVGCircleElement then
+    begin
+      if LowAttr = 'cx' then TSVGCircleElement(FTargetElement).SetAnimatedCx(InterpD)
+      else if LowAttr = 'cy' then TSVGCircleElement(FTargetElement).SetAnimatedCy(InterpD)
+      else if LowAttr = 'r' then TSVGCircleElement(FTargetElement).SetAnimatedR(InterpD);
+    end
+    else if FTargetElement is TSVGEllipseElement then
+    begin
+      if LowAttr = 'cx' then TSVGEllipseElement(FTargetElement).SetAnimatedCx(InterpD)
+      else if LowAttr = 'cy' then TSVGEllipseElement(FTargetElement).SetAnimatedCy(InterpD)
+      else if LowAttr = 'rx' then TSVGEllipseElement(FTargetElement).SetAnimatedRx(InterpD)
+      else if LowAttr = 'ry' then TSVGEllipseElement(FTargetElement).SetAnimatedRy(InterpD);
+    end
+    else if FTargetElement is TSVGLineElement then
+    begin
+      if LowAttr = 'x1' then TSVGLineElement(FTargetElement).SetAnimatedX1(InterpD)
+      else if LowAttr = 'y1' then TSVGLineElement(FTargetElement).SetAnimatedY1(InterpD)
+      else if LowAttr = 'x2' then TSVGLineElement(FTargetElement).SetAnimatedX2(InterpD)
+      else if LowAttr = 'y2' then TSVGLineElement(FTargetElement).SetAnimatedY2(InterpD);
+    end;
+  end;
+end;
+
+// ── TSVGSetElement Implementation ────────────────────────────────────────────
+
+constructor TSVGSetElement.Create(ADoc: TSVGDocument = nil);
+begin
+  inherited Create(ADoc);
+  FTagName := 'set';
+  FDurSec := 0.0;
+  FFillMode := afmFreeze;
+end;
+
+procedure TSVGSetElement.ApplyAtTime(CurrentTimeSec: Double);
+var
+  IsActive: Boolean;
+begin
+  if FTargetElement = nil then Exit;
+  GetNormalizedProgress(CurrentTimeSec, IsActive);
+  if not IsActive then Exit;
+
+  FFromVal := FToVal;
+  inherited ApplyAtTime(CurrentTimeSec);
+end;
+
 // ── TSVGDocument Implementation ──────────────────────────────────────────────
 
 constructor TSVGDocument.Create();
@@ -1249,10 +2277,15 @@ begin
   FIdMap.Sorted := True;
   FIdMap.Duplicates := dupAccept;
   FStylesheets := TObjectList.Create(True);
+  FAnimations := TObjectList.Create(True);
+  FCurrentTimeSec := 0.0;
+  FLastTargetW := 0.0;
+  FLastTargetH := 0.0;
 end;
 
 destructor TSVGDocument.Destroy();
 begin
+  FAnimations.Free();
   FStylesheets.Free();
   FIdMap.Free();
   FRoot.Free();
@@ -1278,6 +2311,65 @@ end;
 procedure TSVGDocument.AddStylesheet(ASheet: TCSSStylesheet);
 begin
   FStylesheets.Add(ASheet);
+end;
+
+procedure TSVGDocument.RegisterAnimation(AAnim: TSVGAnimationElement);
+begin
+  if Assigned(AAnim) and (FAnimations.IndexOf(AAnim) < 0) then
+    FAnimations.Add(AAnim);
+end;
+
+function TSVGDocument.HasAnimation(): Boolean;
+begin
+  Result := (FAnimations.Count > 0);
+end;
+
+function TSVGDocument.GetAnimationDuration(): Double;
+var
+  I: Integer;
+  Anim: TSVGAnimationElement;
+  D: Double;
+begin
+  Result := 0.0;
+  for I := 0 to FAnimations.Count - 1 do
+  begin
+    Anim := TSVGAnimationElement(FAnimations[I]);
+    if Anim.RepeatIndefinite then
+      Exit(0.0);
+    D := Anim.GetEffectiveDuration();
+    if D > Result then
+      Result := D;
+  end;
+end;
+
+procedure TSVGDocument.ResetAnimation();
+begin
+  SetCurrentTime(0.0);
+end;
+
+procedure TSVGDocument.ResetElementAnimationState();
+begin
+  if Assigned(FRoot) then
+    FRoot.ResetAnimationState();
+end;
+
+procedure TSVGDocument.SetCurrentTime(TimeSec: Double);
+var
+  I: Integer;
+  Anim: TSVGAnimationElement;
+begin
+  FCurrentTimeSec := TimeSec;
+  if FAnimations.Count = 0 then Exit;
+
+  ResetElementAnimationState();
+
+  for I := 0 to FAnimations.Count - 1 do
+  begin
+    Anim := TSVGAnimationElement(FAnimations[I]);
+    Anim.ApplyAtTime(TimeSec);
+  end;
+
+  ComputeStyles(FLastTargetW, FLastTargetH);
 end;
 
 procedure TSVGDocument.ResolveReferences();
@@ -1306,8 +2398,24 @@ procedure TSVGDocument.ResolveReferences();
     end;
   end;
 
+var
+  I: Integer;
+  Anim: TSVGAnimationElement;
+  TargetId: string;
 begin
   ResolveNode(FRoot);
+
+  for I := 0 to FAnimations.Count - 1 do
+  begin
+    Anim := TSVGAnimationElement(FAnimations[I]);
+    if (Anim.TargetElement = nil) and (Anim.Href <> '') then
+    begin
+      TargetId := Anim.Href;
+      if (Length(TargetId) > 0) and (TargetId[1] = '#') then
+        Delete(TargetId, 1, 1);
+      Anim.TargetElement := FindElementById(TargetId);
+    end;
+  end;
 end;
 
 procedure TSVGDocument.ComputeStyles(TargetW, TargetH: Double);
@@ -1318,6 +2426,9 @@ begin
 
   if TargetW <= 0.0 then TargetW := GetIntrinsicWidth();
   if TargetH <= 0.0 then TargetH := GetIntrinsicHeight();
+
+  FLastTargetW := TargetW;
+  FLastTargetH := TargetH;
 
   FRoot.ComputeViewBox(TargetW, TargetH);
 

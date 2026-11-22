@@ -56,11 +56,32 @@ type
     fifBMP,
     fifPNG,
     fifJPEG,
-    fifWebP
+    fifWebP,
+    fifGIF
   );
 
-  // Forward declaration
+  // Multi-frame animation frame disposal methods
+  TFloriaDisposalMethod = (
+    fdmNone = 0,             // Unspecified / do not dispose
+    fdmDoNotDispose = 1,     // Leave frame as is on canvas
+    fdmRestoreBackground = 2,// Restore frame area to transparent / background
+    fdmRestorePrevious = 3   // Restore frame area to previous state
+  );
+
+  // Forward declarations
   TFloriaImage = class;
+  TFloriaAnimatedImage = class;
+
+  // Single animation frame description
+  TFloriaFrame = record
+    Image: TFloriaImage;
+    DelayMs: Cardinal;
+    OffsetX: Integer;
+    OffsetY: Integer;
+    Disposal: TFloriaDisposalMethod;
+    BlendOver: Boolean; // True = source-over (Porter-Duff), False = source-copy
+  end;
+  PFloriaFrame = ^TFloriaFrame;
 
   // Base image reader codec class
   TFloriaImageReader = class
@@ -71,6 +92,14 @@ type
   end;
   TFloriaImageReaderClass = class of TFloriaImageReader;
 
+  // Base animated image reader codec class
+  TFloriaAnimatedReader = class(TFloriaImageReader)
+  public
+    class function CanReadAnimation(AStream: TStream): Boolean; virtual;
+    procedure ReadAnimation(AStream: TStream; AAnim: TFloriaAnimatedImage); virtual; abstract;
+  end;
+  TFloriaAnimatedReaderClass = class of TFloriaAnimatedReader;
+
   // Base image writer codec class
   TFloriaImageWriter = class
   public
@@ -79,6 +108,47 @@ type
     procedure WriteImage(AStream: TStream; AImage: TFloriaImage); virtual; abstract;
   end;
   TFloriaImageWriterClass = class of TFloriaImageWriter;
+
+  // TFloriaAnimatedImage
+  // Multi-frame animation container with precomposed frame caching and temporal sampling
+  TFloriaAnimatedImage = class
+  private
+    FWidth: Integer;
+    FHeight: Integer;
+    FLoopCount: Cardinal; // 0 = infinite loop
+    FTotalDurationMs: Cardinal;
+    FFrames: array of TFloriaFrame;
+    FCompositedFrames: array of TFloriaImage;
+    procedure ClearFrames();
+    procedure ClearComposited();
+  public
+    constructor Create();
+    constructor CreateFromFile(const AFileName: string);
+    constructor CreateFromStream(AStream: TStream);
+    constructor CreateFromMemory(const AData: Pointer; const ASize: Integer);
+    destructor Destroy(); override;
+
+    procedure AddFrame(AImage: TFloriaImage; const ADelayMs: Cardinal;
+                       const AOffsetX: Integer = 0; const AOffsetY: Integer = 0;
+                       const ADisposal: TFloriaDisposalMethod = fdmDoNotDispose;
+                       const ABlendOver: Boolean = False);
+    procedure Clear();
+    function FrameCount(): Integer;
+    function GetFrame(const AIndex: Integer): TFloriaFrame;
+    function GetFrameDelay(const AIndex: Integer): Cardinal;
+    function GetFrameAtTime(const ATimeMs: Cardinal): Integer;
+    function GetCompositedFrame(const AIndex: Integer): TFloriaImage;
+    procedure PrecomposeAllFrames();
+
+    procedure LoadFromFile(const AFileName: string);
+    procedure LoadFromStream(AStream: TStream);
+    procedure LoadFromMemory(const AData: Pointer; const ASize: Integer);
+
+    property Width: Integer read FWidth write FWidth;
+    property Height: Integer read FHeight write FHeight;
+    property LoopCount: Cardinal read FLoopCount write FLoopCount;
+    property TotalDurationMs: Cardinal read FTotalDurationMs;
+  end;
 
   // TFloriaImage
   // 2D raster image buffer with integrated AggPas rendering surface
@@ -117,6 +187,8 @@ type
     function Clone(): TFloriaImage;
     function CreateScaled(const NewW, NewH: Integer; const ABilinear: Boolean = True): TFloriaImage;
     procedure CopyFrom(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
+    procedure CopyMasked(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
+    procedure BlendFrom(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
     procedure PremultiplyAlpha();
     procedure DemultiplyAlpha();
 
@@ -142,13 +214,16 @@ type
 
 // Global codec registration and detection routines
 procedure RegisterImageReader(const AReaderClass: TFloriaImageReaderClass);
+procedure RegisterAnimatedReader(const AReaderClass: TFloriaAnimatedReaderClass);
 procedure RegisterImageWriter(const AFormat: TFloriaImageFormat; const AWriterClass: TFloriaImageWriterClass);
 function DetectImageFormat(AStream: TStream): TFloriaImageFormat;
+function DetectAnimationFormat(AStream: TStream): TFloriaImageFormat;
 
 implementation
 
 type
   TReaderRegistry = array of TFloriaImageReaderClass;
+  TAnimReaderRegistry = array of TFloriaAnimatedReaderClass;
   TWriterRegistry = array[TFloriaImageFormat] of TFloriaImageWriterClass;
 
 var
@@ -157,6 +232,7 @@ var
   // is not guaranteed, and a reset could erase codec registrations that ran
   // before Floria.Image.Core initialized.
   GReaders: TReaderRegistry;
+  GAnimReaders: TAnimReaderRegistry;
   GWriters: TWriterRegistry;
 
 procedure RegisterImageReader(const AReaderClass: TFloriaImageReaderClass);
@@ -167,6 +243,18 @@ begin
   Len := Length(GReaders);
   SetLength(GReaders, Len + 1);
   GReaders[Len] := AReaderClass;
+end;
+
+procedure RegisterAnimatedReader(const AReaderClass: TFloriaAnimatedReaderClass);
+var
+  Len: Integer;
+begin
+  if AReaderClass = nil then Exit;
+  Len := Length(GAnimReaders);
+  SetLength(GAnimReaders, Len + 1);
+  GAnimReaders[Len] := AReaderClass;
+  // Also register as standard reader for static loading fallback
+  RegisterImageReader(AReaderClass);
 end;
 
 procedure RegisterImageWriter(const AFormat: TFloriaImageFormat; const AWriterClass: TFloriaImageWriterClass);
@@ -196,6 +284,35 @@ begin
   finally
     AStream.Position := OldPos;
   end;
+end;
+
+function DetectAnimationFormat(AStream: TStream): TFloriaImageFormat;
+var
+  I: Integer;
+  OldPos: Int64;
+begin
+  Result := fifUnknown;
+  if not Assigned(AStream) or (AStream.Size <= 0) then Exit;
+
+  OldPos := AStream.Position;
+  try
+    for I := 0 to Length(GAnimReaders) - 1 do
+    begin
+      AStream.Position := OldPos;
+      if GAnimReaders[I].CanReadAnimation(AStream) then
+      begin
+        Result := GAnimReaders[I].Format();
+        Exit;
+      end;
+    end;
+  finally
+    AStream.Position := OldPos;
+  end;
+end;
+
+class function TFloriaAnimatedReader.CanReadAnimation(AStream: TStream): Boolean;
+begin
+  Result := CanRead(AStream);
 end;
 
 // ============================================================================
@@ -782,6 +899,87 @@ begin
   end;
 end;
 
+procedure TFloriaImage.CopyMasked(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
+var
+  Row, Col: Integer;
+  ActualW, ActualH: Integer;
+  SrcRow, DstRow: PBgraPixel;
+  Sp: PBgraPixel;
+begin
+  if (ASource = nil) or (ASource.PixelBuffer = nil) or (FPixelBuffer = nil) then Exit;
+
+  ActualW := W;
+  ActualH := H;
+  if DstX + ActualW > FWidth then ActualW := FWidth - DstX;
+  if DstY + ActualH > FHeight then ActualH := FHeight - DstY;
+  if SrcX + ActualW > ASource.Width then ActualW := ASource.Width - SrcX;
+  if SrcY + ActualH > ASource.Height then ActualH := ASource.Height - SrcY;
+  if (ActualW <= 0) or (ActualH <= 0) then Exit;
+
+  for Row := 0 to ActualH - 1 do
+  begin
+    SrcRow := PBgraPixel(PByte(ASource.Scanline[SrcY + Row]) + SrcX * 4);
+    DstRow := PBgraPixel(PByte(GetScanline(DstY + Row)) + DstX * 4);
+    for Col := 0 to ActualW - 1 do
+    begin
+      Sp := @SrcRow[Col];
+      if Sp^.A > 0 then
+        DstRow[Col] := Sp^;
+    end;
+  end;
+end;
+
+procedure TFloriaImage.BlendFrom(ASource: TFloriaImage; const SrcX, SrcY, DstX, DstY, W, H: Integer);
+var
+  Row, Col: Integer;
+  ActualW, ActualH: Integer;
+  SrcRow, DstRow: PBgraPixel;
+  sa, da, invSa, outA: Integer;
+  sp, dp: PBgraPixel;
+begin
+  if (ASource = nil) or (ASource.PixelBuffer = nil) or (FPixelBuffer = nil) then Exit;
+
+  ActualW := W;
+  ActualH := H;
+  if DstX + ActualW > FWidth then ActualW := FWidth - DstX;
+  if DstY + ActualH > FHeight then ActualH := FHeight - DstY;
+  if SrcX + ActualW > ASource.Width then ActualW := ASource.Width - SrcX;
+  if SrcY + ActualH > ASource.Height then ActualH := ASource.Height - SrcY;
+  if (ActualW <= 0) or (ActualH <= 0) then Exit;
+
+  for Row := 0 to ActualH - 1 do
+  begin
+    SrcRow := PBgraPixel(PByte(ASource.Scanline[SrcY + Row]) + SrcX * 4);
+    DstRow := PBgraPixel(PByte(GetScanline(DstY + Row)) + DstX * 4);
+    for Col := 0 to ActualW - 1 do
+    begin
+      sp := @SrcRow[Col];
+      sa := sp^.A;
+      if sa = 255 then
+        DstRow[Col] := sp^
+      else if sa > 0 then
+      begin
+        dp := @DstRow[Col];
+        da := dp^.A;
+        if da = 0 then
+          DstRow[Col] := sp^
+        else
+        begin
+          invSa := 255 - sa;
+          outA := sa + (da * invSa + 127) div 255;
+          if outA > 0 then
+          begin
+            dp^.B := (sp^.B * sa + (dp^.B * da * invSa) div 255 + (outA div 2)) div outA;
+            dp^.G := (sp^.G * sa + (dp^.G * da * invSa) div 255 + (outA div 2)) div outA;
+            dp^.R := (sp^.R * sa + (dp^.R * da * invSa) div 255 + (outA div 2)) div outA;
+            dp^.A := outA;
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+
 procedure TFloriaImage.PremultiplyAlpha();
 var
   P: PBgraPixel;
@@ -952,6 +1150,273 @@ begin
   finally
     Writer.Free();
   end;
+end;
+
+// ============================================================================
+// TFloriaAnimatedImage
+// ============================================================================
+
+constructor TFloriaAnimatedImage.Create();
+begin
+  inherited Create();
+  FWidth := 0;
+  FHeight := 0;
+  FLoopCount := 0;
+  FTotalDurationMs := 0;
+  SetLength(FFrames, 0);
+  SetLength(FCompositedFrames, 0);
+end;
+
+constructor TFloriaAnimatedImage.CreateFromFile(const AFileName: string);
+begin
+  Create();
+  LoadFromFile(AFileName);
+end;
+
+constructor TFloriaAnimatedImage.CreateFromStream(AStream: TStream);
+begin
+  Create();
+  LoadFromStream(AStream);
+end;
+
+constructor TFloriaAnimatedImage.CreateFromMemory(const AData: Pointer; const ASize: Integer);
+begin
+  Create();
+  LoadFromMemory(AData, ASize);
+end;
+
+destructor TFloriaAnimatedImage.Destroy();
+begin
+  Clear();
+  inherited Destroy();
+end;
+
+procedure TFloriaAnimatedImage.ClearFrames();
+var
+  I: Integer;
+begin
+  for I := 0 to High(FFrames) do
+  begin
+    if Assigned(FFrames[I].Image) then
+      FFrames[I].Image.Free();
+  end;
+  SetLength(FFrames, 0);
+end;
+
+procedure TFloriaAnimatedImage.ClearComposited();
+var
+  I: Integer;
+begin
+  for I := 0 to High(FCompositedFrames) do
+  begin
+    if Assigned(FCompositedFrames[I]) then
+      FCompositedFrames[I].Free();
+  end;
+  SetLength(FCompositedFrames, 0);
+end;
+
+procedure TFloriaAnimatedImage.Clear();
+begin
+  ClearComposited();
+  ClearFrames();
+  FWidth := 0;
+  FHeight := 0;
+  FLoopCount := 0;
+  FTotalDurationMs := 0;
+end;
+
+procedure TFloriaAnimatedImage.AddFrame(AImage: TFloriaImage; const ADelayMs: Cardinal;
+                                       const AOffsetX: Integer; const AOffsetY: Integer;
+                                       const ADisposal: TFloriaDisposalMethod;
+                                       const ABlendOver: Boolean);
+var
+  Len: Integer;
+  DelayVal: Cardinal;
+begin
+  if AImage = nil then Exit;
+  ClearComposited();
+
+  Len := Length(FFrames);
+  SetLength(FFrames, Len + 1);
+  FFrames[Len].Image := AImage;
+
+  DelayVal := ADelayMs;
+  if DelayVal <= 10 then
+    DelayVal := 100;
+
+  FFrames[Len].DelayMs := DelayVal;
+  FFrames[Len].OffsetX := AOffsetX;
+  FFrames[Len].OffsetY := AOffsetY;
+  FFrames[Len].Disposal := ADisposal;
+  FFrames[Len].BlendOver := ABlendOver;
+
+  if (FWidth = 0) or (AOffsetX + AImage.Width > FWidth) then
+    FWidth := AOffsetX + AImage.Width;
+  if (FHeight = 0) or (AOffsetY + AImage.Height > FHeight) then
+    FHeight := AOffsetY + AImage.Height;
+
+  Inc(FTotalDurationMs, DelayVal);
+end;
+
+function TFloriaAnimatedImage.FrameCount(): Integer;
+begin
+  Result := Length(FFrames);
+end;
+
+function TFloriaAnimatedImage.GetFrame(const AIndex: Integer): TFloriaFrame;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FFrames)) then
+    Result := FFrames[AIndex]
+  else
+    FillChar(Result, SizeOf(Result), 0);
+end;
+
+function TFloriaAnimatedImage.GetFrameDelay(const AIndex: Integer): Cardinal;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FFrames)) then
+    Result := FFrames[AIndex].DelayMs
+  else
+    Result := 100;
+end;
+
+function TFloriaAnimatedImage.GetFrameAtTime(const ATimeMs: Cardinal): Integer;
+var
+  NormTime, Acc: Cardinal;
+  I: Integer;
+begin
+  if Length(FFrames) <= 1 then
+    Exit(0);
+
+  if FTotalDurationMs = 0 then
+    Exit(0);
+
+  NormTime := ATimeMs mod FTotalDurationMs;
+  Acc := 0;
+  for I := 0 to High(FFrames) do
+  begin
+    Inc(Acc, FFrames[I].DelayMs);
+    if NormTime < Acc then
+      Exit(I);
+  end;
+  Result := High(FFrames);
+end;
+
+procedure TFloriaAnimatedImage.PrecomposeAllFrames();
+var
+  N, I: Integer;
+  canvas, prevCanvas: TFloriaImage;
+  frame: TFloriaFrame;
+begin
+  ClearComposited();
+  N := Length(FFrames);
+  if (N = 0) or (FWidth <= 0) or (FHeight <= 0) then Exit;
+
+  SetLength(FCompositedFrames, N);
+  canvas := TFloriaImage.Create(FWidth, FHeight, fpfBGRA32);
+  prevCanvas := TFloriaImage.Create(FWidth, FHeight, fpfBGRA32);
+  try
+    canvas.Clear(0, 0, 0, 0);
+    prevCanvas.Clear(0, 0, 0, 0);
+
+    for I := 0 to N - 1 do
+    begin
+      frame := FFrames[I];
+      if frame.Disposal = fdmRestorePrevious then
+        prevCanvas.CopyFrom(canvas, 0, 0, 0, 0, FWidth, FHeight);
+
+      if frame.BlendOver then
+        canvas.BlendFrom(frame.Image, 0, 0, frame.OffsetX, frame.OffsetY, frame.Image.Width, frame.Image.Height)
+      else
+        canvas.CopyMasked(frame.Image, 0, 0, frame.OffsetX, frame.OffsetY, frame.Image.Width, frame.Image.Height);
+
+      FCompositedFrames[I] := canvas.Clone();
+
+      case frame.Disposal of
+        fdmDoNotDispose, fdmNone:
+          ; // leave canvas
+        fdmRestoreBackground:
+          canvas.ClearRect(frame.OffsetX, frame.OffsetY, frame.Image.Width, frame.Image.Height, 0, 0, 0, 0);
+        fdmRestorePrevious:
+          canvas.CopyFrom(prevCanvas, 0, 0, 0, 0, FWidth, FHeight);
+      end;
+    end;
+  finally
+    canvas.Free();
+    prevCanvas.Free();
+  end;
+end;
+
+function TFloriaAnimatedImage.GetCompositedFrame(const AIndex: Integer): TFloriaImage;
+begin
+  if Length(FFrames) = 0 then Exit(nil);
+
+  if Length(FCompositedFrames) <> Length(FFrames) then
+    PrecomposeAllFrames();
+
+  if (AIndex >= 0) and (AIndex < Length(FCompositedFrames)) then
+    Result := FCompositedFrames[AIndex]
+  else if Length(FCompositedFrames) > 0 then
+    Result := FCompositedFrames[0]
+  else
+    Result := nil;
+end;
+
+procedure TFloriaAnimatedImage.LoadFromFile(const AFileName: string);
+var
+  FS: TFileStream;
+begin
+  FS := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyWrite);
+  try
+    LoadFromStream(FS);
+  finally
+    FS.Free();
+  end;
+end;
+
+procedure TFloriaAnimatedImage.LoadFromMemory(const AData: Pointer; const ASize: Integer);
+var
+  MS: TMemoryStream;
+begin
+  if (AData = nil) or (ASize <= 0) then Exit;
+  MS := TMemoryStream.Create();
+  try
+    MS.WriteBuffer(AData^, ASize);
+    MS.Position := 0;
+    LoadFromStream(MS);
+  finally
+    MS.Free();
+  end;
+end;
+
+procedure TFloriaAnimatedImage.LoadFromStream(AStream: TStream);
+var
+  I: Integer;
+  OldPos: Int64;
+  Reader: TFloriaAnimatedReader;
+begin
+  if not Assigned(AStream) or (AStream.Size <= 0) then Exit;
+  Clear();
+
+  OldPos := AStream.Position;
+  for I := 0 to Length(GAnimReaders) - 1 do
+  begin
+    AStream.Position := OldPos;
+    if GAnimReaders[I].CanReadAnimation(AStream) then
+    begin
+      AStream.Position := OldPos;
+      Reader := GAnimReaders[I].Create();
+      try
+        Reader.ReadAnimation(AStream, Self);
+        PrecomposeAllFrames();
+        Exit;
+      finally
+        Reader.Free();
+      end;
+    end;
+  end;
+
+  AStream.Position := OldPos;
+  raise Exception.Create('Unsupported animated image format');
 end;
 
 end.

@@ -84,7 +84,7 @@ begin
 
   translateMat := SVGMatrixTranslate(X, Y);
   effectiveMat := SVGMatrixMultiply(translateMat, rootSvg.ViewBoxTransform);
-  effectiveMat := SVGMatrixMultiply(effectiveMat, rootSvg.Transform);
+  effectiveMat := SVGMatrixMultiply(effectiveMat, rootSvg.GetEffectiveTransform());
 
   RenderElement(ACanvas, ADoc, rootSvg, effectiveMat, 0);
 end;
@@ -231,7 +231,7 @@ begin
      (AElem.ComputedStyle.Visibility = svCollapse) then
     Exit;
 
-  if AElem is TSVGDefsElement then
+  if (AElem is TSVGDefsElement) or (AElem is TSVGAnimationElement) then
     Exit;
 
   pushOpacity := (AElem.ComputedStyle.Opacity < 0.9999);
@@ -253,13 +253,13 @@ begin
         nestedSvg.ComputeViewBox(nestedW, nestedH);
         elemMatrix := SVGMatrixMultiply(AMatrix, SVGMatrixTranslate(SVGLengthToPixels(nestedSvg.X), SVGLengthToPixels(nestedSvg.Y)));
         elemMatrix := SVGMatrixMultiply(elemMatrix, nestedSvg.ViewBoxTransform);
-        elemMatrix := SVGMatrixMultiply(elemMatrix, nestedSvg.Transform);
+        elemMatrix := SVGMatrixMultiply(elemMatrix, nestedSvg.GetEffectiveTransform());
         RenderContainer(ACanvas, ADoc, nestedSvg, elemMatrix, Depth + 1);
       end;
     end
     else if AElem is TSVGGroupElement then
     begin
-      elemMatrix := SVGMatrixMultiply(AMatrix, AElem.Transform);
+      elemMatrix := SVGMatrixMultiply(AMatrix, AElem.GetEffectiveTransform());
       RenderContainer(ACanvas, ADoc, TSVGContainerElement(AElem), elemMatrix, Depth + 1);
     end
     else if AElem is TSVGUseElement then
@@ -268,12 +268,12 @@ begin
     end
     else if AElem is TSVGShapeElement then
     begin
-      elemMatrix := SVGMatrixMultiply(AMatrix, AElem.Transform);
+      elemMatrix := SVGMatrixMultiply(AMatrix, AElem.GetEffectiveTransform());
       RenderShape(ACanvas, ADoc, TSVGShapeElement(AElem), elemMatrix);
     end
     else if AElem is TSVGContainerElement then
     begin
-      elemMatrix := SVGMatrixMultiply(AMatrix, AElem.Transform);
+      elemMatrix := SVGMatrixMultiply(AMatrix, AElem.GetEffectiveTransform());
       RenderContainer(ACanvas, ADoc, TSVGContainerElement(AElem), elemMatrix, Depth + 1);
     end;
   finally

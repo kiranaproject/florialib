@@ -16,7 +16,8 @@ uses
   Classes, SysUtils, Contnrs, fpcunit, testregistry, Math,
   Floria.CSS.Types, Floria.CSS.Values, Floria.CSS.Properties,
   Floria.Compression.Gzip,
-  Floria.SVG.Types, Floria.SVG.Path, Floria.SVG.DOM, Floria.SVG.Parser;
+  Floria.SVG.Types, Floria.SVG.Path, Floria.SVG.DOM, Floria.SVG.Parser,
+  Floria.SVG.Rasterizer, Floria.Image.Core;
 
 type
   { TSVGTypesTest }
@@ -71,6 +72,17 @@ type
     procedure TestCSSCascadeIntegration();
     procedure TestRealWorldSVGIcon();
     procedure TestParseSVGZStreamAndFile();
+  end;
+
+  { TSVGAnimationTest }
+
+  TSVGAnimationTest = class(TTestCase)
+  published
+    procedure TestAnimateTransformRotation();
+    procedure TestAnimateOpacity();
+    procedure TestAnimateFillColor();
+    procedure TestAnimateCoordinates();
+    procedure TestRasterizeAnimatedFrames();
   end;
 
 implementation
@@ -849,10 +861,200 @@ begin
   end;
 end;
 
+// ── TSVGAnimationTest ────────────────────────────────────────────────────────
+
+procedure TSVGAnimationTest.TestAnimateTransformRotation();
+var
+  SvgXml: string;
+  Doc: TSVGDocument;
+  GroupElem: TSVGElement;
+  Pt1, Pt2: TSVGPoint;
+begin
+  SvgXml := '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">' +
+            '  <g id="spinner">' +
+            '    <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="2s" repeatCount="indefinite"/>' +
+            '    <circle cx="50" cy="20" r="10" fill="red"/>' +
+            '  </g>' +
+            '</svg>';
+  Doc := TSVGParser.ParseString(SvgXml);
+  try
+    AssertNotNull('Doc parsed', Doc);
+    AssertTrue('Doc has animation', Doc.HasAnimation());
+    GroupElem := Doc.FindElementById('spinner');
+    AssertNotNull('Spinner group found', GroupElem);
+
+    // At T = 0.0s
+    Doc.SetCurrentTime(0.0);
+    Pt1 := SVGPoint(50.0, 20.0);
+    Pt2 := SVGMatrixTransformPoint(GroupElem.AccumulatedMatrix, Pt1);
+    AssertEquals(50.0, Pt2.X, 1e-3);
+    AssertEquals(20.0, Pt2.Y, 1e-3);
+
+    // At T = 1.0s (halfway through 2s duration: 180 degrees around (50, 50))
+    // Rotating (50, 20) by 180 deg around (50, 50) moves it to (50, 80)
+    Doc.SetCurrentTime(1.0);
+    Pt2 := SVGMatrixTransformPoint(GroupElem.AccumulatedMatrix, Pt1);
+    AssertEquals(50.0, Pt2.X, 1e-3);
+    AssertEquals(80.0, Pt2.Y, 1e-3);
+  finally
+    Doc.Free();
+  end;
+end;
+
+procedure TSVGAnimationTest.TestAnimateOpacity();
+var
+  SvgXml: string;
+  Doc: TSVGDocument;
+  RectElem: TSVGElement;
+begin
+  SvgXml := '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">' +
+            '  <rect id="r1" x="10" y="10" width="80" height="80" fill="blue" opacity="0.2">' +
+            '    <animate attributeName="opacity" from="0.2" to="1.0" dur="4s" fill="freeze"/>' +
+            '  </rect>' +
+            '</svg>';
+  Doc := TSVGParser.ParseString(SvgXml);
+  try
+    AssertNotNull('Doc parsed', Doc);
+    RectElem := Doc.FindElementById('r1');
+    AssertNotNull('Rect found', RectElem);
+
+    Doc.SetCurrentTime(0.0);
+    AssertEquals(0.2, RectElem.ComputedStyle.Opacity, 1e-3);
+
+    Doc.SetCurrentTime(2.0);
+    AssertEquals(0.6, RectElem.ComputedStyle.Opacity, 1e-3);
+
+    Doc.SetCurrentTime(4.0);
+    AssertEquals(1.0, RectElem.ComputedStyle.Opacity, 1e-3);
+  finally
+    Doc.Free();
+  end;
+end;
+
+procedure TSVGAnimationTest.TestAnimateFillColor();
+var
+  SvgXml: string;
+  Doc: TSVGDocument;
+  CircleElem: TSVGElement;
+begin
+  SvgXml := '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">' +
+            '  <circle id="c1" cx="50" cy="50" r="40" fill="#ff0000">' +
+            '    <animate attributeName="fill" from="#ff0000" to="#00ff00" dur="2s"/>' +
+            '  </circle>' +
+            '</svg>';
+  Doc := TSVGParser.ParseString(SvgXml);
+  try
+    AssertNotNull('Doc parsed', Doc);
+    CircleElem := Doc.FindElementById('c1');
+    AssertNotNull('Circle found', CircleElem);
+
+    Doc.SetCurrentTime(0.0);
+    AssertEquals(255, CircleElem.ComputedStyle.Fill.Color.R);
+    AssertEquals(0, CircleElem.ComputedStyle.Fill.Color.G);
+
+    // Midpoint: 50% red, 50% green = (128, 128, 0)
+    Doc.SetCurrentTime(1.0);
+    AssertTrue('Red channel interpolated', Abs(CircleElem.ComputedStyle.Fill.Color.R - 128) <= 1);
+    AssertTrue('Green channel interpolated', Abs(CircleElem.ComputedStyle.Fill.Color.G - 128) <= 1);
+    AssertEquals(0, CircleElem.ComputedStyle.Fill.Color.B);
+  finally
+    Doc.Free();
+  end;
+end;
+
+procedure TSVGAnimationTest.TestAnimateCoordinates();
+var
+  SvgXml: string;
+  Doc: TSVGDocument;
+  CircleElem: TSVGCircleElement;
+begin
+  SvgXml := '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">' +
+            '  <circle id="c1" cx="50" cy="50" r="10">' +
+            '    <animate attributeName="r" values="10; 40; 10" dur="2s" repeatCount="indefinite"/>' +
+            '  </circle>' +
+            '</svg>';
+  Doc := TSVGParser.ParseString(SvgXml);
+  try
+    AssertNotNull('Doc parsed', Doc);
+    CircleElem := TSVGCircleElement(Doc.FindElementById('c1'));
+    AssertNotNull('Circle found', CircleElem);
+
+    Doc.SetCurrentTime(0.0);
+    AssertEquals(10.0, SVGLengthToPixels(CircleElem.R), 1e-3);
+
+    Doc.SetCurrentTime(0.5);
+    AssertEquals(25.0, SVGLengthToPixels(CircleElem.R), 1e-3);
+
+    Doc.SetCurrentTime(1.0);
+    AssertEquals(40.0, SVGLengthToPixels(CircleElem.R), 1e-3);
+
+    Doc.SetCurrentTime(1.5);
+    AssertEquals(25.0, SVGLengthToPixels(CircleElem.R), 1e-3);
+
+    Doc.SetCurrentTime(2.0);
+    AssertEquals(10.0, SVGLengthToPixels(CircleElem.R), 1e-3);
+  finally
+    Doc.Free();
+  end;
+end;
+
+procedure TSVGAnimationTest.TestRasterizeAnimatedFrames();
+var
+  SvgXml: string;
+  Doc: TSVGDocument;
+  Img0, Img1: TFloriaImage;
+  SamePixels: Boolean;
+  Y, X: Integer;
+begin
+  SvgXml := '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60">' +
+            '  <circle id="c1" cx="30" cy="30" r="10" fill="#ff0000">' +
+            '    <animate attributeName="r" from="10" to="28" dur="2s"/>' +
+            '  </circle>' +
+            '</svg>';
+  Doc := TSVGParser.ParseString(SvgXml);
+  try
+    Doc.SetCurrentTime(0.0);
+    Img0 := TFloriaSVGRenderer.RenderToImage(Doc, 60, 60);
+    try
+      AssertNotNull('Img0 rendered', Img0);
+      AssertEquals(60, Img0.Width);
+      AssertEquals(60, Img0.Height);
+
+      Doc.SetCurrentTime(1.0);
+      Img1 := TFloriaSVGRenderer.RenderToImage(Doc, 60, 60);
+      try
+        AssertNotNull('Img1 rendered', Img1);
+        AssertEquals(60, Img1.Width);
+        AssertEquals(60, Img1.Height);
+
+        SamePixels := True;
+        for Y := 0 to 59 do
+          for X := 0 to 59 do
+            if (Img0.Pixels[X, Y].R <> Img1.Pixels[X, Y].R) or
+               (Img0.Pixels[X, Y].G <> Img1.Pixels[X, Y].G) or
+               (Img0.Pixels[X, Y].B <> Img1.Pixels[X, Y].B) or
+               (Img0.Pixels[X, Y].A <> Img1.Pixels[X, Y].A) then
+            begin
+              SamePixels := False;
+              Break;
+            end;
+        AssertFalse('Frames at T=0 and T=1 have different pixel content', SamePixels);
+      finally
+        Img1.Free();
+      end;
+    finally
+      Img0.Free();
+    end;
+  finally
+    Doc.Free();
+  end;
+end;
+
 initialization
   RegisterTest(TSVGTypesTest);
   RegisterTest(TSVGPathTest);
   RegisterTest(TSVGDOMTest);
   RegisterTest(TSVGParserTest);
+  RegisterTest(TSVGAnimationTest);
 
 end.

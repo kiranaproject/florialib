@@ -33,6 +33,7 @@ type
     FDoc: TSVGDocument;
     FResolver: TCSSStyleResolver;
     procedure ParseElement(AXMLElem: TXMLElement; AParentContainer: TSVGContainerElement);
+    procedure ParseAnimationElement(AXMLElem: TXMLElement; AParentElement: TSVGElement);
     procedure ApplyStyles(AXMLElem: TXMLElement; ASVGElem: TSVGElement);
     function ParseStopElement(AXMLElem: TXMLElement): TSVGStopElement;
   public
@@ -203,9 +204,107 @@ begin
   Result := StopElem;
 end;
 
+procedure TSVGParser.ParseAnimationElement(AXMLElem: TXMLElement; AParentElement: TSVGElement);
+var
+  Tag, TypeStr, FillStr, AddStr, HrefVal: string;
+  AnimElem: TSVGAnimationElement;
+  TransAnim: TSVGAnimateTransformElement;
+begin
+  Tag := LowerCase(AXMLElem.TagName);
+  AnimElem := nil;
+
+  if Tag = 'animatetransform' then
+  begin
+    TransAnim := TSVGAnimateTransformElement.Create(FDoc);
+    if AXMLElem.HasAttribute('type') then
+    begin
+      TypeStr := LowerCase(Trim(AXMLElem.GetAttribute('type')));
+      if TypeStr = 'translate' then TransAnim.TransformType := attTranslate
+      else if TypeStr = 'scale' then TransAnim.TransformType := attScale
+      else if TypeStr = 'skewx' then TransAnim.TransformType := attSkewX
+      else if TypeStr = 'skewy' then TransAnim.TransformType := attSkewY
+      else TransAnim.TransformType := attRotate;
+    end;
+    AnimElem := TransAnim;
+  end
+  else if Tag = 'set' then
+  begin
+    AnimElem := TSVGSetElement.Create(FDoc);
+  end
+  else if Tag = 'animate' then
+  begin
+    AnimElem := TSVGAnimateElement.Create(FDoc);
+  end;
+
+  if AnimElem = nil then Exit;
+
+  if AXMLElem.HasAttribute('id') then
+  begin
+    AnimElem.Id := AXMLElem.GetAttribute('id');
+    FDoc.RegisterElement(AnimElem.Id, AnimElem);
+  end;
+
+  if AXMLElem.HasAttribute('attributeName') then
+    AnimElem.AttributeName := AXMLElem.GetAttribute('attributeName');
+
+  if AXMLElem.HasAttribute('from') then
+    AnimElem.FromVal := AXMLElem.GetAttribute('from');
+
+  if AXMLElem.HasAttribute('to') then
+    AnimElem.ToVal := AXMLElem.GetAttribute('to');
+
+  if AXMLElem.HasAttribute('by') then
+    AnimElem.ByVal := AXMLElem.GetAttribute('by');
+
+  if AXMLElem.HasAttribute('values') then
+    ParseSemicolonList(AXMLElem.GetAttribute('values'), AnimElem.Values);
+
+  if AXMLElem.HasAttribute('dur') then
+    AnimElem.DurSec := ParseSVGDuration(AXMLElem.GetAttribute('dur'));
+
+  if AXMLElem.HasAttribute('begin') then
+    AnimElem.BeginSec := ParseSVGDuration(AXMLElem.GetAttribute('begin'));
+
+  if AXMLElem.HasAttribute('repeatCount') then
+  begin
+    if LowerCase(Trim(AXMLElem.GetAttribute('repeatCount'))) = 'indefinite' then
+      AnimElem.RepeatIndefinite := True
+    else
+      AnimElem.RepeatCount := ParseSVGDuration(AXMLElem.GetAttribute('repeatCount'));
+  end;
+
+  if AXMLElem.HasAttribute('fill') then
+  begin
+    FillStr := LowerCase(Trim(AXMLElem.GetAttribute('fill')));
+    if FillStr = 'freeze' then
+      AnimElem.FillMode := afmFreeze
+    else
+      AnimElem.FillMode := afmRemove;
+  end;
+
+  if AXMLElem.HasAttribute('additive') then
+  begin
+    AddStr := LowerCase(Trim(AXMLElem.GetAttribute('additive')));
+    if AddStr = 'sum' then
+      AnimElem.Additive := ataSum
+    else
+      AnimElem.Additive := ataReplace;
+  end;
+
+  HrefVal := AXMLElem.GetAttribute('href');
+  if HrefVal = '' then HrefVal := AXMLElem.GetAttribute('xlink:href');
+
+  if HrefVal <> '' then
+    AnimElem.Href := HrefVal
+  else
+    AnimElem.TargetElement := AParentElement;
+
+  FDoc.RegisterAnimation(AnimElem);
+end;
+
 procedure TSVGParser.ParseElement(AXMLElem: TXMLElement; AParentContainer: TSVGContainerElement);
 var
-  Tag: string;
+  Tag, ChildTag: string;
   I: Integer;
   ChildNode: TXMLNode;
 
@@ -226,6 +325,12 @@ var
 begin
   Tag := LowerCase(AXMLElem.TagName);
   CreatedElem := nil;
+
+  if (Tag = 'animate') or (Tag = 'animatetransform') or (Tag = 'set') then
+  begin
+    ParseAnimationElement(AXMLElem, AParentContainer);
+    Exit;
+  end;
 
   if Tag = 'path' then
   begin
@@ -426,6 +531,20 @@ begin
       CreatedElem.Transform := SVGParseTransform(AXMLElem.GetAttribute('transform'));
 
     ApplyStyles(AXMLElem, CreatedElem);
+
+    if not (CreatedElem is TSVGContainerElement) then
+    begin
+      for I := 0 to AXMLElem.ChildCount - 1 do
+      begin
+        ChildNode := AXMLElem.Children[I];
+        if ChildNode is TXMLElement then
+        begin
+          ChildTag := LowerCase(TXMLElement(ChildNode).TagName);
+          if (ChildTag = 'animate') or (ChildTag = 'animatetransform') or (ChildTag = 'set') then
+            ParseAnimationElement(TXMLElement(ChildNode), CreatedElem);
+        end;
+      end;
+    end;
 
     if Assigned(AParentContainer) then
       AParentContainer.AddChild(CreatedElem);
